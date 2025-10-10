@@ -33,7 +33,7 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file (default is configs/gateway.yaml)")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file (default is deployments/configs/gateway.yaml)")
 	rootCmd.PersistentFlags().String("host", "0.0.0.0", "server host")
 	rootCmd.PersistentFlags().Int("http-port", 8080, "HTTP server port")
 	rootCmd.PersistentFlags().Int("grpc-port", 9080, "gRPC server port")

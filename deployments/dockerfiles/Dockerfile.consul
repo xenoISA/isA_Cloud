@@ -1,0 +1,13 @@
+FROM hashicorp/consul:latest
+
+# Copy Consul configuration
+COPY configs/staging/consul.json /consul/config/consul.json
+
+# Create data directory
+RUN mkdir -p /consul/data
+
+# Expose Consul ports
+EXPOSE 8500 8600 8300 8301 8302
+
+# Use custom config
+ENTRYPOINT ["consul", "agent", "-config-dir=/consul/config"]

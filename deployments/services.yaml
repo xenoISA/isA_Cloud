@@ -17,7 +17,7 @@ services:
     repo: https://github.com/xenophobed/isA_MCP.git
     branch: main
     path: ../isA_MCP
-    dockerfile: deployments/dockerfiles/Dockerfile.mcp
+    dockerfile: deployments/dockerfiles/services/Dockerfile.mcp
     port: 8081
     healthcheck: /health
     ecr_repo: isa-mcp
@@ -26,7 +26,7 @@ services:
     repo: https://github.com/xenophobed/isA_Model.git
     branch: main
     path: ../isA_Model
-    dockerfile: deployments/dockerfiles/Dockerfile.model
+    dockerfile: deployments/dockerfiles/services/Dockerfile.model
     port: 8082
     healthcheck: /health
     ecr_repo: isa-model
@@ -35,17 +35,17 @@ services:
     repo: https://github.com/xenophobed/isA_Agent.git
     branch: main
     path: ../isA_Agent
-    dockerfile: deployments/dockerfiles/Dockerfile.agent
+    dockerfile: deployments/dockerfiles/services/Dockerfile.agent
     port: 8083
     healthcheck: /health
     ecr_repo: isa-agent
     
-  # User Services (12 microservices)
+  # User Services (16 microservices)
   user:
     repo: https://github.com/xenophobed/isA_user.git
     branch: main
     path: ../isA_user
-    dockerfile: deployments/dockerfiles/Dockerfile.user-base
+    dockerfile: deployments/dockerfiles/services/Dockerfile.user
     ports:
       - account: 8201
       - auth: 8202
@@ -59,6 +59,10 @@ services:
       - order: 8210
       - task: 8211
       - organization: 8212
+      - event: 8101
+      - device: 8220
+      - ota: 8221
+      - telemetry: 8225
     healthcheck: /health
     ecr_repo: isa-user-base
     

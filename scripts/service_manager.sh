@@ -32,13 +32,14 @@ get_service_cmd() {
             echo "consul agent -dev -ui -bind 127.0.0.1"
             ;;
         gateway)
-            echo "cd $CLOUD_DIR && ./bin/gateway --config configs/gateway.yaml"
+            echo "cd $CLOUD_DIR && ./bin/gateway --config deployments/configs/gateway.yaml"
             ;;
         nats)
             echo "docker start isa-cloud-nats-1 isa-cloud-nats-2 isa-cloud-nats-3"
             ;;
         mcp)
-            echo "cd $MCP_DIR && bash deployment/scripts/start_mcp_dev.sh"
+            # Start MCP server directly without the wrapper script that has 'wait'
+            echo "cd $MCP_DIR && source .venv/bin/activate && export \$(cat deployment/dev/.env | grep -v '^#' | xargs) && python smart_mcp_server.py --port 8081"
             ;;
         user)
             # User service needs to run within its virtual environment
@@ -156,17 +157,37 @@ start_service() {
     fi
     
     # Check if service port is already in use
+    # For gateway, clean up any stale processes before starting
+    if [[ "$service" == "gateway" ]]; then
+        local existing_pids=$(pgrep -f "gateway --config" 2>/dev/null)
+        if [ -n "$existing_pids" ]; then
+            echo -e "${YELLOW}Found existing gateway processes, cleaning up...${NC}"
+            pkill -f "gateway --config" 2>/dev/null || true
+            sleep 2
+        fi
+    fi
+    
     local port=$(get_service_port "$service")
     if [ -n "$port" ]; then
         if lsof -i:$port > /dev/null 2>&1; then
-            echo -e "${YELLOW}Service $service is already running on port $port${NC}"
-            # Try to find the PID and save it
-            local service_pid=$(lsof -ti:$port | head -1)
-            if [ -n "$service_pid" ]; then
-                echo "$service_pid" > "$pid_file"
-                echo -e "${GREEN}✓ Detected existing $service process (PID: $service_pid)${NC}"
+            # For gateway, if port is in use, kill the process and continue
+            if [[ "$service" == "gateway" ]]; then
+                echo -e "${YELLOW}Port $port is in use, cleaning up for gateway restart...${NC}"
+                local blocking_pid=$(lsof -ti:$port)
+                if [ -n "$blocking_pid" ]; then
+                    kill -TERM $blocking_pid 2>/dev/null || true
+                    sleep 2
+                fi
+            else
+                echo -e "${YELLOW}Service $service is already running on port $port${NC}"
+                # Try to find the PID and save it
+                local service_pid=$(lsof -ti:$port | head -1)
+                if [ -n "$service_pid" ]; then
+                    echo "$service_pid" > "$pid_file"
+                    echo -e "${GREEN}✓ Detected existing $service process (PID: $service_pid)${NC}"
+                fi
+                return 0
             fi
-            return 0
         fi
     fi
     
@@ -288,6 +309,24 @@ stop_service() {
         echo -e "${GREEN}✓ $service stopped${NC}"
     else
         echo -e "${YELLOW}Service $service was not running${NC}"
+    fi
+    
+    # For gateway, also kill any other gateway processes that might be running
+    if [[ "$service" == "gateway" ]]; then
+        echo -e "${GREEN}Checking for other gateway processes...${NC}"
+        local gateway_pids=$(pgrep -f "gateway --config" 2>/dev/null)
+        if [ -n "$gateway_pids" ]; then
+            echo -e "${GREEN}Found additional gateway processes, stopping them...${NC}"
+            for gpid in $gateway_pids; do
+                if [ "$gpid" != "$pid" ]; then
+                    kill -TERM "$gpid" 2>/dev/null || true
+                    echo -e "${GREEN}Stopped gateway process (PID: $gpid)${NC}"
+                fi
+            done
+            sleep 1
+            # Force kill any remaining
+            pkill -9 -f "gateway --config" 2>/dev/null || true
+        fi
     fi
     
     rm -f "$pid_file"

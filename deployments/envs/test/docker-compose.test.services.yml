@@ -1,0 +1,17 @@
+# ============================================
+# isA Platform - Test Environment (Services Only)
+# ============================================
+# Phase 4: Core application services
+# Includes: Gateway, AI Services (MCP, Model, Agent), User Microservices
+# Prerequisites: Infrastructure must be running first
+#
+# Usage:
+#   docker-compose -f compose/base.yml \
+#                  -f compose/services.yml \
+#                  -f docker-compose.test.services-overrides.yml \
+#                  up -d
+
+include:
+  - compose/base.yml
+  - compose/services.yml
+  - docker-compose.test.services-overrides.yml

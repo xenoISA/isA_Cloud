@@ -1,0 +1,259 @@
+# ============================================
+# isA Platform - Production Environment (AWS)
+# ============================================
+# Uses ECR images for all services
+# All infrastructure managed by AWS (RDS, ElastiCache, AWS MQ, etc.)
+# Use: docker-compose -f docker-compose.production.yml up -d
+
+include:
+  - compose/base.yml
+  - compose/infrastructure.yml
+  - compose/observability.yml
+  - compose/services.yml
+
+# ============================================
+# Production Overrides
+# ============================================
+
+services:
+  # Infrastructure
+  consul:
+    image: ${ECR_REGISTRY}/isa-consul:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  nats-1:
+    image: ${ECR_REGISTRY}/isa-nats:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  nats-2:
+    image: ${ECR_REGISTRY}/isa-nats:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  nats-3:
+    image: ${ECR_REGISTRY}/isa-nats:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  gateway:
+    image: ${ECR_REGISTRY}/isa-gateway:${IMAGE_TAG:-latest}
+    build: null  # Don't build, use ECR image
+    ports:
+      - "80:8000"  # ALB forwards to this
+    environment:
+      - ENVIRONMENT=production
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222,nats://nats-2:4222,nats://nats-3:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}  # Less verbose in production
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Observability
+  loki:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+
+  promtail:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  grafana:
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-https://grafana.isa-platform.com}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD}  # Must be set
+      - GF_AUTH_ANONYMOUS_ENABLED=false  # Disable anonymous in production
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # AI Services
+  mcp:
+    image: ${ECR_REGISTRY}/isa-mcp:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${MCP_DATABASE_URL}  # AWS RDS
+      - REDIS_URL=${REDIS_URL}  # AWS ElastiCache
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  model:
+    image: ${ECR_REGISTRY}/isa-model:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${MODEL_DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '2.0'
+          memory: 2G
+
+  agent:
+    image: ${ECR_REGISTRY}/isa-agent:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${AGENT_DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - MCP_URL=http://mcp:8081
+      - MODEL_URL=http://model:8082
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # User Services
+  account-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+    restart: unless-stopped
+
+  auth-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+    restart: unless-stopped
+
+  authorization-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+    restart: unless-stopped
+
+  payment-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - STRIPE_API_KEY=${STRIPE_API_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    restart: unless-stopped
+
+  device-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+      - MQTT_URL=${MQTT_URL}
+    restart: unless-stopped
+
+  event-service:
+    image: ${ECR_REGISTRY}/isa-user:${IMAGE_TAG:-latest}
+    build: null
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - NATS_URL=${NATS_URL}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=true
+      - LOG_LEVEL=WARNING
+    restart: unless-stopped

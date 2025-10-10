@@ -17,18 +17,18 @@ if [ ! -f "bin/gateway" ]; then
 fi
 
 # Check if config exists
-if [ ! -f "configs/gateway.yaml" ]; then
-    echo "❌ Configuration file not found: configs/gateway.yaml"
+if [ ! -f "deployments/configs/dev/gateway.yaml" ]; then
+    echo "❌ Configuration file not found: deployments/configs/dev/gateway.yaml"
     exit 1
 fi
 
 # Show configuration
 echo "📋 Configuration:"
-echo "   Config file: configs/gateway.yaml"
-echo "   HTTP port: $(grep 'http_port:' configs/gateway.yaml | awk '{print $2}')"
-echo "   gRPC port: $(grep 'grpc_port:' configs/gateway.yaml | awk '{print $2}')"
+echo "   Config file: deployments/configs/dev/gateway.yaml"
+echo "   HTTP port: $(grep 'http_port:' deployments/configs/dev/gateway.yaml | awk '{print $2}')"
+echo "   gRPC port: $(grep 'grpc_port:' deployments/configs/dev/gateway.yaml | awk '{print $2}')"
 echo ""
 
 # Start the gateway
 echo "🔥 Starting gateway..."
-exec ./bin/gateway --config configs/gateway.yaml "$@"
+exec ./bin/gateway --config deployments/configs/dev/gateway.yaml "$@"

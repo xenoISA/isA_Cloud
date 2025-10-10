@@ -79,14 +79,15 @@ func (r *ConsulRegistry) DeregisterService(serviceID string) error {
 
 // DiscoverService returns healthy instances of a service
 func (r *ConsulRegistry) DiscoverService(name string) ([]*ServiceInstance, error) {
-	// Query for healthy services only
-	services, _, err := r.client.Health().Service(name, "", true, nil)
+	// Query for all services (not only passing health checks)
+	// Changed from true to false to include services with TTL health check issues
+	services, _, err := r.client.Health().Service(name, "", false, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover service: %w", err)
 	}
-	
+
 	if len(services) == 0 {
-		return nil, fmt.Errorf("no healthy instances found for service: %s", name)
+		return nil, fmt.Errorf("no instances found for service: %s", name)
 	}
 	
 	instances := make([]*ServiceInstance, 0, len(services))

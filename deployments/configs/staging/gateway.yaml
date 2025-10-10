@@ -1,0 +1,127 @@
+# IsA Cloud Gateway Staging Configuration
+
+app:
+  name: "IsA Cloud Gateway Staging"
+  version: "1.0.0"
+
+environment: "staging"
+debug: true
+
+server:
+  host: "0.0.0.0"
+  http_port: 8000
+  grpc_port: 8001
+
+# Minimal service configuration for staging
+services:
+  agent_service:
+    host: "agent.staging.isa.local"
+    http_port: 8080
+    grpc_port: 9080
+    timeout: "60s"
+    retry:
+      max_attempts: 2
+      backoff: "2s"
+
+  model_service:
+    host: "model.staging.isa.local"
+    http_port: 8082
+    grpc_port: 9082
+    timeout: "120s"
+    retry:
+      max_attempts: 2
+      backoff: "5s"
+
+  mcp_service:
+    host: "mcp.staging.isa.local"
+    http_port: 8081
+    grpc_port: 9081
+    timeout: "30s"
+    retry:
+      max_attempts: 3
+      backoff: "1s"
+
+database:
+  # Using Supabase Cloud for staging
+  host: "db.ugloxikfljpuvakwiadf.supabase.co"
+  port: 5432
+  database: "postgres"
+  username: "postgres"
+  password: "0npfjCaFaXXnm289"
+  ssl_mode: "require"
+
+redis:
+  host: "redis.staging.isa.local"
+  port: 6379
+  password: ""
+  database: 0
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+monitoring:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+  namespace: "isa_cloud_staging"
+  subsystem: "gateway"
+
+security:
+  cors:
+    enabled: true
+    allow_origins:
+      - "*"
+    allow_methods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+    allow_headers:
+      - "Authorization"
+      - "Content-Type"
+      - "X-Request-ID"
+      - "Cache-Control"
+    allow_credentials: true
+
+  rate_limit:
+    enabled: false
+    rps: 100
+    burst: 200
+
+  jwt:
+    secret: "staging-secret-key"
+    expiration: "24h"
+    issuer: "isa-cloud-gateway-staging"
+
+mqtt:
+  enabled: true
+  broker_url: "tcp://mosquitto:1883"
+  client_id: "isa_cloud_gateway_staging"
+  username: ""
+  password: ""
+  keep_alive: "60s"
+  ping_timeout: "10s"
+  clean_session: true
+  auto_reconnect: true
+  qos: 1
+  topics:
+    device_telemetry: "devices/+/telemetry"
+    device_status: "devices/+/status"
+    device_commands: "devices/+/commands"
+    device_commands_response: "devices/+/commands/response"
+    device_auth: "devices/+/auth"
+    device_registration: "devices/register"
+    system_events: "system/events"
+    notification_user_receive: "notifications/users/+/receive"
+    notification_user_ack: "notifications/users/+/ack"
+    notification_broadcast: "notifications/broadcast"
+    notification_system: "notifications/system/+"
+
+# Enable Consul for staging environment service discovery
+consul:
+  enabled: true
+  host: "consul.staging.isa.local"
+  port: 8500

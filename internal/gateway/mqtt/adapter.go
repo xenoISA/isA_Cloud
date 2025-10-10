@@ -14,7 +14,7 @@ import (
 	"github.com/isa-cloud/isa_cloud/pkg/logger"
 )
 
-// Adapter handles MQTT protocol adaptation for IoT devices
+// Adapter handles MQTT protocol adaptation for IoT devices and notifications
 type Adapter struct {
 	config       *config.MQTTConfig
 	logger       *logger.Logger
@@ -63,17 +63,31 @@ func (a *Adapter) Connect() error {
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(a.config.BrokerURL)
-	// Add timestamp to make client ID unique
-	clientID := fmt.Sprintf("%s_%d", a.config.ClientID, time.Now().Unix())
+	
+	// Generate unique client ID using timestamp and random number
+	// This ensures no conflicts even with multiple instances
+	clientID := fmt.Sprintf("gw_%d", time.Now().UnixNano()%1000000)
 	opts.SetClientID(clientID)
+	a.logger.Debug("Using MQTT client ID", "client_id", clientID)
 
 	if a.config.Username != "" {
 		opts.SetUsername(a.config.Username)
 		opts.SetPassword(a.config.Password)
 	}
 
-	opts.SetKeepAlive(a.config.KeepAlive)
-	opts.SetPingTimeout(a.config.PingTimeout)
+	// Set keep alive with defaults if not configured
+	keepAlive := a.config.KeepAlive
+	if keepAlive == 0 {
+		keepAlive = 60 * time.Second
+	}
+	opts.SetKeepAlive(keepAlive)
+	
+	// Set ping timeout with defaults if not configured
+	pingTimeout := a.config.PingTimeout
+	if pingTimeout == 0 {
+		pingTimeout = 10 * time.Second
+	}
+	opts.SetPingTimeout(pingTimeout)
 	opts.SetCleanSession(a.config.CleanSession)
 	opts.SetAutoReconnect(a.config.AutoReconnect)
 
@@ -85,8 +99,24 @@ func (a *Adapter) Connect() error {
 	// Create and connect client
 	a.client = mqtt.NewClient(opts)
 
+	// Log connection attempt details
+	a.logger.Debug("Attempting MQTT connection",
+		"broker", a.config.BrokerURL,
+		"client_id", clientID,
+		"clean_session", a.config.CleanSession,
+		"auto_reconnect", a.config.AutoReconnect,
+		"keep_alive", keepAlive,
+		"ping_timeout", pingTimeout,
+	)
+
 	token := a.client.Connect()
 	if token.Wait() && token.Error() != nil {
+		// Additional debug info for connection failure
+		a.logger.Error("MQTT connection failed",
+			"error", token.Error(),
+			"client_id", clientID,
+			"broker", a.config.BrokerURL,
+		)
 		return fmt.Errorf("failed to connect to MQTT broker: %v", token.Error())
 	}
 
@@ -163,6 +193,12 @@ func (a *Adapter) setupDefaultHandlers() {
 
 	// Device registration handler
 	a.handlers[a.config.Topics.DeviceRegistration] = a.handleDeviceRegistration
+
+	// Notification acknowledgment handler
+	a.handlers[a.config.Topics.NotificationUserAck] = a.handleNotificationAck
+
+	// System notification handler
+	a.handlers[a.config.Topics.NotificationSystem] = a.handleSystemNotification
 }
 
 // handleMessage processes incoming MQTT messages
@@ -210,20 +246,62 @@ func (a *Adapter) handleTelemetry(topic string, payload []byte) error {
 func (a *Adapter) handleDeviceStatus(topic string, payload []byte) error {
 	deviceID := a.extractDeviceID(topic)
 
-	var status map[string]interface{}
-	if err := json.Unmarshal(payload, &status); err != nil {
+	var statusData map[string]interface{}
+	if err := json.Unmarshal(payload, &statusData); err != nil {
 		return err
 	}
 
-	// Add device ID if not present
-	if _, exists := status["device_id"]; !exists {
-		status["device_id"] = deviceID
+	// Transform MQTT status format to DeviceUpdateRequest format
+	updateRequest := make(map[string]interface{})
+	
+	// Map MQTT status to DeviceStatus enum
+	if mqttStatus, exists := statusData["status"]; exists {
+		switch mqttStatus {
+		case "online":
+			updateRequest["status"] = "active"
+		case "offline":
+			updateRequest["status"] = "inactive"
+		case "error":
+			updateRequest["status"] = "error"
+		case "maintenance":
+			updateRequest["status"] = "maintenance"
+		default:
+			updateRequest["status"] = "active" // default fallback
+		}
 	}
 
-	// Forward to device management service
-	return a.forwardToService("device_service", 
-		fmt.Sprintf("/api/v1/devices/%s/status", deviceID), 
-		status)
+	// Set firmware version if provided
+	if fw, exists := statusData["firmware_version"]; exists {
+		updateRequest["firmware_version"] = fw
+	}
+
+	// Put other device metrics into metadata
+	metadata := make(map[string]interface{})
+	
+	// Move device-specific fields to metadata
+	if battery, exists := statusData["battery_level"]; exists {
+		metadata["battery_level"] = battery
+	}
+	if signal, exists := statusData["signal_strength"]; exists {
+		metadata["signal_strength"] = signal
+	}
+	if lastSeen, exists := statusData["last_seen"]; exists {
+		metadata["last_seen"] = lastSeen
+	}
+	if timestamp, exists := statusData["timestamp"]; exists {
+		metadata["timestamp"] = timestamp
+	}
+
+	// Add metadata if we have any
+	if len(metadata) > 0 {
+		updateRequest["metadata"] = metadata
+	}
+
+	// Forward to device management service - using PUT to update device info
+	return a.forwardToServiceWithMethod("device_service", 
+		fmt.Sprintf("/api/v1/devices/%s", deviceID), 
+		"PUT",
+		updateRequest)
 }
 
 // handleCommandResponse processes command responses from devices
@@ -309,6 +387,8 @@ func (a *Adapter) onConnect(client mqtt.Client) {
 		a.config.Topics.DeviceCommandsResponse,
 		a.config.Topics.DeviceAuth,
 		a.config.Topics.DeviceRegistration,
+		a.config.Topics.NotificationUserAck,
+		a.config.Topics.NotificationSystem,
 	}
 
 	for _, topic := range topics {
@@ -395,6 +475,8 @@ func (a *Adapter) forwardToService(serviceName, endpoint string, data interface{
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "ISA-Gateway-MQTT-Adapter")
+	// Add JWT authentication for service-to-service communication
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzU5MTE0MjM3LCJzdWIiOiJnYXRld2F5X21xdHRfYWRhcHRlciIsImVtYWlsIjoiZ2F0ZXdheUBpc2EtY2xvdWQubG9jYWwiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzU5MDI3ODM3fQ.bPflqi4BOCOmSv4xfXEqbxbSBn6c1cwz_c4wS3q6Pc8")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -415,33 +497,272 @@ func (a *Adapter) forwardToService(serviceName, endpoint string, data interface{
 	return nil
 }
 
-// authenticateDevice authenticates a device via auth service
+// forwardToServiceWithMethod forwards data to service with custom HTTP method
+func (a *Adapter) forwardToServiceWithMethod(serviceName, endpoint, method string, data interface{}) error {
+	if !a.deviceConfig.Enabled {
+		a.logger.Debug("Device management disabled, skipping service forward")
+		return nil
+	}
+
+	var serviceEndpoint *config.ServiceEndpoint
+	switch serviceName {
+	case "device_service":
+		serviceEndpoint = &a.deviceConfig.DeviceService
+	case "telemetry_service":
+		serviceEndpoint = &a.deviceConfig.TelemetryService
+	case "ota_service":
+		serviceEndpoint = &a.deviceConfig.OTAService
+	default:
+		return fmt.Errorf("unknown service: %s", serviceName)
+	}
+
+	url := fmt.Sprintf("http://%s:%d%s", 
+		serviceEndpoint.Host, 
+		serviceEndpoint.HTTPPort, 
+		endpoint)
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %v", err)
+	}
+
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ISA-Gateway-MQTT-Adapter")
+	// Add JWT authentication for service-to-service communication
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzU5MTE0MjM3LCJzdWIiOiJnYXRld2F5X21xdHRfYWRhcHRlciIsImVtYWlsIjoiZ2F0ZXdheUBpc2EtY2xvdWQubG9jYWwiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzU5MDI3ODM3fQ.bPflqi4BOCOmSv4xfXEqbxbSBn6c1cwz_c4wS3q6Pc8")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to forward to service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("service returned error: %d", resp.StatusCode)
+	}
+
+	a.logger.Debug("Successfully forwarded to service", 
+		"service", serviceName, 
+		"endpoint", endpoint,
+		"method", method,
+		"status", resp.StatusCode,
+	)
+
+	return nil
+}
+
+// authenticateDevice authenticates a device via device management service
 func (a *Adapter) authenticateDevice(deviceID string, authData map[string]interface{}) (map[string]interface{}, error) {
-	// This would integrate with the auth service
-	// For now, return a mock successful authentication
-	return map[string]interface{}{
-		"success":   true,
-		"token":     "device-jwt-token",
-		"device_id": deviceID,
-		"expires_at": time.Now().Add(24 * time.Hour).Unix(),
-	}, nil
+	// Forward to device management service for authentication
+	// The device management service will handle auth-service integration
+	
+	url := fmt.Sprintf("http://%s:%d/api/v1/devices/auth",
+		a.deviceConfig.DeviceService.Host,
+		a.deviceConfig.DeviceService.HTTPPort)
+	
+	// Ensure device_id is in the auth data
+	authData["device_id"] = deviceID
+	
+	jsonData, err := json.Marshal(authData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal auth data: %v", err)
+	}
+	
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth request: %v", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ISA-Gateway-MQTT-Adapter")
+	
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate device: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode auth response: %v", err)
+	}
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("authentication failed: status %d", resp.StatusCode)
+	}
+	
+	a.logger.Debug("Device authenticated successfully",
+		"device_id", deviceID,
+		"status", resp.StatusCode,
+	)
+	
+	return result, nil
+}
+
+// handleNotificationAck processes user acknowledgment of notifications
+func (a *Adapter) handleNotificationAck(topic string, payload []byte) error {
+	userID := a.extractUserID(topic)
+
+	var ackData map[string]interface{}
+	if err := json.Unmarshal(payload, &ackData); err != nil {
+		return err
+	}
+
+	// Add user ID if not present
+	if _, exists := ackData["user_id"]; !exists {
+		ackData["user_id"] = userID
+	}
+
+	a.logger.Info("Notification acknowledgment received",
+		"user_id", userID,
+		"ack_data", ackData,
+	)
+
+	// Forward to notification service via HTTP
+	return a.forwardToNotificationService(
+		fmt.Sprintf("/api/v1/notifications/ack/%s", userID),
+		ackData)
+}
+
+// handleSystemNotification processes system notification requests
+func (a *Adapter) handleSystemNotification(topic string, payload []byte) error {
+	var notification map[string]interface{}
+	if err := json.Unmarshal(payload, &notification); err != nil {
+		return err
+	}
+
+	a.logger.Info("System notification received",
+		"topic", topic,
+		"notification", notification,
+	)
+
+	// Forward to notification service for processing
+	return a.forwardToNotificationService("/api/v1/notifications/system", notification)
+}
+
+// PublishNotificationToUser sends notification to specific user via MQTT
+func (a *Adapter) PublishNotificationToUser(userID string, notification map[string]interface{}) error {
+	topic := fmt.Sprintf("notifications/users/%s/receive", userID)
+	a.logger.Debug("Publishing notification to user",
+		"user_id", userID,
+		"topic", topic,
+	)
+	return a.Publish(topic, notification)
+}
+
+// PublishBroadcastNotification sends notification to all users via MQTT
+func (a *Adapter) PublishBroadcastNotification(notification map[string]interface{}) error {
+	topic := "notifications/broadcast"
+	a.logger.Debug("Publishing broadcast notification", "topic", topic)
+	return a.Publish(topic, notification)
+}
+
+// PublishSystemNotification sends system notification via MQTT
+func (a *Adapter) PublishSystemNotification(systemID string, notification map[string]interface{}) error {
+	topic := fmt.Sprintf("notifications/system/%s", systemID)
+	a.logger.Debug("Publishing system notification",
+		"system_id", systemID,
+		"topic", topic,
+	)
+	return a.Publish(topic, notification)
+}
+
+// extractUserID extracts user ID from notification topic
+func (a *Adapter) extractUserID(topic string) string {
+	// Topic format: notifications/users/{user_id}/...
+	parts := strings.Split(topic, "/")
+	if len(parts) >= 3 && parts[0] == "notifications" && parts[1] == "users" {
+		return parts[2]
+	}
+	return ""
+}
+
+// forwardToNotificationService forwards data to notification service via HTTP
+func (a *Adapter) forwardToNotificationService(endpoint string, data interface{}) error {
+	// Use gateway's notification service configuration
+	url := fmt.Sprintf("http://localhost:8206%s", endpoint)
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ISA-Gateway-MQTT-Adapter")
+	// Add JWT authentication for service-to-service communication
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzU5MTE0MjM3LCJzdWIiOiJnYXRld2F5X21xdHRfYWRhcHRlciIsImVtYWlsIjoiZ2F0ZXdheUBpc2EtY2xvdWQubG9jYWwiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzU5MDI3ODM3fQ.bPflqi4BOCOmSv4xfXEqbxbSBn6c1cwz_c4wS3q6Pc8")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to forward to notification service: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("notification service returned error: %d", resp.StatusCode)
+	}
+
+	a.logger.Debug("Successfully forwarded to notification service",
+		"endpoint", endpoint,
+		"status", resp.StatusCode,
+	)
+
+	return nil
 }
 
 // registerDevice registers a new device via device management service
 func (a *Adapter) registerDevice(regData map[string]interface{}) (map[string]interface{}, error) {
 	// Forward to device management service
-	err := a.forwardToService("device_service", "/api/v1/devices", regData)
+	url := fmt.Sprintf("http://%s:%d/api/v1/devices",
+		a.deviceConfig.DeviceService.Host,
+		a.deviceConfig.DeviceService.HTTPPort)
+	
+	jsonData, err := json.Marshal(regData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal registration data: %v", err)
 	}
-
-	// Return mock successful registration
-	// In real implementation, this would parse the response from the service
-	return map[string]interface{}{
-		"success":   true,
-		"device_id": fmt.Sprintf("device_%d", time.Now().Unix()),
-		"message":   "Device registered successfully",
-	}, nil
+	
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registration request: %v", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "ISA-Gateway-MQTT-Adapter")
+	// Note: Device self-registration might not require user auth
+	// The device management service should handle this case
+	
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register device: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode registration response: %v", err)
+	}
+	
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("registration failed: status %d", resp.StatusCode)
+	}
+	
+	a.logger.Debug("Device registered successfully",
+		"result", result,
+		"status", resp.StatusCode,
+	)
+	
+	return result, nil
 }
 
 // IsConnected returns the connection status
@@ -449,12 +770,27 @@ func (a *Adapter) IsConnected() bool {
 	return a.isConnected && a.client != nil && a.client.IsConnected()
 }
 
-// GetStats returns adapter statistics
+// GetStats returns adapter statistics including notification topics
 func (a *Adapter) GetStats() map[string]interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	return map[string]interface{}{
 		"connected":        a.IsConnected(),
 		"broker_url":       a.config.BrokerURL,
 		"client_id":        a.config.ClientID,
 		"subscribed_topics": len(a.handlers),
+		"qos":              a.config.QoS,
+		"topics": map[string]interface{}{
+			"device_telemetry":          a.config.Topics.DeviceTelemetry,
+			"device_status":             a.config.Topics.DeviceStatus,
+			"device_commands":           a.config.Topics.DeviceCommands,
+			"device_auth":               a.config.Topics.DeviceAuth,
+			"device_registration":       a.config.Topics.DeviceRegistration,
+			"notification_user_receive": a.config.Topics.NotificationUserReceive,
+			"notification_user_ack":     a.config.Topics.NotificationUserAck,
+			"notification_broadcast":    a.config.Topics.NotificationBroadcast,
+			"notification_system":       a.config.Topics.NotificationSystem,
+		},
 	}
 }

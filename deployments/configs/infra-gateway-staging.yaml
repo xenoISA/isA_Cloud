@@ -1,0 +1,51 @@
+# Infrastructure Gateway Configuration - Staging
+app:
+  name: "Infrastructure Gateway"
+  version: "1.0.0"
+
+environment: "staging"
+debug: false
+
+# Infrastructure Gateway specific config
+infra_gateway:
+  host: "0.0.0.0"
+  port: 8090
+
+# Infrastructure services configuration
+infrastructure:
+  supabase:
+    url: "https://ugloxikfljpuvakwiadf.supabase.co"
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnbG94aWtmbGpwdXZha3dpYWRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk4MDkzNzcsImV4cCI6MjA3NTM4NTM3N30.-lhB-ggVYD5Foey9rjNv40MkcGhmT9cVcaqvy2y4zro"
+    service_role_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnbG94aWtmbGpwdXZha3dpYWRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA3NTM4NTM3N30.s2rLpfJKJJjqLl3HftKgRF4xXuHHZ7e0rRAM9g-WzO0"
+    timeout: 30
+  
+  redis:
+    host: "redis.staging.isa.local"
+    port: 6379
+    password: ""
+    database: 0
+  
+  neo4j:
+    uri: "neo4j+s://bb8d19d7.databases.neo4j.io"
+    username: "neo4j"
+    password: "${NEO4J_PASSWORD}"
+
+# Consul configuration
+consul:
+  enabled: false
+  host: "localhost"
+  port: 8500
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+  namespace: "infra_gateway"
+  subsystem: "requests"
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"

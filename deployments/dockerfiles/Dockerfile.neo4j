@@ -1,0 +1,15 @@
+FROM neo4j:5.15-community
+
+# Set environment variables
+ENV NEO4J_AUTH=neo4j/isa_neo4j_2024
+ENV NEO4J_PLUGINS=["apoc"]
+ENV NEO4J_apoc_export_file_enabled=true
+ENV NEO4J_apoc_import_file_enabled=true
+ENV NEO4J_apoc_import_file_use__neo4j__config=true
+
+# Expose Neo4j ports
+EXPOSE 7474 7687
+
+# Create data directory
+VOLUME /data
+VOLUME /logs

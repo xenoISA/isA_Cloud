@@ -1,0 +1,77 @@
+# Infrastructure Gateway Configuration
+app:
+  name: "Infrastructure Gateway"
+  version: "1.0.0"
+
+environment: "development"
+debug: true
+
+# Infrastructure Gateway specific config
+infra_gateway:
+  host: "0.0.0.0"
+  port: 8090
+
+# Infrastructure services configuration
+infrastructure:
+  supabase:
+    url: "${SUPABASE_LOCAL_URL:http://127.0.0.1:54321}"
+    anon_key: "${SUPABASE_LOCAL_ANON_KEY}"
+    timeout: 30
+  
+  redis:
+    host: "${REDIS_HOST:localhost}"
+    port: 6379
+    password: "${REDIS_PASSWORD:}"
+    database: 0
+  
+  minio:
+    endpoint: "${MINIO_ENDPOINT:localhost:9000}"
+    access_key: "${MINIO_ACCESS_KEY:minioadmin}"
+    secret_key: "${MINIO_SECRET_KEY:minioadmin}"
+    use_ssl: false
+  
+  duckdb:
+    path: "${DUCKDB_PATH:/tmp/analytics.duckdb}"
+    memory_limit: "4GB"
+    threads: 4
+  
+  neo4j:
+    uri: "${NEO4J_URI:bolt://localhost:7687}"
+    username: "${NEO4J_USERNAME:neo4j}"
+    password: "${NEO4J_PASSWORD:neo4j}"
+  
+  influxdb:
+    url: "${INFLUXDB_URL:http://localhost:8086}"
+    token: "${INFLUXDB_TOKEN:}"
+    org: "${INFLUXDB_ORG:isa-platform}"
+    bucket: "${INFLUXDB_BUCKET:metrics}"
+  
+  loki:
+    url: "${LOKI_URL:http://localhost:3100}"
+    batch_size: 100
+    timeout: 30
+  
+  nats:
+    urls:
+      - "${NATS_URL:nats://localhost:4222}"
+    cluster_id: "${NATS_CLUSTER_ID:isa-cluster}"
+
+# Consul configuration
+consul:
+  enabled: true
+  host: "${CONSUL_HOST:localhost}"
+  port: 8500
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+  namespace: "infra_gateway"
+  subsystem: "requests"
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"

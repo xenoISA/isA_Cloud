@@ -1,0 +1,20 @@
+# ============================================
+# isA Platform - Test Environment (Infrastructure Only)
+# ============================================
+# Phase 1: Infrastructure services only
+# Includes: Service Discovery, Message Queue, Databases, Observability
+#
+# Usage:
+#   docker-compose -f compose/base.yml \
+#                  -f compose/infrastructure.yml \
+#                  -f compose/data-stores.yml \
+#                  -f compose/observability.yml \
+#                  -f docker-compose.test.infrastructure-overrides.yml \
+#                  up -d
+
+include:
+  - compose/base.yml
+  - compose/infrastructure.yml
+  - compose/data-stores.yml
+  - compose/observability.yml
+  - docker-compose.test.infrastructure-overrides.yml
