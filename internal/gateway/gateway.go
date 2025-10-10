@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -41,18 +42,29 @@ func New(cfg *config.Config, logger *logger.Logger) (*Gateway, error) {
 
 	// Initialize Consul registry (optional - will work without it)
 	var consulRegistry *registry.ConsulRegistry
-	consulAddress := "localhost:8500" // Default Consul address
-	consulRegistry, err = registry.NewConsulRegistry(consulAddress, logger)
-	if err != nil {
-		logger.Warn("Failed to connect to Consul, using static configuration", "error", err)
-		// Continue without Consul - will use static config
-	} else {
-		logger.Info("Connected to Consul service registry", "address", consulAddress)
-		
-		// Register gateway itself with Consul
-		err = consulRegistry.RegisterService("gateway", "localhost", cfg.Server.HTTPPort, []string{"api", "gateway"})
+	if cfg.Consul.Enabled {
+		consulAddress := fmt.Sprintf("%s:%d", cfg.Consul.Host, cfg.Consul.Port)
+		consulRegistry, err = registry.NewConsulRegistry(consulAddress, logger)
 		if err != nil {
-			logger.Warn("Failed to register gateway with Consul", "error", err)
+			logger.Warn("Failed to connect to Consul, using static configuration", "error", err)
+			// Continue without Consul - will use static config
+		} else {
+			logger.Info("Connected to Consul service registry", "address", consulAddress)
+
+			// Register gateway itself with Consul
+			gatewayHost := cfg.Server.Host
+			if gatewayHost == "0.0.0.0" {
+				// Use hostname instead of 0.0.0.0 for Consul registration
+				if hostname, err := os.Hostname(); err == nil {
+					gatewayHost = hostname
+				} else {
+					gatewayHost = "localhost"
+				}
+			}
+			err = consulRegistry.RegisterService("gateway", gatewayHost, cfg.Server.HTTPPort, []string{"api", "gateway"})
+			if err != nil {
+				logger.Warn("Failed to register gateway with Consul", "error", err)
+			}
 		}
 	}
 
@@ -158,12 +170,17 @@ func (g *Gateway) SetupHTTPRoutes() *gin.Engine {
 	if g.mqttAdapter != nil {
 		deviceAPI := router.Group("/api/v1/devices")
 		deviceAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
-		
+
 		// Device management endpoints
 		deviceAPI.GET("/mqtt/status", g.mqttStatus)
 		deviceAPI.GET("/mqtt/stats", g.mqttStats)
 		deviceAPI.POST("/:device_id/commands", g.sendDeviceCommand)
 		deviceAPI.GET("/stats", g.deviceStats)
+
+		// MQTT notification endpoints
+		mqttAPI := router.Group("/api/v1/mqtt")
+		mqttAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
+		mqttAPI.POST("/publish/notification", g.publishNotification)
 	}
 	
 	// Set up dynamic proxy for service routes
@@ -498,6 +515,85 @@ func (g *Gateway) deviceStats(c *gin.Context) {
 		"device_management": map[string]interface{}{
 			"enabled": g.config.DeviceManagement.Enabled,
 		},
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+// Publish notification via MQTT endpoint
+func (g *Gateway) publishNotification(c *gin.Context) {
+	if g.mqttAdapter == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "MQTT adapter not available",
+		})
+		return
+	}
+
+	var req struct {
+		Type         string                 `json:"type" binding:"required"`          // "user", "broadcast", "system"
+		UserID       string                 `json:"user_id"`                          // Required for type="user"
+		SystemID     string                 `json:"system_id"`                        // Required for type="system"
+		Notification map[string]interface{} `json:"notification" binding:"required"` // Notification payload
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	// Add timestamp to notification
+	req.Notification["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	req.Notification["source"] = "gateway"
+
+	var err error
+	switch req.Type {
+	case "user":
+		if req.UserID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "user_id is required for user notifications",
+			})
+			return
+		}
+		err = g.mqttAdapter.PublishNotificationToUser(req.UserID, req.Notification)
+
+	case "broadcast":
+		err = g.mqttAdapter.PublishBroadcastNotification(req.Notification)
+
+	case "system":
+		if req.SystemID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "system_id is required for system notifications",
+			})
+			return
+		}
+		err = g.mqttAdapter.PublishSystemNotification(req.SystemID, req.Notification)
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid notification type. Must be 'user', 'broadcast', or 'system'",
+		})
+		return
+	}
+
+	if err != nil {
+		g.logger.Error("Failed to publish notification via MQTT",
+			"type", req.Type,
+			"user_id", req.UserID,
+			"system_id", req.SystemID,
+			"error", err,
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to publish notification: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"type":      req.Type,
+		"user_id":   req.UserID,
+		"system_id": req.SystemID,
 		"timestamp": time.Now().UTC(),
 	})
 }

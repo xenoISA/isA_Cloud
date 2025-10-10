@@ -1,0 +1,109 @@
+# ============================================
+# isA Platform - Infrastructure Services
+# ============================================
+# Service discovery, message queue, API gateway
+
+services:
+  # ============== Service Discovery ==============
+
+  consul:
+    build:
+      context: ..
+      dockerfile: dockerfiles/Dockerfile.consul
+    image: isa-consul:latest
+    container_name: isa-consul
+    ports:
+      - "${CONSUL_PORT:-8500}:8500"
+      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
+    volumes:
+      - consul-data:/consul/data
+    networks:
+      - isa-network
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============== Message Queue Cluster ==============
+
+  nats-1:
+    build:
+      context: ..
+      dockerfile: dockerfiles/Dockerfile.nats
+    image: isa-nats:latest
+    container_name: isa-cloud-nats-1
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://nats-2:6222,nats://nats-3:6222"
+    ports:
+      - "${NATS_1_CLIENT_PORT:-4222}:4222"
+      - "${NATS_1_CLUSTER_PORT:-6222}:6222"
+      - "${NATS_1_HTTP_PORT:-8222}:8222"
+    networks:
+      - isa-network
+    restart: unless-stopped
+
+  nats-2:
+    build:
+      context: ..
+      dockerfile: dockerfiles/Dockerfile.nats
+    image: isa-nats:latest
+    container_name: isa-cloud-nats-2
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://nats-1:6222,nats://nats-3:6222"
+    ports:
+      - "${NATS_2_CLIENT_PORT:-4223}:4222"
+      - "${NATS_2_CLUSTER_PORT:-6223}:6222"
+      - "${NATS_2_HTTP_PORT:-8223}:8222"
+    networks:
+      - isa-network
+    restart: unless-stopped
+
+  nats-3:
+    build:
+      context: ..
+      dockerfile: dockerfiles/Dockerfile.nats
+    image: isa-nats:latest
+    container_name: isa-cloud-nats-3
+    command: "--cluster nats://0.0.0.0:6222 --routes=nats://nats-1:6222,nats://nats-2:6222"
+    ports:
+      - "${NATS_3_CLIENT_PORT:-4224}:4222"
+      - "${NATS_3_CLUSTER_PORT:-6224}:6222"
+      - "${NATS_3_HTTP_PORT:-8224}:8222"
+    networks:
+      - isa-network
+    restart: unless-stopped
+
+  # ============== API Gateway ==============
+
+  gateway:
+    build:
+      context: ${GATEWAY_BUILD_CONTEXT:-../..}
+      dockerfile: ${GATEWAY_DOCKERFILE:-deployments/dockerfiles/Dockerfile.gateway}
+    image: ${GATEWAY_IMAGE:-isa-gateway:latest}
+    container_name: isa-gateway
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - NATS_URL=nats://nats-1:4222,nats://nats-2:4222,nats://nats-3:4222
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - nats-1
+      - nats-2
+      - nats-3
+    restart: unless-stopped
+
+# Networks and volumes are defined in compose/base.yml

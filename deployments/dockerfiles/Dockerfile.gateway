@@ -28,7 +28,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/bin/gateway /app/gateway
-COPY configs/ /app/configs/
+COPY deployments/configs/ /app/configs/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
@@ -36,4 +36,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 EXPOSE 8000
 
-CMD ["/app/gateway", "--config", "/app/configs/gateway.yaml"]
+# Use shell form to expand ENVIRONMENT variable
+CMD /app/gateway --config /app/configs/${ENVIRONMENT:-dev}/gateway.yaml

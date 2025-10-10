@@ -1,0 +1,714 @@
+# ============================================
+# isA Platform - Application Services
+# ============================================
+# AI Services (MCP, Model, Agent) + User Microservices
+
+services:
+  # ============== AI Services ==============
+
+  mcp:
+    build:
+      context: ${MCP_BUILD_CONTEXT:-../../isA_MCP}
+      dockerfile: ${MCP_DOCKERFILE:-deployment/Dockerfile.mcp}
+      args:
+        - ENVIRONMENT=${ENVIRONMENT:-dev}
+    image: ${MCP_IMAGE:-isa-mcp:latest}
+    container_name: isa-mcp
+    ports:
+      - "${MCP_PORT:-8081}:8081"
+    environment:
+      # Service Config
+      - SERVICE_NAME=mcp
+      - MCP_PORT=8081
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+
+      # Infrastructure
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${MCP_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_mcp}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+
+      # Logging
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # External APIs
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+
+      # Python
+      - PYTHONUNBUFFERED=1
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  model:
+    build:
+      context: ${MODEL_BUILD_CONTEXT:-../../isA_Model}
+      dockerfile: ${MODEL_DOCKERFILE:-deployment/Dockerfile.model}
+      args:
+        - ENVIRONMENT=${ENVIRONMENT:-dev}
+    image: ${MODEL_IMAGE:-isa-model:latest}
+    container_name: isa-model
+    ports:
+      - "${MODEL_PORT:-8082}:8082"
+    environment:
+      # Service Config
+      - SERVICE_NAME=model
+      - ISA_API_URL=http://model:8082
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+
+      # Infrastructure
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${MODEL_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_model}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+
+      # Logging
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # External APIs
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
+      - HF_TOKEN=${HF_TOKEN}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+
+      # Python
+      - PYTHONUNBUFFERED=1
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - mcp
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  agent:
+    build:
+      context: ${AGENT_BUILD_CONTEXT:-../../isA_Agent}
+      dockerfile: ${AGENT_DOCKERFILE:-deployment/Dockerfile.agent}
+      args:
+        - ENVIRONMENT=${ENVIRONMENT:-dev}
+    image: ${AGENT_IMAGE:-isa-agent:latest}
+    container_name: isa-agent
+    ports:
+      - "${AGENT_PORT:-8083}:8083"
+    environment:
+      # Service Config
+      - SERVICE_NAME=agent
+      - AGENT_PORT=8083
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+
+      # Infrastructure
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - MCP_URL=http://mcp:8081
+      - MODEL_URL=http://model:8082
+      - DATABASE_URL=${AGENT_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_agent}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+
+      # Logging
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # External APIs
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+
+      # Python
+      - PYTHONUNBUFFERED=1
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - mcp
+      - model
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============== User Microservices ==============
+
+  account-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-account
+    ports:
+      - "${ACCOUNT_PORT:-8201}:8201"
+    environment:
+      - SERVICE_NAME=account
+      - SERVICE_PORT=8201
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_accounts}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.account_service.main:app", "--host", "0.0.0.0", "--port", "8201"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-auth
+    ports:
+      - "${AUTH_PORT:-8202}:8202"
+    environment:
+      - SERVICE_NAME=auth
+      - SERVICE_PORT=8202
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_auth}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.auth_service.main:app", "--host", "0.0.0.0", "--port", "8202"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  authorization-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-authorization
+    ports:
+      - "${AUTHORIZATION_PORT:-8203}:8203"
+    environment:
+      - SERVICE_NAME=authorization
+      - SERVICE_PORT=8203
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_authorization}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.authorization_service.main:app", "--host", "0.0.0.0", "--port", "8203"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-payment
+    ports:
+      - "${PAYMENT_PORT:-8207}:8207"
+    environment:
+      - SERVICE_NAME=payment
+      - SERVICE_PORT=8207
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_payments}
+      - STRIPE_API_KEY=${STRIPE_API_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.payment_service.main:app", "--host", "0.0.0.0", "--port", "8207"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+    restart: unless-stopped
+
+  device-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-device
+    ports:
+      - "${DEVICE_PORT:-8220}:8220"
+    environment:
+      - SERVICE_NAME=device
+      - SERVICE_PORT=8220
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_devices}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - MQTT_URL=${MQTT_URL:-mqtt://mosquitto:1883}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.device_service.main:app", "--host", "0.0.0.0", "--port", "8220"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - mosquitto
+    restart: unless-stopped
+
+  event-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-event
+    ports:
+      - "${EVENT_PORT:-8101}:8101"
+    environment:
+      - SERVICE_NAME=event
+      - SERVICE_PORT=8101
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.event_service.main:app", "--host", "0.0.0.0", "--port", "8101"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  audit-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-audit
+    ports:
+      - "${AUDIT_PORT:-8102}:8102"
+    environment:
+      - SERVICE_NAME=audit
+      - SERVICE_PORT=8102
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.audit_service.main:app", "--host", "0.0.0.0", "--port", "8102"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  invitation-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-invitation
+    ports:
+      - "${INVITATION_PORT:-8103}:8103"
+    environment:
+      - SERVICE_NAME=invitation
+      - SERVICE_PORT=8103
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.invitation_service.main:app", "--host", "0.0.0.0", "--port", "8103"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-notification
+    ports:
+      - "${NOTIFICATION_PORT:-8104}:8104"
+    environment:
+      - SERVICE_NAME=notification
+      - SERVICE_PORT=8104
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.notification_service.main:app", "--host", "0.0.0.0", "--port", "8104"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-order
+    ports:
+      - "${ORDER_PORT:-8105}:8105"
+    environment:
+      - SERVICE_NAME=order
+      - SERVICE_PORT=8105
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.order_service.main:app", "--host", "0.0.0.0", "--port", "8105"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  organization-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-organization
+    ports:
+      - "${ORGANIZATION_PORT:-8106}:8106"
+    environment:
+      - SERVICE_NAME=organization
+      - SERVICE_PORT=8106
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.organization_service.main:app", "--host", "0.0.0.0", "--port", "8106"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  ota-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-ota
+    ports:
+      - "${OTA_PORT:-8107}:8107"
+    environment:
+      - SERVICE_NAME=ota
+      - SERVICE_PORT=8107
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.ota_service.main:app", "--host", "0.0.0.0", "--port", "8107"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  session-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-session
+    ports:
+      - "${SESSION_PORT:-8108}:8108"
+    environment:
+      - SERVICE_NAME=session
+      - SERVICE_PORT=8108
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.session_service.main:app", "--host", "0.0.0.0", "--port", "8108"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  storage-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-storage
+    ports:
+      - "${STORAGE_PORT:-8109}:8109"
+    environment:
+      - SERVICE_NAME=storage
+      - SERVICE_PORT=8109
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.storage_service.main:app", "--host", "0.0.0.0", "--port", "8109"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+      - minio
+    restart: unless-stopped
+
+  task-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-task
+    ports:
+      - "${TASK_PORT:-8110}:8110"
+    environment:
+      - SERVICE_NAME=task
+      - SERVICE_PORT=8110
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.task_service.main:app", "--host", "0.0.0.0", "--port", "8110"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  telemetry-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-telemetry
+    ports:
+      - "${TELEMETRY_PORT:-8111}:8111"
+    environment:
+      - SERVICE_NAME=telemetry
+      - SERVICE_PORT=8111
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
+      - INFLUXDB_TOKEN=${INFLUXDB_ADMIN_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-isa-platform}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-metrics}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.telemetry_service.main:app", "--host", "0.0.0.0", "--port", "8111"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+      - influxdb
+    restart: unless-stopped
+
+  vault-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-vault
+    ports:
+      - "${VAULT_PORT:-8112}:8112"
+    environment:
+      - SERVICE_NAME=vault
+      - SERVICE_PORT=8112
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.vault_service.main:app", "--host", "0.0.0.0", "--port", "8112"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+  wallet-service:
+    build:
+      context: ${USER_BUILD_CONTEXT:-../../isA_user}
+      dockerfile: ${USER_DOCKERFILE:-deployment/docker/Dockerfile.user}
+    image: ${USER_IMAGE:-isa-user:latest}
+    container_name: isa-wallet
+    ports:
+      - "${WALLET_PORT:-8113}:8113"
+    environment:
+      - SERVICE_NAME=wallet
+      - SERVICE_PORT=8113
+      - CONSUL_HOST=consul
+      - CONSUL_PORT=8500
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/isa_user}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - NATS_URL=${NATS_URL:-nats://nats-1:4222}
+      - LOKI_URL=${LOKI_URL:-http://loki:3100}
+      - LOKI_ENABLED=${LOKI_ENABLED:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+    command: ["python", "-m", "uvicorn", "microservices.wallet_service.main:app", "--host", "0.0.0.0", "--port", "8113"]
+    networks:
+      - isa-network
+    depends_on:
+      - consul
+      - postgres
+      - redis
+      - nats-1
+    restart: unless-stopped
+
+networks:
+  isa-network:
+    external: true

@@ -237,4 +237,51 @@ docker-compose restart
 5. ✅ 多设备并发处理
 6. ✅ 系统监控和统计
 
-现在 MQTT 服务已经完全测试验证，可以投入生产使用！
+## ✅ 问题已解决 (2025-09-27)
+
+### Gateway MQTT 适配器连接问题 [已解决]
+- **问题描述**: Go 客户端连接 MQTT broker 时出现 "identifier rejected" 错误
+
+- **根本原因**: 
+  配置文件格式错误 - `keep_alive` 和 `ping_timeout` 必须使用 duration 字符串格式（如 `"60s"`），而不是整数（如 `60`）
+
+- **解决方案**:
+  ```yaml
+  # 错误配置
+  keep_alive: 60
+  ping_timeout: 10
+  
+  # 正确配置
+  keep_alive: "60s"
+  ping_timeout: "10s"
+  ```
+
+- **验证结果**:
+  - ✅ Gateway MQTT 适配器成功连接
+  - ✅ 成功订阅 5 个主题
+  - ✅ 成功接收设备消息
+  - ✅ 成功尝试转发到后端服务
+
+### ✅ 设备认证架构（已解决）
+- **最终架构设计**:
+  ```
+  三层分离架构：
+  1. MQTT 适配器：纯协议转换（MQTT → HTTP）
+  2. device_management_service：设备管理业务逻辑
+  3. auth-service：统一认证服务
+  ```
+
+- **认证流程**:
+  - 设备通过 MQTT → Gateway 适配器 → device_management_service → auth-service
+  - 用户管理设备 → Gateway → device_management_service（需token） → auth-service
+  
+- **优点**:
+  1. 职责分离清晰
+  2. 复用现有服务
+  3. 协议无关性
+  4. 易于扩展新协议
+
+## 📋 下一步行动
+1. 深入调试 Go MQTT 客户端库在 Gateway 中的问题
+2. 考虑替代方案（如直接使用 TCP 连接或其他 MQTT 库）
+3. 完成端到端设备通信测试

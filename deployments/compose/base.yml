@@ -1,0 +1,46 @@
+# ============================================
+# isA Platform - Base Configuration
+# ============================================
+# Defines shared networks and volumes used across all environments
+
+networks:
+  isa-network:
+    driver: bridge
+    name: isa-network
+
+volumes:
+  # Infrastructure
+  consul-data:
+    name: isa-consul-data
+
+  # Data Stores
+  postgres-data:
+    name: isa-postgres-data
+  redis-data:
+    name: isa-redis-data
+  neo4j-data:
+    name: isa-neo4j-data
+  influxdb-data:
+    name: isa-influxdb-data
+
+  # Storage
+  minio-data:
+    name: isa-minio-data
+  storage-data:
+    name: isa-storage-data
+
+  # Messaging
+  mosquitto-data:
+    name: isa-mosquitto-data
+  mosquitto-log:
+    name: isa-mosquitto-log
+
+  # Observability
+  loki-data:
+    name: isa-loki-data
+  grafana-data:
+    name: isa-grafana-data
+
+  # Supabase
+  supabase-storage-data:
+    name: isa-supabase-storage-data

@@ -23,6 +23,9 @@ type Config struct {
 	Blockchain        BlockchainConfig      `mapstructure:"blockchain"`  // Re-enabled with chain-agnostic design
 	MQTT              MQTTConfig            `mapstructure:"mqtt"`
 	DeviceManagement  DeviceManagementConfig `mapstructure:"device_management"`
+	Consul            ConsulConfig          `mapstructure:"consul"`
+	Infrastructure    InfrastructureConfig  `mapstructure:"infrastructure"`
+	InfraGateway      InfraGatewayConfig    `mapstructure:"infra_gateway"`
 }
 
 // AppConfig contains application metadata
@@ -151,6 +154,10 @@ type MQTTTopicsConfig struct {
 	DeviceAuth             string `mapstructure:"device_auth"`
 	DeviceRegistration     string `mapstructure:"device_registration"`
 	SystemEvents           string `mapstructure:"system_events"`
+	NotificationUserReceive string `mapstructure:"notification_user_receive"`
+	NotificationUserAck    string `mapstructure:"notification_user_ack"`
+	NotificationBroadcast  string `mapstructure:"notification_broadcast"`
+	NotificationSystem     string `mapstructure:"notification_system"`
 }
 
 // DeviceManagementConfig contains device management services configuration
@@ -161,21 +168,98 @@ type DeviceManagementConfig struct {
 	OTAService       ServiceEndpoint `mapstructure:"ota_service"`
 }
 
-// Load loads configuration from file and environment variables
+// ConsulConfig contains Consul service registry configuration
+type ConsulConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
+}
+
+// InfrastructureConfig contains all infrastructure services configuration
+type InfrastructureConfig struct {
+	Supabase SupabaseConfig `mapstructure:"supabase"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	MinIO    MinIOConfig    `mapstructure:"minio"`
+	DuckDB   DuckDBConfig   `mapstructure:"duckdb"`
+	Neo4j    Neo4jConfig    `mapstructure:"neo4j"`
+	InfluxDB InfluxDBConfig `mapstructure:"influxdb"`
+	Loki     LokiConfig     `mapstructure:"loki"`
+	NATS     NATSConfig     `mapstructure:"nats"`
+	MQTT     MQTTConfig     `mapstructure:"mqtt"`
+}
+
+// InfraGatewayConfig contains Infrastructure Gateway specific configuration
+type InfraGatewayConfig struct {
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+}
+
+// SupabaseConfig contains Supabase configuration
+type SupabaseConfig struct {
+	URL     string `mapstructure:"url"`
+	AnonKey string `mapstructure:"anon_key"`
+	Timeout int    `mapstructure:"timeout"`
+}
+
+// MinIOConfig contains MinIO configuration
+type MinIOConfig struct {
+	Endpoint  string `mapstructure:"endpoint"`
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	UseSSL    bool   `mapstructure:"use_ssl"`
+}
+
+// DuckDBConfig contains DuckDB configuration
+type DuckDBConfig struct {
+	Path        string `mapstructure:"path"`
+	MemoryLimit string `mapstructure:"memory_limit"`
+	Threads     int    `mapstructure:"threads"`
+}
+
+// Neo4jConfig contains Neo4j configuration
+type Neo4jConfig struct {
+	URI      string `mapstructure:"uri"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+}
+
+// InfluxDBConfig contains InfluxDB configuration
+type InfluxDBConfig struct {
+	URL    string `mapstructure:"url"`
+	Token  string `mapstructure:"token"`
+	Org    string `mapstructure:"org"`
+	Bucket string `mapstructure:"bucket"`
+}
+
+// LokiConfig contains Loki configuration
+type LokiConfig struct {
+	URL       string `mapstructure:"url"`
+	BatchSize int    `mapstructure:"batch_size"`
+	Timeout   int    `mapstructure:"timeout"`
+}
+
+// NATSConfig contains NATS configuration
+type NATSConfig struct {
+	URLs      []string `mapstructure:"urls"`
+	ClusterID string   `mapstructure:"cluster_id"`
+}
+
+// Load loads configuration from file and environment variables (legacy)
 func Load(configFile string) (*Config, error) {
+	return LoadConfig()
+}
+
+// LoadConfig loads configuration from file and environment variables
+func LoadConfig() (*Config, error) {
 	// Set defaults
 	setDefaults()
 
 	// Set config file
-	if configFile != "" {
-		viper.SetConfigFile(configFile)
-	} else {
-		viper.SetConfigName("gateway")
-		viper.SetConfigType("yaml")
-		viper.AddConfigPath("./configs")
-		viper.AddConfigPath("../configs")
-		viper.AddConfigPath("/etc/isa_cloud")
-	}
+	viper.SetConfigName("gateway")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("./deployments/configs")
+	viper.AddConfigPath("../deployments/configs")
+	viper.AddConfigPath("/etc/isa_cloud")
 
 	// Read environment variables
 	viper.AutomaticEnv()
@@ -315,6 +399,10 @@ func setDefaults() {
 	viper.SetDefault("mqtt.topics.device_auth", "devices/+/auth")
 	viper.SetDefault("mqtt.topics.device_registration", "devices/register")
 	viper.SetDefault("mqtt.topics.system_events", "system/events")
+	viper.SetDefault("mqtt.topics.notification_user_receive", "notifications/users/+/receive")
+	viper.SetDefault("mqtt.topics.notification_user_ack", "notifications/users/+/ack")
+	viper.SetDefault("mqtt.topics.notification_broadcast", "notifications/broadcast")
+	viper.SetDefault("mqtt.topics.notification_system", "notifications/system/+")
 
 	// Device Management
 	viper.SetDefault("device_management.enabled", true)
@@ -332,4 +420,9 @@ func setDefaults() {
 	viper.SetDefault("device_management.ota_service.http_port", 8222)
 	viper.SetDefault("device_management.ota_service.grpc_port", 9222)
 	viper.SetDefault("device_management.ota_service.timeout", "60s")
+
+	// Consul
+	viper.SetDefault("consul.enabled", true)
+	viper.SetDefault("consul.host", "localhost")
+	viper.SetDefault("consul.port", 8500)
 }
