@@ -293,7 +293,7 @@ print(result)
 - Connection to PostgREST successful
 - Database queries work (after fixing API keys)
 
-### Attempt 5: Match Supabase Local Configuration ✅ SUCCESS
+请你### Attempt 5: Match Supabase Local Configuration ✅ SUCCESS
 
 **Approach**: 对比 `supabase local` 和 Docker Compose 配置差异
 

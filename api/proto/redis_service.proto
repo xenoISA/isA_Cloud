@@ -1,0 +1,888 @@
+// redis_service.proto - Redis 缓存服务 gRPC 接口
+// 提供统一的缓存和会话存储接口，支持多租户和命名空间隔离
+syntax = "proto3";
+
+package isa.redis;
+
+option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/redis";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// ========================================
+// Redis 缓存服务
+// ========================================
+// 这是一个统一的缓存服务，为所有后端服务提供缓存和会话管理能力
+// 支持：
+// - 用户和组织级别的命名空间隔离
+// - String、Hash、List、Set、Sorted Set 操作
+// - 分布式锁
+// - Pub/Sub 消息
+// - 过期时间管理
+// - 批量操作
+
+service RedisService {
+    // ========== 字符串操作 (String Operations) ==========
+    rpc Set(SetRequest) returns (SetResponse);
+    rpc Get(GetRequest) returns (GetResponse);
+    rpc GetMultiple(GetMultipleRequest) returns (GetMultipleResponse);
+    rpc SetWithExpiration(SetWithExpirationRequest) returns (SetResponse);
+    rpc Increment(IncrementRequest) returns (IncrementResponse);
+    rpc Decrement(DecrementRequest) returns (DecrementResponse);
+    rpc Append(AppendRequest) returns (AppendResponse);
+    
+    // ========== 键操作 (Key Operations) ==========
+    rpc Delete(DeleteRequest) returns (DeleteResponse);
+    rpc DeleteMultiple(DeleteMultipleRequest) returns (DeleteResponse);
+    rpc Exists(ExistsRequest) returns (ExistsResponse);
+    rpc Expire(ExpireRequest) returns (ExpireResponse);
+    rpc GetTTL(GetTTLRequest) returns (GetTTLResponse);
+    rpc Rename(RenameRequest) returns (RenameResponse);
+    rpc ListKeys(ListKeysRequest) returns (ListKeysResponse);
+    
+    // ========== 哈希操作 (Hash Operations) ==========
+    rpc HSet(HSetRequest) returns (HSetResponse);
+    rpc HGet(HGetRequest) returns (HGetResponse);
+    rpc HGetAll(HGetAllRequest) returns (HGetAllResponse);
+    rpc HDelete(HDeleteRequest) returns (HDeleteResponse);
+    rpc HExists(HExistsRequest) returns (HExistsResponse);
+    rpc HKeys(HKeysRequest) returns (HKeysResponse);
+    rpc HValues(HValuesRequest) returns (HValuesResponse);
+    rpc HIncrement(HIncrementRequest) returns (HIncrementResponse);
+    
+    // ========== 列表操作 (List Operations) ==========
+    rpc LPush(LPushRequest) returns (LPushResponse);
+    rpc RPush(RPushRequest) returns (RPushResponse);
+    rpc LPop(LPopRequest) returns (LPopResponse);
+    rpc RPop(RPopRequest) returns (RPopResponse);
+    rpc LRange(LRangeRequest) returns (LRangeResponse);
+    rpc LLen(LLenRequest) returns (LLenResponse);
+    rpc LIndex(LIndexRequest) returns (LIndexResponse);
+    rpc LTrim(LTrimRequest) returns (LTrimResponse);
+    
+    // ========== 集合操作 (Set Operations) ==========
+    rpc SAdd(SAddRequest) returns (SAddResponse);
+    rpc SRemove(SRemoveRequest) returns (SRemoveResponse);
+    rpc SMembers(SMembersRequest) returns (SMembersResponse);
+    rpc SIsMember(SIsMemberRequest) returns (SIsMemberResponse);
+    rpc SCard(SCardRequest) returns (SCardResponse);
+    rpc SUnion(SUnionRequest) returns (SUnionResponse);
+    rpc SInter(SInterRequest) returns (SInterResponse);
+    rpc SDiff(SDiffRequest) returns (SDiffResponse);
+    
+    // ========== 有序集合操作 (Sorted Set Operations) ==========
+    rpc ZAdd(ZAddRequest) returns (ZAddResponse);
+    rpc ZRemove(ZRemoveRequest) returns (ZRemoveResponse);
+    rpc ZRange(ZRangeRequest) returns (ZRangeResponse);
+    rpc ZRangeByScore(ZRangeByScoreRequest) returns (ZRangeByScoreResponse);
+    rpc ZRank(ZRankRequest) returns (ZRankResponse);
+    rpc ZScore(ZScoreRequest) returns (ZScoreResponse);
+    rpc ZCard(ZCardRequest) returns (ZCardResponse);
+    rpc ZIncrement(ZIncrementRequest) returns (ZIncrementResponse);
+    
+    // ========== 分布式锁 (Distributed Lock) ==========
+    rpc AcquireLock(AcquireLockRequest) returns (AcquireLockResponse);
+    rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse);
+    rpc RenewLock(RenewLockRequest) returns (RenewLockResponse);
+    
+    // ========== Pub/Sub ==========
+    rpc Publish(PublishRequest) returns (PublishResponse);
+    rpc Subscribe(SubscribeRequest) returns (stream MessageResponse);
+    rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse);
+    
+    // ========== 批量操作 (Batch Operations) ==========
+    rpc ExecuteBatch(ExecuteBatchRequest) returns (ExecuteBatchResponse);
+    
+    // ========== 会话管理 (Session Management) ==========
+    rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+    rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+    rpc UpdateSession(UpdateSessionRequest) returns (UpdateSessionResponse);
+    rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+    rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+    
+    // ========== 统计和监控 ==========
+    rpc GetStatistics(GetStatisticsRequest) returns (GetStatisticsResponse);
+    rpc GetKeyInfo(GetKeyInfoRequest) returns (GetKeyInfoResponse);
+    
+    // ========== 健康检查 ==========
+    rpc HealthCheck(RedisHealthCheckRequest) returns (RedisHealthCheckResponse);
+}
+
+// ========================================
+// 数据类型
+// ========================================
+
+// 数据类型枚举
+enum ValueType {
+    VALUE_TYPE_STRING = 0;
+    VALUE_TYPE_HASH = 1;
+    VALUE_TYPE_LIST = 2;
+    VALUE_TYPE_SET = 3;
+    VALUE_TYPE_ZSET = 4;
+}
+
+// 键值对
+message KeyValue {
+    string key = 1;
+    string value = 2;
+}
+
+// 哈希字段值对
+message HashField {
+    string field = 1;
+    string value = 2;
+}
+
+// 有序集合成员
+message ZSetMember {
+    string member = 1;
+    double score = 2;
+}
+
+// 会话信息
+message SessionInfo {
+    string session_id = 1;
+    string user_id = 2;
+    map<string, string> data = 3;
+    google.protobuf.Timestamp created_at = 4;
+    google.protobuf.Timestamp expires_at = 5;
+    google.protobuf.Timestamp last_accessed = 6;
+}
+
+// 批量操作命令
+message BatchCommand {
+    string operation = 1;                   // SET, GET, DELETE, etc.
+    string key = 2;
+    string value = 3;
+    google.protobuf.Duration expiration = 4;
+}
+
+// ========================================
+// 字符串操作请求/响应
+// ========================================
+
+message SetRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string value = 4;
+}
+
+message SetResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message GetResponse {
+    bool found = 1;
+    string value = 2;
+}
+
+message GetMultipleRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string keys = 3;
+}
+
+message GetMultipleResponse {
+    repeated KeyValue values = 1;
+}
+
+message SetWithExpirationRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string value = 4;
+    google.protobuf.Duration expiration = 5;   // 过期时间
+}
+
+message IncrementRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int64 delta = 4;                           // 增量，默认 1
+}
+
+message IncrementResponse {
+    int64 value = 1;                           // 增量后的值
+}
+
+message DecrementRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int64 delta = 4;
+}
+
+message DecrementResponse {
+    int64 value = 1;
+}
+
+message AppendRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string value = 4;
+}
+
+message AppendResponse {
+    int64 length = 1;                          // 追加后的长度
+}
+
+// ========================================
+// 键操作请求/响应
+// ========================================
+
+message DeleteRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message DeleteResponse {
+    bool success = 1;
+    int32 deleted_count = 2;
+}
+
+message DeleteMultipleRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string keys = 3;
+}
+
+message ExistsRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message ExistsResponse {
+    bool exists = 1;
+}
+
+message ExpireRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    google.protobuf.Duration expiration = 4;
+}
+
+message ExpireResponse {
+    bool success = 1;
+}
+
+message GetTTLRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message GetTTLResponse {
+    int64 ttl_seconds = 1;                     // -1 表示永不过期，-2 表示键不存在
+}
+
+message RenameRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string old_key = 3;
+    string new_key = 4;
+}
+
+message RenameResponse {
+    bool success = 1;
+}
+
+message ListKeysRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string pattern = 3;                        // 匹配模式，如 "user:*"
+    int32 limit = 4;                           // 限制数量
+}
+
+message ListKeysResponse {
+    repeated string keys = 1;
+    int32 total_count = 2;
+}
+
+// ========================================
+// 哈希操作请求/响应
+// ========================================
+
+message HSetRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated HashField fields = 4;             // 支持批量设置
+}
+
+message HSetResponse {
+    bool success = 1;
+    int32 fields_set = 2;
+}
+
+message HGetRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string field = 4;
+}
+
+message HGetResponse {
+    bool found = 1;
+    string value = 2;
+}
+
+message HGetAllRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message HGetAllResponse {
+    repeated HashField fields = 1;
+}
+
+message HDeleteRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string fields = 4;
+}
+
+message HDeleteResponse {
+    bool success = 1;
+    int32 deleted_count = 2;
+}
+
+message HExistsRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string field = 4;
+}
+
+message HExistsResponse {
+    bool exists = 1;
+}
+
+message HKeysRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message HKeysResponse {
+    repeated string fields = 1;
+}
+
+message HValuesRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message HValuesResponse {
+    repeated string values = 1;
+}
+
+message HIncrementRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string field = 4;
+    int64 delta = 5;
+}
+
+message HIncrementResponse {
+    int64 value = 1;
+}
+
+// ========================================
+// 列表操作请求/响应
+// ========================================
+
+message LPushRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string values = 4;
+}
+
+message LPushResponse {
+    int32 length = 1;                          // 推送后的列表长度
+}
+
+message RPushRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string values = 4;
+}
+
+message RPushResponse {
+    int32 length = 1;
+}
+
+message LPopRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message LPopResponse {
+    bool found = 1;
+    string value = 2;
+}
+
+message RPopRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message RPopResponse {
+    bool found = 1;
+    string value = 2;
+}
+
+message LRangeRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int32 start = 4;
+    int32 stop = 5;
+}
+
+message LRangeResponse {
+    repeated string values = 1;
+}
+
+message LLenRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message LLenResponse {
+    int32 length = 1;
+}
+
+message LIndexRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int32 index = 4;
+}
+
+message LIndexResponse {
+    bool found = 1;
+    string value = 2;
+}
+
+message LTrimRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int32 start = 4;
+    int32 stop = 5;
+}
+
+message LTrimResponse {
+    bool success = 1;
+}
+
+// ========================================
+// 集合操作请求/响应
+// ========================================
+
+message SAddRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string members = 4;
+}
+
+message SAddResponse {
+    int32 added_count = 1;
+}
+
+message SRemoveRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string members = 4;
+}
+
+message SRemoveResponse {
+    int32 removed_count = 1;
+}
+
+message SMembersRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message SMembersResponse {
+    repeated string members = 1;
+}
+
+message SIsMemberRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string member = 4;
+}
+
+message SIsMemberResponse {
+    bool is_member = 1;
+}
+
+message SCardRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message SCardResponse {
+    int32 count = 1;
+}
+
+message SUnionRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string keys = 3;
+}
+
+message SUnionResponse {
+    repeated string members = 1;
+}
+
+message SInterRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string keys = 3;
+}
+
+message SInterResponse {
+    repeated string members = 1;
+}
+
+message SDiffRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string keys = 3;
+}
+
+message SDiffResponse {
+    repeated string members = 1;
+}
+
+// ========================================
+// 有序集合操作请求/响应
+// ========================================
+
+message ZAddRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated ZSetMember members = 4;
+}
+
+message ZAddResponse {
+    int32 added_count = 1;
+}
+
+message ZRemoveRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    repeated string members = 4;
+}
+
+message ZRemoveResponse {
+    int32 removed_count = 1;
+}
+
+message ZRangeRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    int32 start = 4;
+    int32 stop = 5;
+    bool with_scores = 6;                      // 是否包含分数
+}
+
+message ZRangeResponse {
+    repeated ZSetMember members = 1;
+}
+
+message ZRangeByScoreRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    double min_score = 4;
+    double max_score = 5;
+    int32 offset = 6;
+    int32 count = 7;
+}
+
+message ZRangeByScoreResponse {
+    repeated ZSetMember members = 1;
+}
+
+message ZRankRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string member = 4;
+}
+
+message ZRankResponse {
+    bool found = 1;
+    int32 rank = 2;                            // 排名（从0开始）
+}
+
+message ZScoreRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string member = 4;
+}
+
+message ZScoreResponse {
+    bool found = 1;
+    double score = 2;
+}
+
+message ZCardRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message ZCardResponse {
+    int32 count = 1;
+}
+
+message ZIncrementRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+    string member = 4;
+    double delta = 5;
+}
+
+message ZIncrementResponse {
+    double score = 1;                          // 增量后的分数
+}
+
+// ========================================
+// 分布式锁请求/响应
+// ========================================
+
+message AcquireLockRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string lock_key = 3;
+    google.protobuf.Duration ttl = 4;          // 锁超时时间
+    google.protobuf.Duration wait_timeout = 5; // 等待超时
+}
+
+message AcquireLockResponse {
+    bool acquired = 1;
+    string lock_id = 2;                        // 锁 ID（用于释放）
+    google.protobuf.Timestamp expires_at = 3;
+}
+
+message ReleaseLockRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string lock_key = 3;
+    string lock_id = 4;
+}
+
+message ReleaseLockResponse {
+    bool released = 1;
+}
+
+message RenewLockRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string lock_key = 3;
+    string lock_id = 4;
+    google.protobuf.Duration ttl = 5;
+}
+
+message RenewLockResponse {
+    bool renewed = 1;
+    google.protobuf.Timestamp expires_at = 2;
+}
+
+// ========================================
+// Pub/Sub 请求/响应
+// ========================================
+
+message PublishRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string channel = 3;
+    string message = 4;
+}
+
+message PublishResponse {
+    int32 subscriber_count = 1;                // 接收者数量
+}
+
+message SubscribeRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string channels = 3;
+}
+
+message MessageResponse {
+    string channel = 1;
+    string message = 2;
+    google.protobuf.Timestamp timestamp = 3;
+}
+
+message UnsubscribeRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated string channels = 3;
+}
+
+message UnsubscribeResponse {
+    bool success = 1;
+}
+
+// ========================================
+// 批量操作请求/响应
+// ========================================
+
+message ExecuteBatchRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    repeated BatchCommand commands = 3;
+}
+
+message ExecuteBatchResponse {
+    bool success = 1;
+    int32 executed_count = 2;
+    repeated string errors = 3;
+}
+
+// ========================================
+// 会话管理请求/响应
+// ========================================
+
+message CreateSessionRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    map<string, string> data = 3;
+    google.protobuf.Duration ttl = 4;
+}
+
+message CreateSessionResponse {
+    string session_id = 1;
+    google.protobuf.Timestamp expires_at = 2;
+}
+
+message GetSessionRequest {
+    string user_id = 1;
+    string session_id = 2;
+}
+
+message GetSessionResponse {
+    bool found = 1;
+    SessionInfo session = 2;
+}
+
+message UpdateSessionRequest {
+    string user_id = 1;
+    string session_id = 2;
+    map<string, string> data = 3;
+    bool extend_ttl = 4;                       // 是否延长过期时间
+}
+
+message UpdateSessionResponse {
+    bool success = 1;
+}
+
+message DeleteSessionRequest {
+    string user_id = 1;
+    string session_id = 2;
+}
+
+message DeleteSessionResponse {
+    bool success = 1;
+}
+
+message ListSessionsRequest {
+    string user_id = 1;
+    string organization_id = 2;
+}
+
+message ListSessionsResponse {
+    repeated SessionInfo sessions = 1;
+}
+
+// ========================================
+// 统计和监控请求/响应
+// ========================================
+
+message GetStatisticsRequest {
+    string user_id = 1;
+    string organization_id = 2;
+}
+
+message GetStatisticsResponse {
+    int64 total_keys = 1;
+    int64 memory_used_bytes = 2;
+    int64 commands_processed = 3;
+    int64 connections_received = 4;
+    double hit_rate = 5;
+    map<string, int64> key_type_distribution = 6;
+}
+
+message GetKeyInfoRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string key = 3;
+}
+
+message GetKeyInfoResponse {
+    bool exists = 1;
+    ValueType type = 2;
+    int64 ttl_seconds = 3;
+    int64 size_bytes = 4;
+    google.protobuf.Timestamp created_at = 5;
+    google.protobuf.Timestamp last_accessed = 6;
+}
+
+// ========================================
+// 健康检查
+// ========================================
+
+message RedisHealthCheckRequest {
+    bool deep_check = 1;
+}
+
+message RedisHealthCheckResponse {
+    bool healthy = 1;
+    string redis_status = 2;
+    int64 connected_clients = 3;
+    int64 used_memory_bytes = 4;
+    google.protobuf.Timestamp checked_at = 5;
+    string message = 6;
+}
+
+
+

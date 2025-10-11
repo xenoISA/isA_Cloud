@@ -246,7 +246,41 @@ type NATSConfig struct {
 
 // Load loads configuration from file and environment variables (legacy)
 func Load(configFile string) (*Config, error) {
-	return LoadConfig()
+	// Set defaults
+	setDefaults()
+
+	// Read environment variables
+	viper.AutomaticEnv()
+	viper.SetEnvPrefix("ISA_CLOUD")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// If configFile is provided, use it
+	if configFile != "" {
+		viper.SetConfigFile(configFile)
+	} else {
+		// Set config file defaults
+		viper.SetConfigName("gateway")
+		viper.SetConfigType("yaml")
+		viper.AddConfigPath("./deployments/configs")
+		viper.AddConfigPath("../deployments/configs")
+		viper.AddConfigPath("/etc/isa_cloud")
+	}
+
+	// Read config file
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
+		// Config file not found, use defaults and env vars
+	}
+
+	// Unmarshal config
+	var cfg Config
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	return &cfg, nil
 }
 
 // LoadConfig loads configuration from file and environment variables

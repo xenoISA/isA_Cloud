@@ -1,0 +1,40 @@
+# Redis Staging Deployment
+# Optimized for AWS ECS Fargate with persistence
+FROM redis:latest
+
+# Metadata
+LABEL maintainer="ISA Platform"
+LABEL version="1.0.0"
+LABEL description="Redis Cache/Session Store for AWS ECS Staging"
+LABEL environment="staging"
+
+# Install additional tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Redis configuration
+COPY deployments/configs/staging/redis.conf /usr/local/etc/redis/redis.conf
+
+# Create Redis data directory with proper permissions
+RUN mkdir -p /data/redis && \
+    chown -R redis:redis /data/redis && \
+    chmod 755 /data/redis
+
+# Create log directory
+RUN mkdir -p /var/log/redis && \
+    chown -R redis:redis /var/log/redis
+
+# Expose Redis port
+EXPOSE 6379
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD redis-cli ping || exit 1
+
+# Switch to redis user for security
+USER redis
+
+# Start Redis with custom configuration
+CMD ["redis-server", "/usr/local/etc/redis/redis.conf"]

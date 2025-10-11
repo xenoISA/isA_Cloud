@@ -1,0 +1,54 @@
+# NATS SDK 客户端配置
+# NATS SDK Client Configuration
+#
+# 文件名: configs/sdk/nats.yaml
+# 用途: 开发者配置 NATS SDK 客户端
+
+# 基础配置
+urls:                                          # NATS 服务器地址列表
+  - "nats://localhost:4222"
+cluster_id: "isa-cloud-cluster"                # JetStream 集群 ID
+
+# Consul 服务发现配置
+use_consul: false                              # 是否使用 Consul 服务发现
+service_name: "nats-service"                   # Consul 服务名（use_consul=true 时需要）
+grpc_port: 50056                              # gRPC 端口
+
+# 认证配置
+username: ""                                   # 用户名（可选）
+password: ""                                   # 密码（可选）
+token: ""                                      # Token（可选）
+nkey_seed: ""                                  # NKey Seed（可选）
+
+# 连接配置
+max_reconnect: 10                              # 最大重连次数（-1 表示无限）
+reconnect_wait: "2s"                           # 重连等待时间
+timeout: "10s"                                 # 连接超时
+ping_interval: "2m"                            # Ping 间隔
+max_pings_out: 2                               # 最大未确认 Ping 数
+
+# TLS 配置
+tls_enabled: false                             # 是否启用 TLS
+tls_cert: ""                                   # 证书文件路径
+tls_key: ""                                    # 密钥文件路径
+tls_ca: ""                                     # CA 证书路径
+
+# JetStream 配置
+jetstream_enabled: true                        # 是否启用 JetStream
+jetstream_domain: ""                           # JetStream 域名（可选）
+
+# 流配置默认值
+default_stream_replicas: 1                     # 默认流副本数
+default_storage_type: "file"                   # 默认存储类型（file 或 memory）
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_NATS_URLS (逗号分隔)
+#   ISA_CLOUD_NATS_USERNAME
+#   ISA_CLOUD_NATS_PASSWORD
+#   ISA_CLOUD_NATS_TOKEN
+
+
+

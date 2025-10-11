@@ -1,0 +1,34 @@
+# MinIO 服务配置
+# 文件名: deployments/configs/staging/minio.yaml
+# 用于 staging 环境
+
+# ============== 基础配置 ==============
+address: ":9000"
+console_address: ":9001"
+
+# ============== 认证配置 ==============
+# 使用环境变量: MINIO_ROOT_USER, MINIO_ROOT_PASSWORD
+
+# ============== 存储配置 ==============
+data_dir: /data
+
+# ============== Consul 配置 ==============
+consul:
+  enabled: ${CONSUL_ENABLED:-false}
+  host: ${CONSUL_HOST:-consul}
+  port: ${CONSUL_PORT:-8500}
+  service_name: minio-service
+  tags:
+    - storage
+    - s3
+    - object-storage
+
+# ============== 日志配置 ==============
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: false
+
+
+

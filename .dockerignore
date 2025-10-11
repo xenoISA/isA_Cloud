@@ -1,0 +1,102 @@
+# Git files
+.git
+.gitignore
+
+# Environment files with secrets
+.env.local
+.env.production
+.env.staging
+deployments/envs/*/.env
+deployments/envs/*/.env.*
+!deployments/envs/*/.env.example
+
+# Documentation
+*.md
+README*
+docs/
+!docs/required-for-runtime/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+gateway.log
+
+# Temporary files
+temp.md
+*.tmp
+*.temp
+
+# Test files
+*_test.go
+test/
+tests/
+testing/
+
+# Build artifacts
+bin/
+dist/
+build/
+target/
+
+# Dependencies (will be installed in container)
+node_modules/
+vendor/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local development
+volumes/
+data/
+
+# Docker files not needed in containers
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Scripts not needed in runtime
+scripts/test_*
+scripts/dev_*
+scripts/local_*
+
+# Issue tracking
+issues/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Development configs
+deployments/configs/dev/
+deployments/configs/test/
+deployments/envs/dev/
+deployments/envs/test/
+
+# Supabase local files
+supabase/
+.branches/
+.temp/
+
+# Large binary files
+*.iso
+*.tar
+*.zip
+*.gz

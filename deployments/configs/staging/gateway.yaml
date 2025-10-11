@@ -12,10 +12,10 @@ server:
   http_port: 8000
   grpc_port: 8001
 
-# Minimal service configuration for staging
+# Staging service configuration - using Consul discovery
 services:
   agent_service:
-    host: "agent.staging.isa.local"
+    consul_service_name: "agent_service"
     http_port: 8080
     grpc_port: 9080
     timeout: "60s"
@@ -24,7 +24,7 @@ services:
       backoff: "2s"
 
   model_service:
-    host: "model.staging.isa.local"
+    consul_service_name: "model_service"
     http_port: 8082
     grpc_port: 9082
     timeout: "120s"
@@ -33,7 +33,7 @@ services:
       backoff: "5s"
 
   mcp_service:
-    host: "mcp.staging.isa.local"
+    consul_service_name: "mcp_service"
     http_port: 8081
     grpc_port: 9081
     timeout: "30s"
@@ -51,7 +51,7 @@ database:
   ssl_mode: "require"
 
 redis:
-  host: "redis.staging.isa.local"
+  host: "staging-redis"
   port: 6379
   password: ""
   database: 0
@@ -98,7 +98,7 @@ security:
 
 mqtt:
   enabled: true
-  broker_url: "tcp://mosquitto:1883"
+  broker_url: "tcp://staging-mosquitto:1883"
   client_id: "isa_cloud_gateway_staging"
   username: ""
   password: ""
@@ -123,5 +123,5 @@ mqtt:
 # Enable Consul for staging environment service discovery
 consul:
   enabled: true
-  host: "consul.staging.isa.local"
+  host: "staging-consul"
   port: 8500

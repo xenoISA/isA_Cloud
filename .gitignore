@@ -85,3 +85,7 @@ venv/
 .temp/
 supabase/.branches/
 supabase/.temp/
+
+# AWS deployment files with secrets
+deployments/aws/tasks/
+deployments/aws/services/

@@ -1,88 +1,114 @@
 #!/bin/bash
-# ============================================
-# isA Platform - Staging Environment (AWS)
-# ============================================
-# Uses ECR images, AWS managed services
+# 启动 Staging 环境（支持 Consul 服务发现）
+# Start Staging Environment with Consul Service Discovery
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+DEPLOYMENTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-cd "$DEPLOY_DIR"
-
-# Load environment variables
-if [ -f .env.staging ]; then
-    export $(cat .env.staging | grep -v '^#' | xargs)
-else
-    echo "❌ Error: .env.staging not found!"
-    exit 1
-fi
-
-# Check required environment variables
-if [ -z "$ECR_REGISTRY" ] || [ -z "$IMAGE_TAG" ]; then
-    echo "❌ Error: ECR_REGISTRY and IMAGE_TAG must be set in .env.staging"
-    exit 1
-fi
-
-echo "🎭 Starting isA Platform - Staging Environment"
-echo "==============================================="
-echo "Environment: staging (AWS)"
-echo "ECR Registry: $ECR_REGISTRY"
-echo "Image Tag: $IMAGE_TAG"
+echo "=========================================="
+echo "启动 isA Cloud Staging 服务"
+echo "=========================================="
 echo ""
 
-case "${1:-up}" in
-    up)
-        echo "📦 Deploying to staging..."
+cd "$DEPLOYMENTS_DIR"
 
-        # Login to ECR
-        echo "🔐 Logging into ECR..."
-        aws ecr get-login-password --region ${AWS_REGION:-us-east-1} | \
-            docker login --username AWS --password-stdin $ECR_REGISTRY
+# 检查参数
+USE_CONSUL=${1:-false}
 
-        # Pull latest images
-        echo "📥 Pulling latest images..."
-        docker-compose -f docker-compose.staging.yml pull
+if [ "$USE_CONSUL" = "true" ] || [ "$USE_CONSUL" = "--consul" ]; then
+    export CONSUL_ENABLED=true
+    export CONSUL_HOST=consul
+    export CONSUL_PORT=8500
+    echo "模式: 启用 Consul 服务发现"
+else
+    export CONSUL_ENABLED=false
+    echo "模式: 直接连接（不使用 Consul）"
+fi
 
-        # Start services
-        echo "🚀 Starting services..."
-        docker-compose -f docker-compose.staging.yml up -d
+echo ""
 
-        echo ""
-        echo "✅ Staging environment deployed!"
-        echo ""
-        echo "📊 Service URLs:"
-        echo "  - Gateway:  http://staging-gateway.isa-platform.com"
-        echo "  - Grafana:  http://staging-grafana.isa-platform.com"
-        echo ""
-        echo "💡 Check logs: ./scripts/start-staging.sh logs [service]"
-        ;;
-    down)
-        echo "🛑 Stopping services..."
-        docker-compose -f docker-compose.staging.yml down
-        echo "✅ Stopped!"
-        ;;
-    restart)
-        echo "🔄 Restarting services..."
-        docker-compose -f docker-compose.staging.yml restart
-        echo "✅ Restarted!"
-        ;;
-    logs)
-        docker-compose -f docker-compose.staging.yml logs -f ${2:-}
-        ;;
-    ps)
-        docker-compose -f docker-compose.staging.yml ps
-        ;;
-    pull)
-        echo "📥 Pulling latest images..."
-        aws ecr get-login-password --region ${AWS_REGION:-us-east-1} | \
-            docker login --username AWS --password-stdin $ECR_REGISTRY
-        docker-compose -f docker-compose.staging.yml pull
-        echo "✅ Images pulled!"
-        ;;
-    *)
-        echo "Usage: $0 {up|down|restart|logs|ps|pull}"
-        exit 1
-        ;;
-esac
+# 停止现有服务
+echo "1. 清理现有服务..."
+docker-compose -f compose/base.yml \
+    -f compose/infrastructure.yml \
+    -f compose/sdk-services.yml \
+    down 2>/dev/null || true
+echo "✓ 清理完成"
+echo ""
+
+# 构建镜像
+echo "2. 构建服务镜像..."
+docker-compose -f compose/base.yml -f compose/sdk-services.yml build
+echo "✓ 镜像构建完成"
+echo ""
+
+# 启动服务
+echo "3. 启动服务..."
+
+if [ "$CONSUL_ENABLED" = "true" ]; then
+    # 先启动 Consul
+    echo "   - 启动 Consul..."
+    docker-compose -f compose/base.yml -f compose/infrastructure.yml up -d consul
+    
+    # 等待 Consul 就绪
+    echo "   - 等待 Consul 就绪..."
+    sleep 5
+    
+    # 启动 SDK 服务
+    echo "   - 启动 SDK 服务（注册到 Consul）..."
+    docker-compose -f compose/base.yml -f compose/sdk-services.yml up -d
+else
+    # 直接启动服务
+    docker-compose -f compose/base.yml -f compose/sdk-services.yml up -d
+fi
+
+echo "✓ 服务启动完成"
+echo ""
+
+# 等待服务就绪
+echo "4. 等待服务就绪..."
+sleep 10
+
+# 检查服务状态
+echo ""
+echo "5. 检查服务状态..."
+docker-compose -f compose/base.yml -f compose/sdk-services.yml ps
+
+echo ""
+echo "=========================================="
+echo "✓ Staging 环境启动成功！"
+echo "=========================================="
+echo ""
+
+if [ "$CONSUL_ENABLED" = "true" ]; then
+    echo "Consul 已启用:"
+    echo "  Consul UI:  http://localhost:8500/ui"
+    echo "  查看服务:   curl http://localhost:8500/v1/agent/services | jq"
+    echo ""
+fi
+
+echo "服务访问:"
+echo "  Loki API:      http://localhost:3100"
+echo "  Loki Ready:    http://localhost:3100/ready"
+echo "  MinIO API:     http://localhost:9000"
+echo "  MinIO Console: http://localhost:9001 (minioadmin/minioadmin)"
+echo "  MQTT Broker:   tcp://localhost:1883"
+echo "  MQTT WS:       ws://localhost:9001"
+echo ""
+
+if [ "$CONSUL_ENABLED" = "true" ]; then
+    echo "测试服务发现:"
+    echo "  ./scripts/test-consul-discovery.sh"
+    echo ""
+fi
+
+echo "查看日志:"
+echo "  docker-compose -f compose/base.yml -f compose/sdk-services.yml logs -f"
+echo ""
+
+echo "停止服务:"
+echo "  docker-compose -f compose/base.yml -f compose/sdk-services.yml down"
+echo ""
+
