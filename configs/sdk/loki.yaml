@@ -1,0 +1,41 @@
+# Loki SDK 客户端配置
+# Loki SDK Client Configuration
+#
+# 文件名: configs/sdk/loki.yaml
+# 用途: 开发者配置 Loki SDK 客户端
+
+# 基础配置
+url: "http://localhost:3100"              # Loki 服务地址
+use_consul: false                          # 是否使用 Consul 服务发现
+service_name: "loki-service"               # Consul 服务名（use_consul=true 时需要）
+
+# 认证配置
+tenant_id: ""                              # 租户 ID（多租户模式）
+username: ""                               # 基础认证用户名（可选）
+password: ""                               # 基础认证密码（可选）
+
+# 推送配置
+batch_size: 100                            # 批量发送大小（条）
+batch_wait: "1s"                           # 批量等待时间
+timeout: "10s"                             # 请求超时时间
+
+# 重试配置
+max_retries: 3                             # 最大重试次数
+retry_wait: "1s"                           # 重试等待时间
+
+# 静态标签（所有日志都会带上这些标签）
+static_labels:
+  app: "isa-cloud"
+  environment: "development"
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_LOKI_URL
+#   ISA_CLOUD_LOKI_TENANT_ID
+#   ISA_CLOUD_LOKI_USERNAME
+#   ISA_CLOUD_LOKI_PASSWORD
+
+
+

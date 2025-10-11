@@ -1,0 +1,240 @@
+# ============================================
+# isA Platform - gRPC Infrastructure Services
+# ============================================
+# 统一的 gRPC 基础设施服务层
+# 
+# 文件名: deployments/compose/grpc-services.yml
+# 用法: docker-compose -f compose/base.yml -f compose/grpc-services.yml up -d
+#
+# 架构：
+#   Python 服务 → gRPC 服务 → 基础设施容器
+#
+# gRPC 服务端口:
+#   - MinIO:  50051
+#   - DuckDB: 50052
+#   - MQTT:   50053
+#   - Loki:   50054
+#   - Redis:  50055
+#   - NATS:   50056
+
+services:
+  # ============== MinIO gRPC Service ==============
+  minio-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.minio-service
+    image: isa-minio-service:latest
+    container_name: isa-minio-grpc
+    ports:
+      - "50051:50051"
+    environment:
+      # MinIO 连接配置
+      - MINIO_ENDPOINT=staging-minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_USE_SSL=false
+      
+      # Loki 审计日志
+      - LOKI_URL=http://staging-loki:3100
+      
+      # Consul 服务发现
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - CONSUL_PORT=${CONSUL_PORT:-8500}
+      
+      # gRPC 配置
+      - GRPC_PORT=50051
+      - SERVICE_NAME=minio-grpc-service
+    networks:
+      - staging-network
+    depends_on:
+      - staging-minio
+      - staging-loki
+      - staging-consul
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============== DuckDB gRPC Service ==============
+  duckdb-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.duckdb-service
+    image: isa-duckdb-service:latest
+    container_name: isa-duckdb-grpc
+    ports:
+      - "50052:50052"
+    environment:
+      # DuckDB 配置
+      - DUCKDB_PATH=/data/duckdb
+      - DUCKDB_MEMORY_LIMIT=2GB
+      
+      # MinIO 集成（用于查询 S3 数据）
+      - MINIO_ENDPOINT=staging-minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      
+      # Loki 审计日志
+      - LOKI_URL=http://staging-loki:3100
+      
+      # Consul
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50052
+      - SERVICE_NAME=duckdb-grpc-service
+    volumes:
+      - duckdb-data:/data/duckdb
+    networks:
+      - staging-network
+    depends_on:
+      - staging-minio
+      - staging-loki
+      - staging-consul
+    restart: unless-stopped
+
+  # ============== MQTT gRPC Service ==============
+  mqtt-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.mqtt-service
+    image: isa-mqtt-service:latest
+    container_name: isa-mqtt-grpc
+    ports:
+      - "50053:50053"
+    environment:
+      # MQTT 连接配置
+      - MQTT_BROKER_URL=tcp://staging-mosquitto:1883
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      
+      # Loki 审计日志
+      - LOKI_URL=http://staging-loki:3100
+      
+      # Consul
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50053
+      - SERVICE_NAME=mqtt-grpc-service
+    networks:
+      - staging-network
+    depends_on:
+      - staging-mosquitto
+      - staging-loki
+      - staging-consul
+    restart: unless-stopped
+
+  # ============== Loki gRPC Service ==============
+  loki-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.loki-service
+    image: isa-loki-service:latest
+    container_name: isa-loki-grpc
+    ports:
+      - "50054:50054"
+    environment:
+      # Loki 连接配置
+      - LOKI_URL=http://staging-loki:3100
+      - LOKI_TENANT_ID=
+      
+      # Consul
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50054
+      - SERVICE_NAME=loki-grpc-service
+    networks:
+      - staging-network
+    depends_on:
+      - staging-loki
+      - staging-consul
+    restart: unless-stopped
+
+  # ============== Redis gRPC Service ==============
+  redis-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.redis-service
+    image: isa-redis-service:latest
+    container_name: isa-redis-grpc
+    ports:
+      - "50055:50055"
+    environment:
+      # Redis 连接配置
+      - REDIS_HOST=staging-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DATABASE=0
+      
+      # Loki 审计日志
+      - LOKI_URL=http://staging-loki:3100
+      
+      # Consul
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50055
+      - SERVICE_NAME=redis-grpc-service
+    networks:
+      - staging-network
+    depends_on:
+      - staging-redis
+      - staging-loki
+      - staging-consul
+    restart: unless-stopped
+
+  # ============== NATS gRPC Service ==============
+  nats-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.nats-service
+    image: isa-nats-service:latest
+    container_name: isa-nats-grpc
+    ports:
+      - "50056:50056"
+    environment:
+      # NATS 连接配置
+      - NATS_URLS=nats://staging-nats:4222
+      - NATS_CLUSTER_ID=isa-cloud-cluster
+      - NATS_USERNAME=
+      - NATS_PASSWORD=
+      
+      # Loki 审计日志
+      - LOKI_URL=http://staging-loki:3100
+      
+      # Consul
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50056
+      - SERVICE_NAME=nats-grpc-service
+    networks:
+      - staging-network
+    depends_on:
+      - staging-nats
+      - staging-loki
+      - staging-consul
+    restart: unless-stopped
+
+# Volumes
+volumes:
+  duckdb-data:
+
+# Networks
+networks:
+  staging-network:
+    external: true
+
+
+
+

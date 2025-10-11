@@ -1,0 +1,73 @@
+FROM minio/minio:latest
+
+# 支持 Consul 服务发现的 MinIO Dockerfile
+# 文件名: deployments/dockerfiles/Staging/Dockerfile.minio.staging
+
+# curl 已在 MinIO 镜像中可用
+
+# 环境变量
+ENV MINIO_PORT=9000
+ENV MINIO_CONSOLE_PORT=9001
+ENV MINIO_ROOT_USER=minioadmin
+ENV MINIO_ROOT_PASSWORD=minioadmin
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=minio-service
+ENV SERVICE_TAGS=storage,s3,object-storage
+
+# 启动脚本
+COPY <<'EOF' /usr/local/bin/start-minio.sh
+#!/bin/bash
+set -e
+
+echo "Starting MinIO service..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+
+# 启动 MinIO
+/usr/bin/minio server /data --console-address ":${MINIO_CONSOLE_PORT}" &
+MINIO_PID=$!
+
+# 如果启用 Consul，注册服务
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for MinIO to be ready..."
+    sleep 5
+    
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+    
+    # 注册 MinIO API 服务
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${MINIO_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\"],
+        \"Meta\": {
+            \"console_port\": \"${MINIO_CONSOLE_PORT}\"
+        },
+        \"Check\": {
+            \"HTTP\": \"http://${HOSTNAME}:${MINIO_PORT}/minio/health/live\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register with Consul (will retry)"
+    
+    echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
+fi
+
+# 等待 MinIO 进程
+wait $MINIO_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-minio.sh
+
+# MinIO runs as root by default
+
+EXPOSE 9000 9001
+
+CMD ["/usr/local/bin/start-minio.sh"]
+
+
+

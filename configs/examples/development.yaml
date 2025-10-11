@@ -1,0 +1,51 @@
+# 开发环境配置示例
+# Development Environment Configuration
+#
+# 文件名: configs/examples/development.yaml
+# 用途: 开发环境的完整 SDK 配置示例
+
+# ====================================
+# 日志服务 (Logging)
+# ====================================
+loki:
+  url: "http://localhost:3100"
+  batch_size: 10                           # 开发环境使用小批量，便于调试
+  batch_wait: "500ms"                      # 更快的刷新
+  static_labels:
+    environment: "development"
+    developer: "${USER}"                   # 使用开发者用户名
+
+# ====================================
+# 消息服务 (Messaging)
+# ====================================
+mqtt:
+  broker_url: "tcp://localhost:1883"
+  client_id: "isa-cloud-dev-${USER}"      # 使用开发者用户名避免冲突
+  qos: 0                                  # 开发环境使用 QoS 0
+  clean_session: true
+  auto_reconnect: true
+
+# ====================================
+# 存储服务 (Storage)
+# ====================================
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  region: "us-east-1"
+
+# ====================================
+# 分析服务 (Analytics)
+# ====================================
+duckdb:
+  database_path: ":memory:"               # 开发环境使用内存数据库
+  memory_limit: "1GB"
+  threads: 2
+  extensions:
+    - httpfs
+    - parquet
+    - json
+
+
+

@@ -1,0 +1,186 @@
+# ============================================
+# isA Platform - Infrastructure Services (Staging)
+# ============================================
+# Core infrastructure services for staging environment
+# Uses staging-isa-*:amd64 Docker images
+
+services:
+  # ============== Service Discovery ==============
+  consul:
+    image: staging-isa-consul:amd64
+    container_name: staging-consul
+    ports:
+      - "8500:8500"
+    volumes:
+      - consul-data:/consul/data
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============== Cache ==============
+  redis:
+    image: staging-isa-redis:amd64
+    container_name: staging-redis
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=staging_redis_2024
+    volumes:
+      - redis-data:/data/redis
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============== Object Storage ==============
+  minio:
+    image: staging-isa-minio:amd64
+    container_name: staging-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: ["minio", "server", "/data", "--console-address", ":9001"]
+    volumes:
+      - minio-data:/data
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # ============== Message Streaming ==============
+  nats:
+    image: staging-isa-nats:amd64
+    container_name: staging-nats
+    ports:
+      - "4222:4222"
+      - "8322:8222"
+      - "6222:6222"
+    environment:
+      - NATS_PORT=4222
+      - NATS_HTTP_PORT=8222
+      - CONSUL_ENABLED=false
+      - CONSUL_HOST=consul
+      - SERVICE_NAME=nats-service
+    volumes:
+      - nats-data:/data
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4222 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============== MQTT Broker ==============
+  mosquitto:
+    image: staging-isa-mosquitto:amd64
+    container_name: staging-mosquitto
+    ports:
+      - "1883:1883"
+      - "9003:9001"
+    environment:
+      - MQTT_PORT=1883
+      - MQTT_WS_PORT=9001
+      - CONSUL_ENABLED=false
+      - CONSUL_HOST=consul
+      - SERVICE_NAME=mqtt-service
+    volumes:
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ============== Log Aggregation ==============
+  loki:
+    image: staging-isa-loki:amd64
+    container_name: staging-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ============== Monitoring Dashboard ==============
+  grafana:
+    image: staging-isa-grafana:amd64
+    container_name: staging-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=staging_admin_2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+      - GF_PATHS_DATA=/var/lib/grafana
+      - GF_PATHS_LOGS=/var/log/grafana
+      - GF_PATHS_PLUGINS=/var/lib/grafana/plugins
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - grafana-logs:/var/log/grafana
+    networks:
+      - staging-network
+    depends_on:
+      - loki
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  staging-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  consul-data:
+    driver: local
+  redis-data:
+    driver: local
+  minio-data:
+    driver: local
+  nats-data:
+    driver: local
+  mosquitto-data:
+    driver: local
+  mosquitto-logs:
+    driver: local
+  loki-data:
+    driver: local
+  grafana-data:
+    driver: local
+  grafana-logs:
+    driver: local

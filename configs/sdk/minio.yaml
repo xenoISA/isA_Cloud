@@ -1,0 +1,33 @@
+# MinIO SDK 客户端配置
+# MinIO SDK Client Configuration
+#
+# 文件名: configs/sdk/minio.yaml
+# 用途: 开发者配置 MinIO SDK 客户端
+
+# 基础配置
+endpoint: "localhost:9000"                 # MinIO 服务地址
+access_key: "minioadmin"                   # 访问密钥
+secret_key: "minioadmin"                   # 密钥
+use_ssl: false                             # 是否使用 SSL
+region: "us-east-1"                        # 区域
+
+# Consul 服务发现配置
+use_consul: false                          # 是否使用 Consul 发现服务
+service_name: "minio-service"              # Consul 中的服务名
+grpc_port: 50051                          # gRPC 端口
+
+# 连接配置
+connect_timeout: "30s"                     # 连接超时
+request_timeout: "5m"                      # 请求超时
+max_retries: 3                            # 最大重试次数
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_MINIO_ENDPOINT
+#   ISA_CLOUD_MINIO_ACCESS_KEY
+#   ISA_CLOUD_MINIO_SECRET_KEY
+
+
+

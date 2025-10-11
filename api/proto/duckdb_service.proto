@@ -1,0 +1,620 @@
+// duckdb_service.proto - DuckDB 数据分析服务 gRPC 接口
+// 提供高性能的 OLAP 分析能力，数据存储在 MinIO 中，支持用户隔离
+syntax = "proto3";
+
+package isa.duckdb;
+
+option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/duckdb";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ========================================
+// DuckDB 数据分析服务
+// ========================================
+// DuckDB 是一个嵌入式 OLAP 数据库，专为分析查询优化
+// 特点：
+// - 数据库文件存储在 MinIO 中，实现持久化和用户隔离
+// - 支持 SQL 查询（兼容 PostgreSQL 语法）
+// - 高性能列式存储
+// - 支持 Parquet、CSV、JSON 等多种数据格式
+// - 可直接查询 MinIO 中的文件（无需导入）
+// - 适用场景：数据分析、BI 报表、数据科学
+
+service DuckDBService {
+    // ========== 数据库管理 ==========
+    rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
+    rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse);
+    rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse);
+    rpc GetDatabaseInfo(GetDatabaseInfoRequest) returns (GetDatabaseInfoResponse);
+    rpc BackupDatabase(BackupDatabaseRequest) returns (BackupDatabaseResponse);
+    rpc RestoreDatabase(RestoreDatabaseRequest) returns (RestoreDatabaseResponse);
+    
+    // ========== 查询操作 ==========
+    // 执行 SQL 查询（返回完整结果）
+    rpc ExecuteQuery(ExecuteQueryRequest) returns (ExecuteQueryResponse);
+    // 流式查询（适合大结果集）
+    rpc ExecuteQueryStream(ExecuteQueryRequest) returns (stream QueryResultChunk);
+    // 执行写操作（INSERT、UPDATE、DELETE）
+    rpc ExecuteStatement(ExecuteStatementRequest) returns (ExecuteStatementResponse);
+    // 批量执行 SQL
+    rpc ExecuteBatch(ExecuteBatchRequest) returns (ExecuteBatchResponse);
+    // 准备预编译语句
+    rpc PrepareStatement(PrepareStatementRequest) returns (PrepareStatementResponse);
+    
+    // ========== 表管理 ==========
+    rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+    rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+    rpc DropTable(DropTableRequest) returns (DropTableResponse);
+    rpc GetTableSchema(GetTableSchemaRequest) returns (GetTableSchemaResponse);
+    rpc GetTableStats(GetTableStatsRequest) returns (GetTableStatsResponse);
+    
+    // ========== 视图管理 ==========
+    rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
+    rpc ListViews(ListViewsRequest) returns (ListViewsResponse);
+    rpc DropView(DropViewRequest) returns (DropViewResponse);
+    
+    // ========== 数据导入/导出 ==========
+    // 从 MinIO 导入数据
+    rpc ImportFromMinIO(ImportFromMinIORequest) returns (ImportFromMinIOResponse);
+    // 导出数据到 MinIO
+    rpc ExportToMinIO(ExportToMinIORequest) returns (ExportToMinIOResponse);
+    // 直接查询 MinIO 中的文件（无需导入）
+    rpc QueryMinIOFile(QueryMinIOFileRequest) returns (QueryMinIOFileResponse);
+    // 流式导入数据
+    rpc ImportData(stream ImportDataRequest) returns (ImportDataResponse);
+    
+    // ========== 扩展和函数 ==========
+    rpc InstallExtension(InstallExtensionRequest) returns (InstallExtensionResponse);
+    rpc ListExtensions(ListExtensionsRequest) returns (ListExtensionsResponse);
+    rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+    
+    // ========== 健康检查和监控 ==========
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+    rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+// ========================================
+// 数据结构
+// ========================================
+
+// 数据库信息
+message DatabaseInfo {
+    string database_id = 1;
+    string database_name = 2;
+    string user_id = 3;
+    string organization_id = 4;
+    string minio_bucket = 5;                      // 存储桶
+    string minio_path = 6;                        // MinIO 中的存储路径
+    int64 size_bytes = 7;                         // 数据库大小
+    int32 table_count = 8;                        // 表数量
+    google.protobuf.Timestamp created_at = 9;
+    google.protobuf.Timestamp last_accessed = 10;
+    map<string, string> metadata = 11;
+    string version = 12;                          // DuckDB 版本
+}
+
+// 表信息
+message TableInfo {
+    string table_name = 1;
+    string schema_name = 2;
+    repeated ColumnInfo columns = 3;
+    int64 row_count = 4;
+    int64 size_bytes = 5;
+    string table_type = 6;                        // TABLE, VIEW, etc.
+    google.protobuf.Timestamp created_at = 7;
+    string comment = 8;
+}
+
+// 列信息
+message ColumnInfo {
+    string name = 1;
+    string data_type = 2;                         // VARCHAR, INTEGER, DOUBLE, etc.
+    bool nullable = 3;
+    string default_value = 4;
+    bool is_primary_key = 5;
+    bool is_unique = 6;
+    string comment = 7;
+}
+
+// 查询结果（分块）
+message QueryResultChunk {
+    bool success = 1;
+    repeated string columns = 2;                  // 列名（只在第一个chunk发送）
+    repeated string column_types = 3;             // 列类型
+    repeated Row rows = 4;                        // 数据行
+    bool is_last = 5;                             // 是否最后一个chunk
+    double execution_time_ms = 6;
+    string error = 7;
+}
+
+// 数据行
+message Row {
+    repeated Value values = 1;
+}
+
+// 值（支持多种类型）
+message Value {
+    oneof value {
+        string string_value = 1;
+        int64 int_value = 2;
+        double double_value = 3;
+        bool bool_value = 4;
+        bytes bytes_value = 5;
+        google.protobuf.Timestamp timestamp_value = 6;
+        google.protobuf.Struct struct_value = 7;
+        NullValue null_value = 8;
+    }
+}
+
+enum NullValue {
+    NULL_VALUE = 0;
+}
+
+// 表统计信息
+message TableStats {
+    string table_name = 1;
+    int64 row_count = 2;
+    int64 size_bytes = 3;
+    repeated ColumnStats column_stats = 4;
+}
+
+message ColumnStats {
+    string column_name = 1;
+    int64 distinct_count = 2;
+    Value min_value = 3;
+    Value max_value = 4;
+    int64 null_count = 5;
+}
+
+// ========================================
+// 数据库管理 - 请求/响应
+// ========================================
+
+message CreateDatabaseRequest {
+    string database_name = 1;
+    string user_id = 2;
+    string organization_id = 3;
+    string minio_bucket = 4;                      // 指定存储桶（可选）
+    map<string, string> metadata = 5;
+    map<string, string> config = 6;               // 数据库配置（如内存限制）
+}
+
+message CreateDatabaseResponse {
+    bool success = 1;
+    string message = 2;
+    DatabaseInfo database_info = 3;
+    string error = 4;
+}
+
+message ListDatabasesRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    string name_filter = 3;                       // 名称过滤
+    int32 page = 4;
+    int32 page_size = 5;
+}
+
+message ListDatabasesResponse {
+    bool success = 1;
+    repeated DatabaseInfo databases = 2;
+    int32 total_count = 3;
+    int32 page = 4;
+    int32 page_size = 5;
+    string error = 6;
+}
+
+message DeleteDatabaseRequest {
+    string database_id = 1;
+    string user_id = 2;
+    bool delete_from_minio = 3;                   // 是否从 MinIO 删除文件
+    bool force = 4;                               // 强制删除（忽略错误）
+}
+
+message DeleteDatabaseResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetDatabaseInfoRequest {
+    string database_id = 1;
+    string user_id = 2;
+}
+
+message GetDatabaseInfoResponse {
+    bool success = 1;
+    DatabaseInfo database_info = 2;
+    string error = 3;
+}
+
+message BackupDatabaseRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string backup_name = 3;                       // 备份名称
+    bool incremental = 4;                         // 是否增量备份
+}
+
+message BackupDatabaseResponse {
+    bool success = 1;
+    string message = 2;
+    string backup_path = 3;                       // MinIO 中的备份路径
+    int64 backup_size = 4;
+    google.protobuf.Timestamp backup_time = 5;
+    string error = 6;
+}
+
+message RestoreDatabaseRequest {
+    string backup_path = 1;                       // MinIO 中的备份路径
+    string user_id = 2;
+    string new_database_name = 3;                 // 新数据库名称
+}
+
+message RestoreDatabaseResponse {
+    bool success = 1;
+    string message = 2;
+    DatabaseInfo database_info = 3;
+    string error = 4;
+}
+
+// ========================================
+// 查询操作 - 请求/响应
+// ========================================
+
+message ExecuteQueryRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string query = 3;
+    map<string, Value> parameters = 4;            // 参数化查询
+    int32 max_rows = 5;                           // 最大返回行数（0表示无限制）
+    int32 timeout_seconds = 6;                    // 查询超时时间
+    bool explain = 7;                             // 是否返回查询计划
+}
+
+message ExecuteQueryResponse {
+    bool success = 1;
+    repeated string columns = 2;
+    repeated string column_types = 3;
+    repeated Row rows = 4;
+    int32 row_count = 5;
+    double execution_time_ms = 6;
+    string query_plan = 7;                        // 查询计划（如果 explain=true）
+    string error = 8;
+}
+
+message ExecuteStatementRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string statement = 3;                         // SQL 语句
+    map<string, Value> parameters = 4;
+}
+
+message ExecuteStatementResponse {
+    bool success = 1;
+    int32 affected_rows = 2;
+    double execution_time_ms = 3;
+    string message = 4;
+    string error = 5;
+}
+
+message ExecuteBatchRequest {
+    string database_id = 1;
+    string user_id = 2;
+    repeated string statements = 3;
+    bool transaction = 4;                         // 是否在事务中执行
+}
+
+message ExecuteBatchResponse {
+    bool success = 1;
+    repeated BatchResult results = 2;
+    double total_execution_time_ms = 3;
+    string error = 4;
+}
+
+message BatchResult {
+    bool success = 1;
+    int32 affected_rows = 2;
+    string error = 3;
+}
+
+message PrepareStatementRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string statement = 3;
+}
+
+message PrepareStatementResponse {
+    bool success = 1;
+    string statement_id = 2;
+    repeated string parameter_types = 3;
+    string error = 4;
+}
+
+// ========================================
+// 表管理 - 请求/响应
+// ========================================
+
+message CreateTableRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+    repeated ColumnInfo columns = 4;
+    repeated string primary_keys = 5;
+    bool if_not_exists = 6;
+    string comment = 7;
+}
+
+message CreateTableResponse {
+    bool success = 1;
+    string message = 2;
+    TableInfo table_info = 3;
+    string error = 4;
+}
+
+message ListTablesRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string schema_name = 3;                       // 模式名（可选）
+    string name_filter = 4;
+}
+
+message ListTablesResponse {
+    bool success = 1;
+    repeated TableInfo tables = 2;
+    int32 total_count = 3;
+    string error = 4;
+}
+
+message DropTableRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+    bool if_exists = 4;
+    bool cascade = 5;                             // 级联删除
+}
+
+message DropTableResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetTableSchemaRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+}
+
+message GetTableSchemaResponse {
+    bool success = 1;
+    TableInfo table_info = 2;
+    string error = 3;
+}
+
+message GetTableStatsRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+    bool include_columns = 4;                     // 是否包含列统计
+}
+
+message GetTableStatsResponse {
+    bool success = 1;
+    TableStats stats = 2;
+    string error = 3;
+}
+
+// ========================================
+// 视图管理 - 请求/响应
+// ========================================
+
+message CreateViewRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string view_name = 3;
+    string query = 4;                             // 视图定义查询
+    bool replace = 5;                             // 是否替换已存在的视图
+}
+
+message CreateViewResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message ListViewsRequest {
+    string database_id = 1;
+    string user_id = 2;
+}
+
+message ListViewsResponse {
+    bool success = 1;
+    repeated string views = 2;
+    string error = 3;
+}
+
+message DropViewRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string view_name = 3;
+}
+
+message DropViewResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+// ========================================
+// 数据导入/导出 - 请求/响应
+// ========================================
+
+message ImportFromMinIORequest {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+    string bucket_name = 4;
+    string object_key = 5;
+    string format = 6;                            // csv, parquet, json, arrow
+    bool create_table = 7;                        // 如果表不存在是否自动创建
+    bool truncate = 8;                            // 是否清空表
+    map<string, string> options = 9;              // 格式选项（如CSV分隔符）
+}
+
+message ImportFromMinIOResponse {
+    bool success = 1;
+    string message = 2;
+    int32 rows_imported = 3;
+    double execution_time_ms = 4;
+    string error = 5;
+}
+
+message ExportToMinIORequest {
+    string database_id = 1;
+    string user_id = 2;
+    string query = 3;                             // 要导出的查询
+    string bucket_name = 4;
+    string object_key = 5;
+    string format = 6;                            // csv, parquet, json
+    map<string, string> options = 7;              // 导出选项
+    bool overwrite = 8;                           // 是否覆盖已存在的文件
+}
+
+message ExportToMinIOResponse {
+    bool success = 1;
+    string message = 2;
+    int32 rows_exported = 3;
+    int64 file_size = 4;
+    double execution_time_ms = 5;
+    string error = 6;
+}
+
+message QueryMinIOFileRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string bucket_name = 3;
+    string object_key = 4;
+    string format = 5;                            // csv, parquet, json
+    string query = 6;                             // SQL 查询（可以直接查询文件）
+    map<string, string> options = 7;
+}
+
+message QueryMinIOFileResponse {
+    bool success = 1;
+    repeated string columns = 2;
+    repeated Row rows = 3;
+    int32 row_count = 4;
+    double execution_time_ms = 5;
+    string error = 6;
+}
+
+message ImportDataRequest {
+    oneof data {
+        ImportDataMetadata metadata = 1;
+        bytes chunk = 2;
+    }
+}
+
+message ImportDataMetadata {
+    string database_id = 1;
+    string user_id = 2;
+    string table_name = 3;
+    string format = 4;
+    int64 total_size = 5;
+    map<string, string> options = 6;
+}
+
+message ImportDataResponse {
+    bool success = 1;
+    string message = 2;
+    int32 rows_imported = 3;
+    double execution_time_ms = 4;
+    string error = 5;
+}
+
+// ========================================
+// 扩展和函数 - 请求/响应
+// ========================================
+
+message InstallExtensionRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string extension_name = 3;                    // httpfs, json, parquet, etc.
+}
+
+message InstallExtensionResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message ListExtensionsRequest {
+    string database_id = 1;
+    string user_id = 2;
+}
+
+message ListExtensionsResponse {
+    bool success = 1;
+    repeated ExtensionInfo extensions = 2;
+    string error = 3;
+}
+
+message ExtensionInfo {
+    string name = 1;
+    string version = 2;
+    bool installed = 3;
+    bool loaded = 4;
+    string description = 5;
+}
+
+message CreateFunctionRequest {
+    string database_id = 1;
+    string user_id = 2;
+    string function_name = 3;
+    string function_body = 4;                     // SQL 函数体
+    repeated string parameters = 5;
+    string return_type = 6;
+}
+
+message CreateFunctionResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+// ========================================
+// 健康检查和监控 - 请求/响应
+// ========================================
+
+message HealthCheckRequest {
+    string database_id = 1;                       // 可选，检查特定数据库
+    bool detailed = 2;
+}
+
+message HealthCheckResponse {
+    bool success = 1;
+    bool healthy = 2;
+    string status = 3;
+    google.protobuf.Timestamp timestamp = 4;
+    google.protobuf.Struct details = 5;
+    string error = 6;
+}
+
+message GetMetricsRequest {
+    string database_id = 1;
+}
+
+message GetMetricsResponse {
+    bool success = 1;
+    int64 total_queries = 2;
+    int64 active_connections = 3;
+    double avg_query_time_ms = 4;
+    int64 cache_hits = 5;
+    int64 cache_misses = 6;
+    google.protobuf.Struct metrics = 7;
+    string error = 8;
+}
+
+
+

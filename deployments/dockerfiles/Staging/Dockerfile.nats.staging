@@ -1,0 +1,21 @@
+# NATS Staging Deployment
+# Optimized for AWS ECS Fargate with Consul integration
+FROM nats:latest
+
+# Metadata
+LABEL maintainer="ISA Platform"
+LABEL version="1.0.0"
+LABEL description="NATS Message Queue for AWS ECS Staging"
+LABEL environment="staging"
+
+# Copy NATS configuration (NATS image is minimal, no shell commands)
+COPY deployments/configs/staging/nats.conf /nats.conf
+
+# Expose NATS ports
+# 4222: Client connections
+# 8222: HTTP monitoring
+# 6222: Cluster routing
+EXPOSE 4222 8222 6222
+
+# Start NATS with config file
+ENTRYPOINT ["nats-server", "-c", "/nats.conf"]

@@ -1,0 +1,21 @@
+# AWS ECS Consul Staging Deployment
+# Optimized for AWS ECS Fargate with Service Discovery
+FROM hashicorp/consul:latest
+
+# Metadata
+LABEL maintainer="ISA Platform"
+LABEL version="1.0.0"
+LABEL description="Consul Service Discovery for AWS ECS Staging"
+LABEL environment="staging"
+
+# Copy AWS-optimized Consul configuration
+COPY deployments/configs/staging/consul.json /consul/config/consul.json
+
+# Create data directory
+RUN mkdir -p /consul/data
+
+# Expose Consul ports
+EXPOSE 8500 8600 8300 8301 8302
+
+# Use custom config (same as original but with staging config)
+ENTRYPOINT ["consul", "agent", "-config-dir=/consul/config"]

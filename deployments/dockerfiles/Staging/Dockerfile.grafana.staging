@@ -1,0 +1,42 @@
+# Grafana Staging Deployment
+# Optimized for AWS ECS Fargate with InfluxDB and Loki integration
+FROM grafana/grafana:latest
+
+# Metadata
+LABEL maintainer="ISA Platform"
+LABEL version="1.0.0"
+LABEL description="Grafana Monitoring Dashboard for AWS ECS Staging"
+LABEL environment="staging"
+
+# Switch to root to install packages and configure
+USER root
+
+# curl 已在 Grafana 镜像中可用
+
+# Grafana configuration will be handled via environment variables
+
+# Copy provisioning configs and dashboards if they exist
+COPY deployments/configs/staging/grafana/provisioning/ /etc/grafana/provisioning/
+COPY deployments/configs/staging/grafana/dashboards/ /var/lib/grafana/dashboards/
+
+# Environment variables for staging
+ENV GF_SECURITY_ADMIN_PASSWORD=staging_admin_2024
+ENV GF_USERS_ALLOW_SIGN_UP=false
+ENV GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+ENV GF_PATHS_DATA=/var/lib/grafana
+ENV GF_PATHS_LOGS=/var/log/grafana
+ENV GF_PATHS_PLUGINS=/var/lib/grafana/plugins
+ENV GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+
+# Expose Grafana port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Switch back to grafana user
+USER grafana
+
+# Start Grafana
+ENTRYPOINT ["/run.sh"]

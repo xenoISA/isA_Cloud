@@ -13,7 +13,7 @@ This causes both services to enter restart loops.
 ## Affected Services
 
 - `isa-mcp-test` container
-- `isa-agent-test` container
+- `isa-agent-test` containerz
 
 ## Root Cause Analysis
 
