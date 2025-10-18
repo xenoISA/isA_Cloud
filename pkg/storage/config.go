@@ -24,9 +24,10 @@ import (
 
 // StorageConfig 存储服务配置
 type StorageConfig struct {
-	MinIO  MinIOServiceConfig  `mapstructure:"minio"`
-	DuckDB DuckDBServiceConfig `mapstructure:"duckdb"`
-	Consul ConsulConfig        `mapstructure:"consul"`
+	MinIO    MinIOServiceConfig    `mapstructure:"minio"`
+	DuckDB   DuckDBServiceConfig   `mapstructure:"duckdb"`
+	Supabase SupabaseServiceConfig `mapstructure:"supabase"`
+	Consul   ConsulConfig          `mapstructure:"consul"`
 }
 
 // MinIOServiceConfig MinIO 服务配置
@@ -68,6 +69,38 @@ type DuckDBServiceConfig struct {
 
 	// 扩展
 	Extensions []string `mapstructure:"extensions"` // 自动加载的扩展
+}
+
+// SupabaseServiceConfig Supabase 服务配置
+type SupabaseServiceConfig struct {
+	// Supabase API 配置
+	URL            string `mapstructure:"url"`              // Supabase 项目 URL
+	AnonKey        string `mapstructure:"anon_key"`         // Anon Key
+	ServiceRoleKey string `mapstructure:"service_role_key"` // Service Role Key
+
+	// PostgreSQL 直连配置 (可选)
+	PostgresHost     string `mapstructure:"postgres_host"`
+	PostgresPort     int    `mapstructure:"postgres_port"`
+	PostgresDB       string `mapstructure:"postgres_db"`
+	PostgresUser     string `mapstructure:"postgres_user"`
+	PostgresPassword string `mapstructure:"postgres_password"`
+	PostgresSSLMode  string `mapstructure:"postgres_ssl_mode"`
+	Schema           string `mapstructure:"schema"` // Database schema (default: public)
+
+	// 服务发现配置
+	UseConsul   bool   `mapstructure:"use_consul"`
+	ServiceName string `mapstructure:"service_name"`
+	GRPCPort    int    `mapstructure:"grpc_port"`
+
+	// 向量配置
+	VectorEnabled       bool   `mapstructure:"vector_enabled"`
+	VectorDefaultTable  string `mapstructure:"vector_default_table"`
+	VectorDefaultMetric string `mapstructure:"vector_default_metric"`
+	VectorDimensions    int    `mapstructure:"vector_dimensions"`
+
+	// 连接配置
+	Timeout    time.Duration `mapstructure:"timeout"`
+	MaxRetries int           `mapstructure:"max_retries"`
 }
 
 // ConsulConfig Consul 配置
@@ -364,6 +397,27 @@ func LoadFromEnv() *StorageConfig {
 			ConnMaxLife:  1 * time.Hour,
 			Extensions:   []string{"httpfs", "parquet"},
 		},
+		Supabase: SupabaseServiceConfig{
+			URL:                 getEnv("SUPABASE_URL", ""),
+			AnonKey:             getEnv("SUPABASE_ANON_KEY", ""),
+			ServiceRoleKey:      getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+			PostgresHost:        getEnv("SUPABASE_POSTGRES_HOST", ""),
+			PostgresPort:        getEnvInt("SUPABASE_POSTGRES_PORT", 5432),
+			PostgresDB:          getEnv("SUPABASE_POSTGRES_DB", "postgres"),
+			PostgresUser:        getEnv("SUPABASE_POSTGRES_USER", "postgres"),
+			PostgresPassword:    getEnv("SUPABASE_POSTGRES_PASSWORD", ""),
+			PostgresSSLMode:     getEnv("SUPABASE_POSTGRES_SSL_MODE", "require"),
+			Schema:              getEnv("SUPABASE_SCHEMA", "public"),
+			UseConsul:           getEnvBool("SUPABASE_USE_CONSUL", false),
+			ServiceName:         getEnv("SUPABASE_SERVICE_NAME", "supabase-grpc-service"),
+			GRPCPort:            getEnvInt("SUPABASE_GRPC_PORT", 50057),
+			VectorEnabled:       getEnvBool("SUPABASE_VECTOR_ENABLED", true),
+			VectorDefaultTable:  getEnv("SUPABASE_VECTOR_TABLE", "embeddings"),
+			VectorDefaultMetric: getEnv("SUPABASE_VECTOR_METRIC", "cosine"),
+			VectorDimensions:    getEnvInt("SUPABASE_VECTOR_DIMENSIONS", 1536),
+			Timeout:             30 * time.Second,
+			MaxRetries:          3,
+		},
 		Consul: ConsulConfig{
 			Enabled: getEnvBool("CONSUL_ENABLED", false),
 			Host:    getEnv("CONSUL_HOST", "localhost"),
@@ -397,5 +451,3 @@ func getEnvInt(key string, defaultValue int) int {
 	}
 	return defaultValue
 }
-
-

@@ -10,12 +10,13 @@
 #   Python 服务 → gRPC 服务 → 基础设施容器
 #
 # gRPC 服务端口:
-#   - MinIO:  50051
-#   - DuckDB: 50052
-#   - MQTT:   50053
-#   - Loki:   50054
-#   - Redis:  50055
-#   - NATS:   50056
+#   - MinIO:    50051
+#   - DuckDB:   50052
+#   - MQTT:     50053
+#   - Loki:     50054
+#   - Redis:    50055
+#   - NATS:     50056
+#   - Supabase: 50057
 
 services:
   # ============== MinIO gRPC Service ==============
@@ -25,37 +26,35 @@ services:
       dockerfile: deployments/dockerfiles/Dockerfile.minio-service
     image: isa-minio-service:latest
     container_name: isa-minio-grpc
+    hostname: isa-minio-grpc  # 设置容器主机名
     ports:
       - "50051:50051"
     environment:
-      # MinIO 连接配置
-      - MINIO_ENDPOINT=staging-minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - MINIO_USE_SSL=false
-      
-      # Loki 审计日志
-      - LOKI_URL=http://staging-loki:3100
-      
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-minio-grpc
+      # MinIO 连接配置 (使用 ISA_CLOUD_STORAGE 前缀)
+      - ISA_CLOUD_STORAGE_MINIO_ENDPOINT=staging-minio:9000
+      - ISA_CLOUD_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - ISA_CLOUD_STORAGE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - ISA_CLOUD_STORAGE_MINIO_USE_SSL=false
+      - ISA_CLOUD_STORAGE_MINIO_REGION=us-east-1
+
       # Consul 服务发现
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      - CONSUL_PORT=${CONSUL_PORT:-8500}
-      
+      - ISA_CLOUD_STORAGE_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_STORAGE_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_STORAGE_CONSUL_PORT=${CONSUL_PORT:-8500}
+
       # gRPC 配置
-      - GRPC_PORT=50051
-      - SERVICE_NAME=minio-grpc-service
+      - ISA_CLOUD_STORAGE_MINIO_GRPC_PORT=50051
     networks:
       - staging-network
-    depends_on:
-      - staging-minio
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      test: ["CMD-SHELL", "nc -z localhost 50051 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ============== DuckDB gRPC Service ==============
@@ -65,24 +64,32 @@ services:
       dockerfile: deployments/dockerfiles/Dockerfile.duckdb-service
     image: isa-duckdb-service:latest
     container_name: isa-duckdb-grpc
+    hostname: isa-duckdb-grpc  # 设置容器主机名
     ports:
       - "50052:50052"
     environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-duckdb-grpc
       # DuckDB 配置
-      - DUCKDB_PATH=/data/duckdb
-      - DUCKDB_MEMORY_LIMIT=2GB
-      
+      - ISA_CLOUD_STORAGE_DUCKDB_DATABASE_PATH=/data/duckdb
+      - ISA_CLOUD_STORAGE_DUCKDB_MEMORY_LIMIT=2GB
+
       # MinIO 集成（用于查询 S3 数据）
-      - MINIO_ENDPOINT=staging-minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      
+      - ISA_CLOUD_STORAGE_MINIO_ENDPOINT=staging-minio:9000
+      - ISA_CLOUD_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - ISA_CLOUD_STORAGE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - ISA_CLOUD_STORAGE_MINIO_USE_SSL=false
+
+      # Consul 配置
+      - ISA_CLOUD_STORAGE_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_STORAGE_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+
       # Loki 审计日志
       - LOKI_URL=http://staging-loki:3100
       
       # Consul
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
       
       # gRPC 配置
       - GRPC_PORT=50052
@@ -91,10 +98,7 @@ services:
       - duckdb-data:/data/duckdb
     networks:
       - staging-network
-    depends_on:
-      - staging-minio
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
     restart: unless-stopped
 
   # ============== MQTT gRPC Service ==============
@@ -104,30 +108,38 @@ services:
       dockerfile: deployments/dockerfiles/Dockerfile.mqtt-service
     image: isa-mqtt-service:latest
     container_name: isa-mqtt-grpc
+    hostname: isa-mqtt-grpc  # 设置容器主机名
     ports:
       - "50053:50053"
     environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-mqtt-grpc
+
       # MQTT 连接配置
       - MQTT_BROKER_URL=tcp://staging-mosquitto:1883
       - MQTT_USERNAME=
       - MQTT_PASSWORD=
-      
+
       # Loki 审计日志
       - LOKI_URL=http://staging-loki:3100
-      
+
       # Consul
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_CONSUL_PORT=${CONSUL_PORT:-8500}
+
       # gRPC 配置
       - GRPC_PORT=50053
       - SERVICE_NAME=mqtt-grpc-service
     networks:
       - staging-network
-    depends_on:
-      - staging-mosquitto
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50053 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ============== Loki gRPC Service ==============
@@ -137,25 +149,34 @@ services:
       dockerfile: deployments/dockerfiles/Dockerfile.loki-service
     image: isa-loki-service:latest
     container_name: isa-loki-grpc
+    hostname: isa-loki-grpc  # 设置容器主机名
     ports:
       - "50054:50054"
     environment:
-      # Loki 连接配置
-      - LOKI_URL=http://staging-loki:3100
-      - LOKI_TENANT_ID=
-      
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-loki-grpc
+
+      # Loki 连接配置 (use ISA_CLOUD prefix for logging config)
+      - ISA_CLOUD_LOKI_URL=http://staging-loki:3100
+      - ISA_CLOUD_LOKI_TENANT_ID=
+
       # Consul
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_CONSUL_PORT=${CONSUL_PORT:-8500}
+
       # gRPC 配置
       - GRPC_PORT=50054
       - SERVICE_NAME=loki-grpc-service
     networks:
       - staging-network
-    depends_on:
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50054 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ============== Redis gRPC Service ==============
@@ -165,31 +186,39 @@ services:
       dockerfile: deployments/dockerfiles/Dockerfile.redis-service
     image: isa-redis-service:latest
     container_name: isa-redis-grpc
+    hostname: isa-redis-grpc  # 设置容器主机名
     ports:
       - "50055:50055"
     environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-redis-grpc
+
       # Redis 连接配置
-      - REDIS_HOST=staging-redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=
-      - REDIS_DATABASE=0
-      
+      - ISA_CLOUD_REDIS_HOST=staging-redis
+      - ISA_CLOUD_REDIS_PORT=6379
+      - ISA_CLOUD_REDIS_PASSWORD=staging_redis_2024
+      - ISA_CLOUD_REDIS_DATABASE=0
+
       # Loki 审计日志
       - LOKI_URL=http://staging-loki:3100
-      
+
       # Consul
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_CONSUL_PORT=${CONSUL_PORT:-8500}
+
       # gRPC 配置
       - GRPC_PORT=50055
       - SERVICE_NAME=redis-grpc-service
     networks:
       - staging-network
-    depends_on:
-      - staging-redis
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50055 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # ============== NATS gRPC Service ==============
@@ -202,28 +231,91 @@ services:
     ports:
       - "50056:50056"
     environment:
-      # NATS 连接配置
-      - NATS_URLS=nats://staging-nats:4222
-      - NATS_CLUSTER_ID=isa-cloud-cluster
-      - NATS_USERNAME=
-      - NATS_PASSWORD=
-      
+      # NATS 连接配置 (use ISA_CLOUD prefix for event config)
+      - ISA_CLOUD_NATS_URLS=nats://staging-nats:4222
+      - ISA_CLOUD_NATS_CLUSTER_ID=isa-cloud-cluster
+      - ISA_CLOUD_NATS_USERNAME=
+      - ISA_CLOUD_NATS_PASSWORD=
+      - ISA_CLOUD_NATS_JETSTREAM_ENABLED=true
+
+      # Redis 配置 (for KV store backend)
+      - REDIS_HOST=staging-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+
+      # MinIO 配置 (for object store backend)
+      - MINIO_ENDPOINT=staging-minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_USE_SSL=false
+
       # Loki 审计日志
       - LOKI_URL=http://staging-loki:3100
-      
-      # Consul
-      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      
+
+      # Consul 配置
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - ISA_CLOUD_CONSUL_PORT=8500
+
       # gRPC 配置
-      - GRPC_PORT=50056
+      - ISA_CLOUD_NATS_GRPC_PORT=50056
       - SERVICE_NAME=nats-grpc-service
+      - SERVICE_HOSTNAME=isa-nats-grpc
     networks:
       - staging-network
-    depends_on:
-      - staging-nats
-      - staging-loki
-      - staging-consul
+    # depends_on removed - infrastructure services are external
+    restart: unless-stopped
+
+  # ============== Supabase gRPC Service ==============
+  # Note: Supabase 不使用 Docker 容器
+  #       - 本地开发: 使用 Supabase Local (supabase start)
+  #       - 生产环境: 使用 Supabase Cloud
+  supabase-grpc-service:
+    build:
+      context: ../..
+      dockerfile: deployments/dockerfiles/Dockerfile.supabase-service
+    image: isa-supabase-service:latest
+    container_name: isa-supabase-grpc
+    hostname: isa-supabase-grpc  # 设置容器主机名
+    ports:
+      - "50057:50057"
+    environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-supabase-grpc
+      
+      # Supabase 连接配置
+      # 本地开发: 连接到 host.docker.internal (Supabase Local)
+      # 生产环境: 连接到 Supabase Cloud
+      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:54321}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      
+      # PostgreSQL 直连配置 (可选)
+      - SUPABASE_POSTGRES_HOST=${SUPABASE_POSTGRES_HOST:-host.docker.internal}
+      - SUPABASE_POSTGRES_PORT=${SUPABASE_POSTGRES_PORT:-54322}
+      - SUPABASE_POSTGRES_DB=${SUPABASE_POSTGRES_DB:-postgres}
+      - SUPABASE_POSTGRES_USER=${SUPABASE_POSTGRES_USER:-postgres}
+      - SUPABASE_POSTGRES_PASSWORD=${SUPABASE_POSTGRES_PASSWORD:-postgres}
+      - SUPABASE_POSTGRES_SSL_MODE=${SUPABASE_POSTGRES_SSL_MODE:-disable}
+      - SUPABASE_SCHEMA=${SUPABASE_SCHEMA:-dev}
+      
+      # 向量配置
+      - SUPABASE_VECTOR_ENABLED=true
+      - SUPABASE_VECTOR_TABLE=embeddings
+      - SUPABASE_VECTOR_METRIC=cosine
+      - SUPABASE_VECTOR_DIMENSIONS=1536
+      
+      # Consul 配置
+      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      
+      # gRPC 配置
+      - GRPC_PORT=50057
+      - SERVICE_NAME=supabase-grpc-service
+    networks:
+      - staging-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # 允许访问宿主机的 Supabase Local
     restart: unless-stopped
 
 # Volumes
@@ -233,6 +325,7 @@ volumes:
 # Networks
 networks:
   staging-network:
+    name: staging_staging-network
     external: true
 
 

@@ -1,0 +1,97 @@
+# ============================================
+# OpenResty Edge Layer - Staging Environment
+# ============================================
+# OpenResty (Nginx + Lua) reverse proxy and load balancer
+#
+# Architecture:
+#   Client → OpenResty (Edge Layer) → Go Gateway → Microservices
+#
+# Features:
+#   - SSL/TLS termination
+#   - DDoS protection & WAF
+#   - Rate limiting (network level)
+#   - Response caching
+#   - Load balancing
+#
+# File: deployments/dockerfiles/Staging/Dockerfile.openresty.staging
+
+FROM openresty/openresty:1.21.4.3-alpine
+
+LABEL maintainer="isA_Cloud Team"
+LABEL description="OpenResty Edge Layer with Lua modules for API Gateway"
+LABEL version="1.0.0"
+LABEL environment="staging"
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    openssl \
+    pcre \
+    zlib \
+    curl \
+    bash \
+    perl \
+    && rm -rf /var/cache/apk/*
+
+# Install OpenResty packages using opm (OpenResty Package Manager)
+# Note: OpenResty already includes lua-resty-core, lua-cjson, and lua-resty-lock
+RUN /usr/local/openresty/bin/opm get ledgetech/lua-resty-http \
+    && /usr/local/openresty/bin/opm get openresty/lua-resty-redis \
+    && /usr/local/openresty/bin/opm get SkyLothar/lua-resty-jwt
+
+# Create necessary directories
+RUN mkdir -p /var/log/nginx \
+    /var/cache/nginx/api \
+    /var/cache/nginx/static \
+    /var/www/static \
+    /var/www/certbot \
+    /etc/nginx/conf.d \
+    /etc/nginx/sites-available \
+    /etc/nginx/sites-enabled \
+    /etc/nginx/lua \
+    /etc/nginx/ssl
+
+# Set proper permissions for cache directories
+RUN chown -R nobody:nobody /var/cache/nginx \
+    && chown -R nobody:nobody /var/www \
+    && chown -R nobody:nobody /var/log/nginx
+
+# Copy Nginx configuration files
+COPY deployments/nginx/conf/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+COPY deployments/nginx/conf/upstream.conf /etc/nginx/conf.d/upstream.conf
+COPY deployments/nginx/conf/cache.conf /etc/nginx/conf.d/cache.conf
+COPY deployments/nginx/conf/security-maps.conf /etc/nginx/conf.d/security-maps.conf
+COPY deployments/nginx/conf/security.conf /etc/nginx/conf.d/security.conf
+
+# Copy site configurations
+COPY deployments/nginx/sites-available/*.conf /etc/nginx/sites-available/
+
+# Enable sites
+RUN ln -sf /etc/nginx/sites-available/isa-cloud.conf /etc/nginx/sites-enabled/isa-cloud.conf
+
+# Copy Lua scripts
+COPY deployments/nginx/lua/*.lua /etc/nginx/lua/
+
+# Copy SSL certificates (if available)
+# In production, use proper certificates from Let's Encrypt or your CA
+# For staging, we'll generate self-signed certificates
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/key.pem \
+    -out /etc/nginx/ssl/cert.pem \
+    -subj "/C=US/ST=State/L=City/O=isA_Cloud/OU=IT/CN=isa-cloud-staging"
+
+# Environment variables
+ENV REDIS_HOST=redis \
+    REDIS_PORT=6379 \
+    UPSTREAM_HOST=gateway \
+    UPSTREAM_PORT=8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+# Expose ports
+EXPOSE 80 443
+
+# Start OpenResty (run as root to bind to port 80/443, nginx will drop privileges)
+CMD ["/usr/local/openresty/bin/openresty", "-g", "daemon off;"]

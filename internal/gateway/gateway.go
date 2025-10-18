@@ -136,27 +136,47 @@ func (g *Gateway) SetupHTTPRoutes() *gin.Engine {
 
 	// Rate limiting middleware
 	if g.config.Security.RateLimit.Enabled {
-		router.Use(middleware.RateLimit(
-			g.config.Security.RateLimit.RPS,
-			g.config.Security.RateLimit.Burst,
-		))
+		switch g.config.Security.RateLimit.Type {
+		case "tiered":
+			// Tiered rate limiting based on subscription
+			freeRPS := g.config.Security.RateLimit.TierLimits["free"]
+			proRPS := g.config.Security.RateLimit.TierLimits["pro"]
+			enterpriseRPS := g.config.Security.RateLimit.TierLimits["enterprise"]
+			if freeRPS == 0 {
+				freeRPS = g.config.Security.RateLimit.RPS
+			}
+			if proRPS == 0 {
+				proRPS = g.config.Security.RateLimit.RPS * 5
+			}
+			if enterpriseRPS == 0 {
+				enterpriseRPS = g.config.Security.RateLimit.RPS * 20
+			}
+			router.Use(middleware.TieredRateLimit(freeRPS, proRPS, enterpriseRPS, g.config.Security.RateLimit.Burst, g.logger))
+		case "per_user", "per_ip":
+			// Per-user or per-IP rate limiting
+			router.Use(middleware.PerUserRateLimit(g.config.Security.RateLimit.RPS, g.config.Security.RateLimit.Burst, g.logger))
+		default:
+			// Fallback to global rate limiting
+			router.Use(middleware.RateLimit(g.config.Security.RateLimit.RPS, g.config.Security.RateLimit.Burst))
+		}
 	}
 
 	// Health check
 	router.GET("/health", g.healthCheck)
+	router.HEAD("/health", g.healthCheck)
 	router.GET("/ready", g.readinessCheck)
 
 	// Gateway management routes (these don't go through the proxy)
 	gateway := router.Group("/api/v1/gateway")
-	gateway.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
+	gateway.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.config, g.logger))
 	gateway.GET("/services", g.listServices)
 	gateway.GET("/metrics", g.getMetrics)
 	gateway.GET("/health", g.servicesHealth)
-	
+
 	// Blockchain routes (if blockchain gateway is available)
 	if g.blockchainGateway != nil {
 		blockchainAPI := router.Group("/api/v1/blockchain")
-		blockchainAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
+		blockchainAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.config, g.logger))
 		
 		// Blockchain endpoints
 		blockchainAPI.GET("/status", g.blockchainStatus)
@@ -169,7 +189,7 @@ func (g *Gateway) SetupHTTPRoutes() *gin.Engine {
 	// MQTT and Device Management routes (if MQTT adapter is available)
 	if g.mqttAdapter != nil {
 		deviceAPI := router.Group("/api/v1/devices")
-		deviceAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
+		deviceAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.config, g.logger))
 
 		// Device management endpoints
 		deviceAPI.GET("/mqtt/status", g.mqttStatus)
@@ -179,7 +199,7 @@ func (g *Gateway) SetupHTTPRoutes() *gin.Engine {
 
 		// MQTT notification endpoints
 		mqttAPI := router.Group("/api/v1/mqtt")
-		mqttAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.logger))
+		mqttAPI.Use(middleware.UnifiedAuthentication(g.clients.Auth, g.registry, g.config, g.logger))
 		mqttAPI.POST("/publish/notification", g.publishNotification)
 	}
 	

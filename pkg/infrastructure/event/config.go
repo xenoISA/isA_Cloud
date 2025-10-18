@@ -201,8 +201,10 @@ func (f *EventClientFactory) NewNATSClient(ctx context.Context) (*nats.Client, e
 		return nil, fmt.Errorf("failed to create NATS client: %w", err)
 	}
 
-	// 验证连接
-	if err := client.Ping(ctx); err != nil {
+	// 验证连接 (add timeout for health check)
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := client.Ping(pingCtx); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("NATS health check failed: %w", err)
 	}
@@ -296,5 +298,3 @@ func getEnvInt(key string, defaultValue int) int {
 	}
 	return defaultValue
 }
-
-

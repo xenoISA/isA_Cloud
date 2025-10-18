@@ -132,7 +132,7 @@ func NewClient(cfg *Config) (*Client, error) {
 		DialTimeout:  cfg.ConnectTimeout,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
-		IdleTimeout:  cfg.IdleTimeout,
+		ConnMaxIdleTime: cfg.IdleTimeout,
 	}
 
 	// 创建客户端
@@ -462,7 +462,12 @@ func (c *Client) SDiff(ctx context.Context, keys ...string) ([]string, error) {
 //
 //	client.ZAdd(ctx, "leaderboard", redis.Z{Score: 100, Member: "player1"})
 func (c *Client) ZAdd(ctx context.Context, key string, members ...*redis.Z) error {
-	return c.client.ZAdd(ctx, key, members...).Err()
+	// 转换 []*redis.Z 为 []redis.Z
+	zMembers := make([]redis.Z, len(members))
+	for i, m := range members {
+		zMembers[i] = *m
+	}
+	return c.client.ZAdd(ctx, key, zMembers...).Err()
 }
 
 // ZRemove 从有序集合删除成员
@@ -650,4 +655,9 @@ func (c *Client) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	stats["info"] = info
 
 	return stats, nil
+}
+
+// EvalLua 执行 Lua 脚本
+func (c *Client) EvalLua(ctx context.Context, script string, keys []string, args ...interface{}) error {
+	return c.client.Eval(ctx, script, keys, args...).Err()
 }

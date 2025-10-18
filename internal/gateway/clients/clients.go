@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/isa-cloud/isa_cloud/internal/config"
+	"github.com/isa-cloud/isa_cloud/internal/gateway/circuitbreaker"
 	// "github.com/isa-cloud/isa_cloud/internal/gateway/blockchain"  // Temporarily disabled
 	"github.com/isa-cloud/isa_cloud/pkg/logger"
 )
@@ -25,6 +26,13 @@ type ServiceClients struct {
 	MCP        MCPClient
 	// Blockchain *blockchain.BlockchainGateway  // Temporarily disabled
 	Blockchain interface{}  // Placeholder for blockchain gateway
+
+	// Circuit breakers for each service
+	userBreaker  *circuitbreaker.CircuitBreaker
+	authBreaker  *circuitbreaker.CircuitBreaker
+	agentBreaker *circuitbreaker.CircuitBreaker
+	modelBreaker *circuitbreaker.CircuitBreaker
+	mcpBreaker   *circuitbreaker.CircuitBreaker
 
 	// gRPC connections
 	userConn  *grpc.ClientConn
@@ -119,38 +127,85 @@ func New(cfg *config.Config, logger *logger.Logger) (*ServiceClients, error) {
 		},
 	}
 
-	// Create real HTTP proxy clients
+	// Initialize circuit breakers for each service
+	// threshold=5 failures, timeout=10s to transition from open to half-open
+	clients.userBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Name:        "user-service",
+		MaxRequests: 3,
+		Interval:    10 * time.Second,
+		Timeout:     10 * time.Second,
+		ReadyToTrip: circuitbreaker.DefaultReadyToTrip(5),
+	}, logger)
+
+	clients.authBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Name:        "auth-service",
+		MaxRequests: 3,
+		Interval:    10 * time.Second,
+		Timeout:     10 * time.Second,
+		ReadyToTrip: circuitbreaker.DefaultReadyToTrip(5),
+	}, logger)
+
+	clients.agentBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Name:        "agent-service",
+		MaxRequests: 3,
+		Interval:    10 * time.Second,
+		Timeout:     10 * time.Second,
+		ReadyToTrip: circuitbreaker.DefaultReadyToTrip(5),
+	}, logger)
+
+	clients.modelBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Name:        "model-service",
+		MaxRequests: 3,
+		Interval:    10 * time.Second,
+		Timeout:     10 * time.Second,
+		ReadyToTrip: circuitbreaker.DefaultReadyToTrip(5),
+	}, logger)
+
+	clients.mcpBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Name:        "mcp-service",
+		MaxRequests: 3,
+		Interval:    10 * time.Second,
+		Timeout:     10 * time.Second,
+		ReadyToTrip: circuitbreaker.DefaultReadyToTrip(5),
+	}, logger)
+
+	// Create real HTTP proxy clients with circuit breaker protection
 	clients.User = &httpUserClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", cfg.Services.UserService.Host, cfg.Services.UserService.HTTPPort),
 		httpClient: clients.httpClient,
 		logger:     logger,
+		breaker:    clients.userBreaker,
 	}
 	clients.Auth = &httpAuthClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", cfg.Services.AuthService.Host, cfg.Services.AuthService.HTTPPort),
 		httpClient: clients.httpClient,
 		logger:     logger,
+		breaker:    clients.authBreaker,
 	}
 	clients.Agent = &httpAgentClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", cfg.Services.AgentService.Host, cfg.Services.AgentService.HTTPPort),
 		httpClient: clients.httpClient,
 		logger:     logger,
+		breaker:    clients.agentBreaker,
 	}
 	clients.Model = &httpModelClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", cfg.Services.ModelService.Host, cfg.Services.ModelService.HTTPPort),
 		httpClient: clients.httpClient,
 		logger:     logger,
+		breaker:    clients.modelBreaker,
 	}
 	clients.MCP = &httpMCPClient{
 		baseURL:    fmt.Sprintf("http://%s:%d", cfg.Services.MCPService.Host, cfg.Services.MCPService.HTTPPort),
 		httpClient: clients.httpClient,
 		logger:     logger,
+		breaker:    clients.mcpBreaker,
 	}
 
 	// Initialize blockchain gateway if enabled
 	// TODO: Re-enable blockchain after dependencies are installed
 	logger.Info("Blockchain gateway disabled - will be enabled in next phase")
 
-	logger.Info("Service clients initialized (HTTP proxy mode)")
+	logger.Info("Service clients initialized with circuit breakers (HTTP proxy mode)")
 	return clients, nil
 }
 
@@ -194,177 +249,227 @@ type httpUserClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	breaker    *circuitbreaker.CircuitBreaker
 }
 
 func (h *httpUserClient) GetUser(ctx context.Context, userID string) (*UserResponse, error) {
 	h.logger.Debug("HTTP GetUser called", "user_id", userID, "base_url", h.baseURL)
-	
-	url := fmt.Sprintf("%s/api/v1/accounts/profile/%s", h.baseURL, userID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	// Wrap request with circuit breaker
+	result, err := h.breaker.Execute(ctx, func() (interface{}, error) {
+		url := fmt.Sprintf("%s/api/v1/accounts/profile/%s", h.baseURL, userID)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result UserResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", err)
+		}
+
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, circuitbreaker.WrapError(err, "user-service")
 	}
-	
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	
-	var result UserResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	
-	return &result, nil
+
+	return result.(*UserResponse), nil
 }
 
 type httpAuthClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	breaker    *circuitbreaker.CircuitBreaker
 }
 
 func (h *httpAuthClient) VerifyToken(ctx context.Context, token string) (*AuthResponse, error) {
 	h.logger.Debug("HTTP VerifyToken called", "token", token[:min(10, len(token))]+"...", "base_url", h.baseURL)
-	
-	url := fmt.Sprintf("%s/api/v1/auth/verify-token", h.baseURL)
-	payload := map[string]string{"token": token}
-	data, err := json.Marshal(payload)
+
+	// Wrap request with circuit breaker
+	result, err := h.breaker.Execute(ctx, func() (interface{}, error) {
+		url := fmt.Sprintf("%s/api/v1/auth/verify-token", h.baseURL)
+		payload := map[string]string{"token": token}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result AuthResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", err)
+		}
+
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
+		return nil, circuitbreaker.WrapError(err, "auth-service")
 	}
-	
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	
-	var result AuthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	
-	return &result, nil
+
+	return result.(*AuthResponse), nil
 }
 
 type httpAgentClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	breaker    *circuitbreaker.CircuitBreaker
 }
 
 func (h *httpAgentClient) ListAgents(ctx context.Context, orgID string) (*AgentsResponse, error) {
 	h.logger.Debug("HTTP ListAgents called", "org_id", orgID, "base_url", h.baseURL)
-	
-	url := fmt.Sprintf("%s/agents?org_id=%s", h.baseURL, orgID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	// Wrap request with circuit breaker
+	result, err := h.breaker.Execute(ctx, func() (interface{}, error) {
+		url := fmt.Sprintf("%s/agents?org_id=%s", h.baseURL, orgID)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result AgentsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", err)
+		}
+
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, circuitbreaker.WrapError(err, "agent-service")
 	}
-	
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	
-	var result AgentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	
-	return &result, nil
+
+	return result.(*AgentsResponse), nil
 }
 
 type httpModelClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	breaker    *circuitbreaker.CircuitBreaker
 }
 
 func (h *httpModelClient) ListModels(ctx context.Context, orgID string) (*ModelsResponse, error) {
 	h.logger.Debug("HTTP ListModels called", "org_id", orgID, "base_url", h.baseURL)
-	
-	url := fmt.Sprintf("%s/models?org_id=%s", h.baseURL, orgID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	// Wrap request with circuit breaker
+	result, err := h.breaker.Execute(ctx, func() (interface{}, error) {
+		url := fmt.Sprintf("%s/models?org_id=%s", h.baseURL, orgID)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result ModelsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", err)
+		}
+
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, circuitbreaker.WrapError(err, "model-service")
 	}
-	
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	
-	var result ModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	
-	return &result, nil
+
+	return result.(*ModelsResponse), nil
 }
 
 type httpMCPClient struct {
 	baseURL    string
 	httpClient *http.Client
 	logger     *logger.Logger
+	breaker    *circuitbreaker.CircuitBreaker
 }
 
 func (h *httpMCPClient) ListResources(ctx context.Context, orgID string) (*ResourcesResponse, error) {
 	h.logger.Debug("HTTP ListResources called", "org_id", orgID, "base_url", h.baseURL)
-	
-	url := fmt.Sprintf("%s/resources?org_id=%s", h.baseURL, orgID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	// Wrap request with circuit breaker
+	result, err := h.breaker.Execute(ctx, func() (interface{}, error) {
+		url := fmt.Sprintf("%s/resources?org_id=%s", h.baseURL, orgID)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+
+		resp, err := h.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var result ResourcesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", err)
+		}
+
+		return &result, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return nil, circuitbreaker.WrapError(err, "mcp-service")
 	}
-	
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
-	}
-	
-	var result ResourcesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
-	
-	return &result, nil
+
+	return result.(*ResourcesResponse), nil
 }
 
 // Helper function for min

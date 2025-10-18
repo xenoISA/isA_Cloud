@@ -105,6 +105,8 @@ type SecurityConfig struct {
 	CORS        CORSConfig `mapstructure:"cors"`
 	RateLimit   RateLimitConfig `mapstructure:"rate_limit"`
 	JWT         JWTConfig `mapstructure:"jwt"`
+	Auth        AuthServiceConfig `mapstructure:"auth"`
+	Authorization AuthorizationServiceConfig `mapstructure:"authorization"`
 }
 
 // CORSConfig contains CORS configuration
@@ -118,9 +120,11 @@ type CORSConfig struct {
 
 // RateLimitConfig contains rate limiting configuration
 type RateLimitConfig struct {
-	Enabled bool `mapstructure:"enabled"`
-	RPS     int  `mapstructure:"rps"`     // requests per second
-	Burst   int  `mapstructure:"burst"`   // burst size
+	Enabled    bool              `mapstructure:"enabled"`
+	Type       string            `mapstructure:"type"`        // "per_user", "per_ip", or "tiered"
+	RPS        int               `mapstructure:"rps"`         // requests per second
+	Burst      int               `mapstructure:"burst"`       // burst size
+	TierLimits map[string]int    `mapstructure:"tier_limits"` // per-tier limits
 }
 
 // JWTConfig contains JWT configuration
@@ -128,6 +132,42 @@ type JWTConfig struct {
 	Secret     string        `mapstructure:"secret"`
 	Expiration time.Duration `mapstructure:"expiration"`
 	Issuer     string        `mapstructure:"issuer"`
+}
+
+// AuthServiceConfig contains authentication service configuration
+type AuthServiceConfig struct {
+	ServiceURL     string        `mapstructure:"service_url"`
+	ConsulService  string        `mapstructure:"consul_service"`
+	Timeout        time.Duration `mapstructure:"timeout"`
+	UseConsul      bool          `mapstructure:"use_consul"`
+	Cache          CacheConfig   `mapstructure:"cache"`
+	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	FailPolicy     string        `mapstructure:"fail_policy"` // "fail_open" or "fail_closed"
+}
+
+// AuthorizationServiceConfig contains authorization service configuration
+type AuthorizationServiceConfig struct {
+	ServiceURL     string        `mapstructure:"service_url"`
+	ConsulService  string        `mapstructure:"consul_service"`
+	Timeout        time.Duration `mapstructure:"timeout"`
+	UseConsul      bool          `mapstructure:"use_consul"`
+	Cache          CacheConfig   `mapstructure:"cache"`
+	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	FailPolicy     string        `mapstructure:"fail_policy"` // "fail_open" or "fail_closed"
+}
+
+// CacheConfig contains caching configuration
+type CacheConfig struct {
+	Enabled bool          `mapstructure:"enabled"`
+	TTL     time.Duration `mapstructure:"ttl"`
+	Backend string        `mapstructure:"backend"` // "redis" or "memory"
+}
+
+// CircuitBreakerConfig contains circuit breaker configuration
+type CircuitBreakerConfig struct {
+	Enabled   bool          `mapstructure:"enabled"`
+	Threshold int           `mapstructure:"threshold"` // failure threshold before opening
+	Timeout   time.Duration `mapstructure:"timeout"`   // how long to wait before half-open
 }
 
 // MQTTConfig contains MQTT broker configuration
@@ -400,6 +440,32 @@ func setDefaults() {
 	viper.SetDefault("security.jwt.secret", "your-secret-key")
 	viper.SetDefault("security.jwt.expiration", "24h")
 	viper.SetDefault("security.jwt.issuer", "isa-cloud")
+
+	// Auth Service
+	viper.SetDefault("security.auth.service_url", "http://localhost:8202")
+	viper.SetDefault("security.auth.consul_service", "auth_service")
+	viper.SetDefault("security.auth.timeout", "5s")
+	viper.SetDefault("security.auth.use_consul", true)
+	viper.SetDefault("security.auth.cache.enabled", false)
+	viper.SetDefault("security.auth.cache.ttl", "300s")
+	viper.SetDefault("security.auth.cache.backend", "memory")
+	viper.SetDefault("security.auth.circuit_breaker.enabled", false)
+	viper.SetDefault("security.auth.circuit_breaker.threshold", 5)
+	viper.SetDefault("security.auth.circuit_breaker.timeout", "10s")
+	viper.SetDefault("security.auth.fail_policy", "fail_open")
+
+	// Authorization Service
+	viper.SetDefault("security.authorization.service_url", "http://localhost:8203")
+	viper.SetDefault("security.authorization.consul_service", "authorization_service")
+	viper.SetDefault("security.authorization.timeout", "3s")
+	viper.SetDefault("security.authorization.use_consul", true)
+	viper.SetDefault("security.authorization.cache.enabled", false)
+	viper.SetDefault("security.authorization.cache.ttl", "60s")
+	viper.SetDefault("security.authorization.cache.backend", "memory")
+	viper.SetDefault("security.authorization.circuit_breaker.enabled", false)
+	viper.SetDefault("security.authorization.circuit_breaker.threshold", 5)
+	viper.SetDefault("security.authorization.circuit_breaker.timeout", "10s")
+	viper.SetDefault("security.authorization.fail_policy", "fail_open")
 
 	// Blockchain (temporarily disabled)
 	// viper.SetDefault("blockchain.enabled", true)

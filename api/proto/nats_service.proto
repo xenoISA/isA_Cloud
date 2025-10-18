@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package isa.nats;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/nats";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/nats";
 
 import "common.proto";
 import "google/protobuf/timestamp.proto";

@@ -1,43 +1,31 @@
 # Redis gRPC Service Dockerfile
-FROM golang:1.23-alpine AS builder
-
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
 ENV GOTOOLCHAIN=auto
-
-# 安装 protoc 和构建工具
-RUN apk add --no-cache protobuf protobuf-dev git make
+ENV CGO_ENABLED=1
 
 WORKDIR /app
 
 # 复制依赖文件
 COPY go.mod go.sum ./
-RUN go mod download
-
-# 安装 protoc Go plugins
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 # 复制源代码
 COPY . .
 
-# 创建protobuf输出目录并生成代码
-RUN mkdir -p pkg/proto/common pkg/proto/redis
-
-RUN protoc -I./api/proto \
-    --go_out=./pkg/proto/common --go_opt=paths=source_relative \
-    --go-grpc_out=./pkg/proto/common --go-grpc_opt=paths=source_relative \
-    api/proto/common.proto
-
-RUN protoc -I./api/proto \
-    --go_out=./pkg/proto/redis --go_opt=paths=source_relative \
-    --go-grpc_out=./pkg/proto/redis --go-grpc_opt=paths=source_relative \
-    api/proto/redis_service.proto
-
 # 构建服务
-RUN go build -o bin/redis-service cmd/redis-service/main.go
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/redis-service cmd/redis-service/main.go
 
 # 最终镜像
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
