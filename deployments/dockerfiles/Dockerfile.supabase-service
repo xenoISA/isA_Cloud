@@ -1,0 +1,36 @@
+# Supabase gRPC Service Dockerfile
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
+ENV GOTOOLCHAIN=auto
+ENV CGO_ENABLED=1
+
+WORKDIR /app
+COPY go.mod go.sum ./
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+# 构建服务
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=linux go build -o bin/supabase-service cmd/supabase-service/main.go
+
+# 运行时镜像
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/bin/supabase-service /app/supabase-service
+COPY configs/ /app/configs/
+
+# 暴露端口
+EXPOSE 50057
+
+# 启动服务
+CMD ["/app/supabase-service"]
+

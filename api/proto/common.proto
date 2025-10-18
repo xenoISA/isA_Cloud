@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package isa.common;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/common";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
@@ -72,4 +72,29 @@ message RequestContext {
     string method_name = 6;
     google.protobuf.Timestamp start_time = 7;
     map<string, string> metadata = 8;
+}
+
+// ========================================
+// 通用请求/响应元数据
+// ========================================
+
+// RequestMetadata - 请求元数据 (用于认证和追踪)
+message RequestMetadata {
+    string user_id = 1;                           // 用户 ID
+    string organization_id = 2;                    // 组织 ID
+    string access_token = 3;                       // 访问令牌 (JWT)
+    string request_id = 4;                         // 请求 ID
+    string trace_id = 5;                           // 追踪 ID
+    map<string, string> custom_metadata = 6;       // 自定义元数据
+}
+
+// ResponseMetadata - 响应元数据
+message ResponseMetadata {
+    bool success = 1;                              // 是否成功
+    string message = 2;                            // 消息
+    string error = 3;                              // 错误信息
+    string error_code = 4;                         // 错误代码
+    google.protobuf.Timestamp timestamp = 5;       // 时间戳
+    string request_id = 6;                         // 请求 ID
+    string trace_id = 7;                           // 追踪 ID
 }

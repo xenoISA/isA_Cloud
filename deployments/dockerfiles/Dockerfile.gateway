@@ -1,4 +1,16 @@
-# Gateway Service Dockerfile
+# ============================================
+# Gateway Service - Multi-Environment
+# ============================================
+# API Gateway for isA_Cloud platform
+#
+# Supports environments: dev, staging, production
+# Set ENVIRONMENT variable to select config
+#
+# Architecture:
+#   OpenResty → Gateway → Microservices
+#
+# File: deployments/dockerfiles/Dockerfile.gateway
+
 FROM golang:1.23-alpine AS builder
 
 # Set GOTOOLCHAIN to allow using newer Go features
@@ -22,19 +34,25 @@ RUN go build -o bin/gateway ./cmd/gateway
 
 # Final stage
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates wget
 
 WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/bin/gateway /app/gateway
+
+# Copy all environment configurations
 COPY deployments/configs/ /app/configs/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1
 
-EXPOSE 8000
+# Expose HTTP and gRPC ports
+EXPOSE 8000 8001
 
 # Use shell form to expand ENVIRONMENT variable
+# Default to dev environment if not specified
 CMD /app/gateway --config /app/configs/${ENVIRONMENT:-dev}/gateway.yaml

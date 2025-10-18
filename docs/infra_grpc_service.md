@@ -23,24 +23,25 @@
                │ gRPC
                ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              Go gRPC Services (6个独立服务)                   │
+│              Go gRPC Services (7个独立服务)                   │
 │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐  │
 │  │  MinIO   │  DuckDB  │   MQTT   │   Loki   │  Redis   │  │
 │  │ Service  │ Service  │ Service  │ Service  │ Service  │  │
 │  │  :50051  │  :50052  │  :50053  │  :50054  │  :50055  │  │
 │  └──────────┴──────────┴──────────┴──────────┴──────────┘  │
-│  ┌──────────┐                                                │
-│  │   NATS   │  每个服务包含：                                │
-│  │ Service  │  - gRPC Server (proto 定义)                    │
-│  │  :50056  │  - SDK Client (pkg/ 实现)                      │
-│  └──────────┘  - Config (configs/sdk/*.yaml)                │
-│                - Auth & Multi-tenancy                        │
+│  ┌──────────┬──────────┐                                    │
+│  │   NATS   │ Supabase │  每个服务包含：                    │
+│  │ Service  │ Service  │  - gRPC Server (proto 定义)        │
+│  │  :50056  │  :50057  │  - SDK Client (pkg/ 实现)          │
+│  └──────────┴──────────┘  - Config (configs/sdk/*.yaml)    │
+│                           - Auth & Multi-tenancy            │
 └──────────────┬──────────────────────────────────────────────┘
                │ Native Protocol
                ↓
 ┌─────────────────────────────────────────────────────────────┐
 │          底层基础设施 (Infrastructure)                         │
-│  MinIO │ DuckDB │ Mosquitto │ Loki │ Redis │ NATS           │
+│  MinIO │ DuckDB │ Mosquitto │ Loki │ Redis │ NATS │ Supabase│
+│  注: Supabase 不在 Docker 中，本地用 CLI，生产用 Cloud       │
 └─────────────────────────────────────────────────────────────┘
                ↑
                │ Consul Service Discovery
@@ -315,6 +316,7 @@ docker-compose -f deployments/compose/grpc-services.yml logs -f redis-service
 - Loki Service: `50054`
 - Redis Service: `50055`
 - NATS Service: `50056`
+- Supabase Service: `50057` ⭐ (PostgreSQL + pgvector)
 
 ### 方式 2: 本地开发 💻
 
@@ -766,6 +768,46 @@ grpcurl -plaintext -H "authorization: Bearer TOKEN" \
   -d '{"key":"test","value":"hello"}' \
   localhost:50055 redis.RedisService/Set
 ```
+
+---
+
+## Supabase Service 特殊说明 ⭐
+
+Supabase Service 与其他服务不同，有特殊的启动方式：
+
+### 本地开发
+
+```bash
+# 1. 启动 Supabase Local (不在 Docker 中)
+supabase start
+
+# 2. 确认服务运行
+supabase status
+
+# 3. 启动 Supabase gRPC Service (连接到 localhost:54321)
+docker-compose -f deployments/compose/grpc-services.yml up -d supabase-grpc-service
+```
+
+### 生产环境
+
+```bash
+# 使用 Supabase Cloud
+export SUPABASE_URL=https://your-project.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=your-key
+
+docker-compose -f deployments/compose/grpc-services.yml up -d supabase-grpc-service
+```
+
+### 特性
+
+- ✅ PostgreSQL 数据库完整功能
+- ✅ pgvector 向量搜索 (RAG, 语义搜索)
+- ✅ 1536 维向量支持 (OpenAI embeddings)
+- ✅ HNSW 索引加速搜索
+- ✅ 混合搜索 (文本 + 向量)
+- ✅ 多租户数据隔离
+
+**详细文档**: [`cmd/supabase-service/README.md`](../cmd/supabase-service/README.md)
 
 ---
 

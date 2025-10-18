@@ -1,30 +1,26 @@
 # Loki gRPC Service Dockerfile
-FROM golang:1.23-alpine AS builder
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
 ENV GOTOOLCHAIN=auto
-
-# 安装 protoc 和构建工具
-RUN apk add --no-cache protobuf protobuf-dev git make
+ENV CGO_ENABLED=1
 
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
-
-# 安装 protoc Go plugins
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 
-# 生成 gRPC 代码
-RUN protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    api/proto/common.proto \
-    api/proto/loki_service.proto
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/loki-service cmd/loki-service/main.go
 
-RUN go build -o bin/loki-service cmd/loki-service/main.go
-
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/bin/loki-service /app/loki-service
 COPY configs/ /app/configs/

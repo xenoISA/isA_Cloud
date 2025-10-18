@@ -12,12 +12,13 @@ import (
 	"syscall"
 
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip" // Register gzip compressor
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/hashicorp/consul/api"
-	pb "github.com/isa-cloud/isa_cloud/api/proto"
+	pb "github.com/isa-cloud/isa_cloud/api/proto/loki"
 	"github.com/isa-cloud/isa_cloud/cmd/loki-service/server"
 	"github.com/isa-cloud/isa_cloud/pkg/infrastructure/logging"
 )

@@ -1,0 +1,110 @@
+# Supabase Service Configuration
+# Supabase 数据库与向量服务配置
+
+supabase:
+  # Supabase 连接配置
+  # Connection Configuration
+  url: "https://ugloxikfljpuvakwiadf.supabase.co"  # Supabase 项目 URL / Project URL
+  anon_key: ""  # Supabase Anon Key (公开密钥，用于客户端)
+  service_role_key: ""  # Service Role Key (服务端密钥，拥有完整权限)
+  
+  # 数据库直连配置 (可选，用于某些高级操作)
+  # Direct PostgreSQL Connection (Optional)
+  postgres:
+    host: "db.ugloxikfljpuvakwiadf.supabase.co"
+    port: 5432
+    database: "postgres"
+    username: "postgres"
+    password: ""
+    ssl_mode: "require"
+    
+  # 向量搜索配置
+  # Vector Search Configuration
+  vector:
+    enabled: true  # 是否启用 pgvector
+    default_table: "embeddings"  # 默认向量表名
+    default_metric: "cosine"  # 默认距离度量: cosine, l2, inner_product
+    default_limit: 10  # 默认返回数量
+    dimensions: 1536  # 向量维度 (OpenAI ada-002: 1536, OpenAI text-embedding-3-small: 1536)
+    
+  # 批量操作配置
+  # Batch Operations Configuration
+  batch:
+    size: 100  # 批量插入大小
+    timeout: 30s  # 批量操作超时
+    
+  # 连接池配置
+  # Connection Pool Configuration
+  pool:
+    max_idle: 10
+    max_active: 100
+    idle_timeout: 300s
+    
+  # 超时配置
+  # Timeout Configuration
+  timeout:
+    connect: 10s
+    read: 30s
+    write: 30s
+    rpc: 60s  # RPC 调用超时
+    
+  # 重试配置
+  # Retry Configuration
+  retry:
+    max_attempts: 3
+    backoff: 1s
+    
+  # Consul 服务发现
+  # Consul Service Discovery
+  consul:
+    enabled: true
+    service_name: "supabase-grpc-service"
+    tag: "production"
+    health_check_interval: 10s
+    
+  # gRPC 服务配置
+  # gRPC Service Configuration
+  grpc:
+    port: 50057
+    max_recv_msg_size: 10485760  # 10 MB
+    max_send_msg_size: 10485760  # 10 MB
+    
+  # 认证配置
+  # Authentication Configuration
+  auth:
+    jwt_secret: "your-jwt-secret-key"  # JWT 密钥 (与网关保持一致)
+    token_expiration: 24h  # Token 过期时间
+    
+  # 多租户配置
+  # Multi-tenancy Configuration
+  multi_tenant:
+    enabled: true
+    isolation_type: "rls"  # rls (Row Level Security) or schema (独立 schema)
+    default_schema: "public"
+
+# 环境变量支持
+# Environment Variable Support:
+# - SUPABASE_URL (覆盖 url)
+# - SUPABASE_ANON_KEY (覆盖 anon_key)
+# - SUPABASE_SERVICE_ROLE_KEY (覆盖 service_role_key)
+# - SUPABASE_POSTGRES_PASSWORD (覆盖 postgres.password)
+# - SUPABASE_JWT_SECRET (覆盖 auth.jwt_secret)
+# - CONSUL_ENABLED (覆盖 consul.enabled)
+# - CONSUL_HOST (Consul 地址)
+# - CONSUL_PORT (Consul 端口)
+
+# 使用示例:
+# Usage Example:
+# 
+# 在代码中:
+# In code:
+#   factory, _ := storage.NewStorageClientFactory()
+#   cfg := factory.GetConfig()
+#   client := supabase.NewClient(cfg.Supabase)
+#
+# 在 Docker 中:
+# In Docker:
+#   docker run -e SUPABASE_URL=https://xxx.supabase.co \
+#              -e SUPABASE_SERVICE_ROLE_KEY=xxx \
+#              supabase-service:latest
+

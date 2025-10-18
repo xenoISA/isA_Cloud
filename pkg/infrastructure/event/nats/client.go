@@ -34,6 +34,7 @@ package nats
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -142,8 +143,9 @@ func NewClient(cfg *Config) (*Client, error) {
 		opts = append(opts, nats.Token(cfg.Token))
 	}
 
-	// 连接到 NATS
-	nc, err := nats.Connect(nats.FormatUrls(cfg.URLs), opts...)
+	// 连接到 NATS (use comma-separated URLs for multiple servers)
+	urls := strings.Join(cfg.URLs, ",")
+	nc, err := nats.Connect(urls, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}

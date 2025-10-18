@@ -87,14 +87,52 @@ security:
     allow_credentials: true
 
   rate_limit:
-    enabled: false
-    rps: 100
-    burst: 200
+    enabled: true                         # ✅ ENABLED - Per-user rate limiting
+    type: "per_user"                      # per_user, per_ip, or tiered
+    rps: 10                               # Requests per second (per user)
+    burst: 20                             # Burst capacity
+    # Tiered rate limiting (optional)
+    tier_limits:
+      free: 10                            # Free tier: 10 RPS
+      pro: 50                             # Pro tier: 50 RPS
+      enterprise: 200                     # Enterprise tier: 200 RPS
 
   jwt:
     secret: "staging-secret-key"
     expiration: "24h"
     issuer: "isa-cloud-gateway-staging"
+
+  # Authentication Service Configuration
+  auth:
+    service_url: "http://localhost:8202"  # Fallback URL
+    consul_service: "auth_service"        # Consul service name
+    timeout: "5s"
+    use_consul: true                      # Use Consul for service discovery
+    cache:
+      enabled: true                       # ✅ ENABLED - Cache tokens
+      ttl: "300s"                         # 5 minutes
+      backend: "memory"
+    circuit_breaker:
+      enabled: true                       # ✅ ENABLED - Protect against cascade failures
+      threshold: 5                        # Open after 5 failures
+      timeout: "10s"                      # Try again after 10s
+    fail_policy: "fail_open"              # For staging - allow on failure
+
+  # Authorization Service Configuration
+  authorization:
+    service_url: "http://localhost:8203"  # Fallback URL
+    consul_service: "authorization_service"
+    timeout: "3s"
+    use_consul: true
+    cache:
+      enabled: true                       # ✅ ENABLED - Cache permissions
+      ttl: "60s"                          # 1 minute
+      backend: "memory"
+    circuit_breaker:
+      enabled: true                       # ✅ ENABLED - Protect against cascade failures
+      threshold: 5                        # Open after 5 failures
+      timeout: "10s"                      # Try again after 10s
+    fail_policy: "fail_open"              # For staging - allow on failure
 
 mqtt:
   enabled: true

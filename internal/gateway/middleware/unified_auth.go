@@ -9,10 +9,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
+
+	"github.com/isa-cloud/isa_cloud/internal/config"
+	"github.com/isa-cloud/isa_cloud/internal/gateway/cache"
+	"github.com/isa-cloud/isa_cloud/internal/gateway/circuitbreaker"
 	"github.com/isa-cloud/isa_cloud/internal/gateway/clients"
 	"github.com/isa-cloud/isa_cloud/internal/gateway/registry"
 	"github.com/isa-cloud/isa_cloud/pkg/logger"
 )
+
+// AuthContext holds dependencies for authentication middleware
+type AuthContext struct {
+	tokenCache      cache.Cache
+	permissionCache cache.Cache
+	authBreaker     *circuitbreaker.CircuitBreaker
+	authzBreaker    *circuitbreaker.CircuitBreaker
+	sfGroup         singleflight.Group
+}
 
 // AuthService response structs
 type TokenVerificationResponse struct {
@@ -51,7 +65,48 @@ type AccessCheckResponse struct {
 // 1. Routes external requests through Auth Service (8202)
 // 2. Maintains compatibility with service-specific auth (Agent, MCP)
 // 3. Handles internal service-to-service communication
-func UnifiedAuthentication(authClient clients.AuthClient, consul *registry.ConsulRegistry, logger *logger.Logger) gin.HandlerFunc {
+// 4. Includes circuit breaker protection and caching
+func UnifiedAuthentication(authClient clients.AuthClient, consul *registry.ConsulRegistry, cfg *config.Config, logger *logger.Logger) gin.HandlerFunc {
+	// Initialize AuthContext with circuit breakers and caches
+	authCtx := &AuthContext{}
+
+	// Initialize token cache if enabled
+	if cfg.Security.Auth.Cache.Enabled {
+		authCtx.tokenCache = cache.NewMemoryCache()
+		logger.Info("Token cache enabled", "ttl", cfg.Security.Auth.Cache.TTL)
+	}
+
+	// Initialize permission cache if enabled
+	if cfg.Security.Authorization.Cache.Enabled {
+		authCtx.permissionCache = cache.NewMemoryCache()
+		logger.Info("Permission cache enabled", "ttl", cfg.Security.Authorization.Cache.TTL)
+	}
+
+	// Initialize circuit breakers if enabled
+	if cfg.Security.Auth.CircuitBreaker.Enabled {
+		authCtx.authBreaker = circuitbreaker.NewAuthServiceBreaker(
+			uint32(cfg.Security.Auth.CircuitBreaker.Threshold),
+			cfg.Security.Auth.CircuitBreaker.Timeout,
+			logger,
+		)
+		logger.Info("Auth service circuit breaker enabled",
+			"threshold", cfg.Security.Auth.CircuitBreaker.Threshold,
+			"timeout", cfg.Security.Auth.CircuitBreaker.Timeout,
+		)
+	}
+
+	if cfg.Security.Authorization.CircuitBreaker.Enabled {
+		authCtx.authzBreaker = circuitbreaker.NewAuthorizationServiceBreaker(
+			uint32(cfg.Security.Authorization.CircuitBreaker.Threshold),
+			cfg.Security.Authorization.CircuitBreaker.Timeout,
+			logger,
+		)
+		logger.Info("Authorization service circuit breaker enabled",
+			"threshold", cfg.Security.Authorization.CircuitBreaker.Threshold,
+			"timeout", cfg.Security.Authorization.CircuitBreaker.Timeout,
+		)
+	}
+
 	return func(c *gin.Context) {
 		// Skip authentication for health checks and public endpoints
 		if isPublicEndpoint(c.Request.URL.Path) {
@@ -65,7 +120,7 @@ func UnifiedAuthentication(authClient clients.AuthClient, consul *registry.Consu
 		}
 
 		// Handle external authentication via Auth Service
-		if authenticated := handleExternalAuth(c, authClient, logger); authenticated {
+		if authenticated := handleExternalAuth(c, authClient, consul, cfg, authCtx, logger); authenticated {
 			return
 		}
 
@@ -140,22 +195,22 @@ func handleInternalServiceAuth(c *gin.Context, consul *registry.ConsulRegistry, 
 }
 
 // handleExternalAuth handles external user authentication via Auth Service
-func handleExternalAuth(c *gin.Context, authClient clients.AuthClient, logger *logger.Logger) bool {
+func handleExternalAuth(c *gin.Context, authClient clients.AuthClient, consul *registry.ConsulRegistry, cfg *config.Config, authCtx *AuthContext, logger *logger.Logger) bool {
 	// Try JWT token authentication first
-	if authenticated := handleJWTAuth(c, authClient, logger); authenticated {
+	if authenticated := handleJWTAuth(c, authClient, consul, cfg, authCtx, logger); authenticated {
 		return true
 	}
 
 	// Try API key authentication
-	if authenticated := handleAPIKeyAuth(c, authClient, logger); authenticated {
+	if authenticated := handleAPIKeyAuth(c, authClient, consul, cfg, authCtx, logger); authenticated {
 		return true
 	}
 
 	return false
 }
 
-// handleJWTAuth validates JWT tokens via Auth Service
-func handleJWTAuth(c *gin.Context, authClient clients.AuthClient, logger *logger.Logger) bool {
+// handleJWTAuth validates JWT tokens via Auth Service with caching and circuit breaker
+func handleJWTAuth(c *gin.Context, authClient clients.AuthClient, consul *registry.ConsulRegistry, cfg *config.Config, authCtx *AuthContext, logger *logger.Logger) bool {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		return false
@@ -172,30 +227,55 @@ func handleJWTAuth(c *gin.Context, authClient clients.AuthClient, logger *logger
 		return false
 	}
 
-	// Call Auth Service to verify token
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Check cache first if enabled
+	cacheKey := cache.HashToken(token)
+	if authCtx.tokenCache != nil {
+		if cached, found := authCtx.tokenCache.Get(context.Background(), cacheKey); found {
+			tokenResp := cached.(*TokenVerificationResponse)
+			logger.Debug("Token cache hit", "user_id", tokenResp.UserID)
 
-	// Create verification request
-	payload := map[string]interface{}{
-		"token": token,
+			// Set user context from cache
+			c.Set("user_id", tokenResp.UserID)
+			c.Set("email", tokenResp.Email)
+			c.Set("provider", tokenResp.Provider)
+			c.Set("is_internal", false)
+			c.Set("auth_method", "jwt")
+
+			// Still check permissions (may have changed)
+			if !checkResourcePermissions(c, tokenResp.UserID, consul, cfg, authCtx, logger) {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error":   "insufficient permissions",
+					"message": "user does not have permission to access this resource",
+				})
+				c.Abort()
+				return false
+			}
+
+			c.Next()
+			return true
+		}
 	}
 
-	response, err := makeAuthServiceRequest(ctx, "http://localhost:8202/api/v1/auth/verify-token", payload)
+	// Use singleflight to deduplicate concurrent requests for same token
+	result, err, _ := authCtx.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		return verifyTokenWithBreaker(token, consul, cfg, authCtx, logger)
+	})
+
 	if err != nil {
-		logger.Error("Auth service request failed", "error", err)
+		logger.Error("Token verification failed", "error", err)
 		return false
 	}
 
-	var tokenResp TokenVerificationResponse
-	if err := json.Unmarshal(response, &tokenResp); err != nil {
-		logger.Error("Failed to parse token verification response", "error", err)
-		return false
-	}
-
+	tokenResp := result.(*TokenVerificationResponse)
 	if !tokenResp.Valid {
 		logger.Debug("Token validation failed", "error", tokenResp.Error)
 		return false
+	}
+
+	// Cache the result if caching is enabled
+	if authCtx.tokenCache != nil {
+		authCtx.tokenCache.Set(context.Background(), cacheKey, tokenResp, cfg.Security.Auth.Cache.TTL)
+		logger.Debug("Token cached", "user_id", tokenResp.UserID, "ttl", cfg.Security.Auth.Cache.TTL)
 	}
 
 	// Set user context
@@ -205,10 +285,10 @@ func handleJWTAuth(c *gin.Context, authClient clients.AuthClient, logger *logger
 	c.Set("is_internal", false)
 	c.Set("auth_method", "jwt")
 
-	// Check resource-specific permissions if needed
-	if hasResourceAccess := checkResourcePermissions(c, tokenResp.UserID, logger); !hasResourceAccess {
+	// Check resource-specific permissions
+	if !checkResourcePermissions(c, tokenResp.UserID, consul, cfg, authCtx, logger) {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "insufficient permissions",
+			"error":   "insufficient permissions",
 			"message": "user does not have permission to access this resource",
 		})
 		c.Abort()
@@ -224,8 +304,8 @@ func handleJWTAuth(c *gin.Context, authClient clients.AuthClient, logger *logger
 	return true
 }
 
-// handleAPIKeyAuth validates API keys via Auth Service
-func handleAPIKeyAuth(c *gin.Context, authClient clients.AuthClient, logger *logger.Logger) bool {
+// handleAPIKeyAuth validates API keys via Auth Service with caching and circuit breaker
+func handleAPIKeyAuth(c *gin.Context, authClient clients.AuthClient, consul *registry.ConsulRegistry, cfg *config.Config, authCtx *AuthContext, logger *logger.Logger) bool {
 	// Check multiple sources for API key
 	apiKey := c.GetHeader("X-API-Key")
 	if apiKey == "" {
@@ -241,17 +321,21 @@ func handleAPIKeyAuth(c *gin.Context, authClient clients.AuthClient, logger *log
 		return false
 	}
 
+	// Resolve auth service URL using Consul or fallback
+	authServiceURL := resolveAuthServiceURL(consul, cfg, logger)
+	verifyAPIKeyURL := fmt.Sprintf("%s/api/v1/auth/verify-api-key", authServiceURL)
+
 	// Call Auth Service to verify API key
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Security.Auth.Timeout)
 	defer cancel()
 
 	payload := map[string]interface{}{
 		"api_key": apiKey,
 	}
 
-	response, err := makeAuthServiceRequest(ctx, "http://localhost:8202/api/v1/auth/verify-api-key", payload)
+	response, err := makeAuthServiceRequest(ctx, verifyAPIKeyURL, payload, logger)
 	if err != nil {
-		logger.Error("Auth service API key verification failed", "error", err)
+		logger.Error("Auth service API key verification failed", "error", err, "url", verifyAPIKeyURL)
 		return false
 	}
 
@@ -285,6 +369,54 @@ func handleAPIKeyAuth(c *gin.Context, authClient clients.AuthClient, logger *log
 }
 
 // Helper functions
+
+// resolveAuthServiceURL resolves the authentication service URL using Consul or fallback
+func resolveAuthServiceURL(consul *registry.ConsulRegistry, cfg *config.Config, logger *logger.Logger) string {
+	// Try Consul service discovery if enabled
+	if cfg.Security.Auth.UseConsul && consul != nil {
+		instance, err := consul.GetHealthyInstance(cfg.Security.Auth.ConsulService)
+		if err == nil {
+			url := fmt.Sprintf("http://%s:%d", instance.Host, instance.Port)
+			logger.Debug("Resolved auth service via Consul",
+				"consul_service", cfg.Security.Auth.ConsulService,
+				"url", url,
+			)
+			return url
+		}
+		logger.Warn("Failed to resolve auth service via Consul, using fallback",
+			"consul_service", cfg.Security.Auth.ConsulService,
+			"error", err,
+		)
+	}
+
+	// Fallback to configured service URL
+	logger.Debug("Using fallback auth service URL", "url", cfg.Security.Auth.ServiceURL)
+	return cfg.Security.Auth.ServiceURL
+}
+
+// resolveAuthorizationServiceURL resolves the authorization service URL using Consul or fallback
+func resolveAuthorizationServiceURL(consul *registry.ConsulRegistry, cfg *config.Config, logger *logger.Logger) string {
+	// Try Consul service discovery if enabled
+	if cfg.Security.Authorization.UseConsul && consul != nil {
+		instance, err := consul.GetHealthyInstance(cfg.Security.Authorization.ConsulService)
+		if err == nil {
+			url := fmt.Sprintf("http://%s:%d", instance.Host, instance.Port)
+			logger.Debug("Resolved authorization service via Consul",
+				"consul_service", cfg.Security.Authorization.ConsulService,
+				"url", url,
+			)
+			return url
+		}
+		logger.Warn("Failed to resolve authorization service via Consul, using fallback",
+			"consul_service", cfg.Security.Authorization.ConsulService,
+			"error", err,
+		)
+	}
+
+	// Fallback to configured service URL
+	logger.Debug("Using fallback authorization service URL", "url", cfg.Security.Authorization.ServiceURL)
+	return cfg.Security.Authorization.ServiceURL
+}
 
 func isValidInternalService(serviceName string, consul *registry.ConsulRegistry, logger *logger.Logger) bool {
 	if consul == nil {
@@ -323,7 +455,7 @@ func isServiceUserAgent(userAgent string) bool {
 	return false
 }
 
-func makeAuthServiceRequest(ctx context.Context, url string, payload map[string]interface{}) ([]byte, error) {
+func makeAuthServiceRequest(ctx context.Context, url string, payload map[string]interface{}, logger *logger.Logger) ([]byte, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
@@ -337,8 +469,10 @@ func makeAuthServiceRequest(ctx context.Context, url string, payload map[string]
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second, // Increased timeout
 	}
+
+	logger.Debug("Calling auth/authorization service", "url", url)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -359,24 +493,34 @@ func makeAuthServiceRequest(ctx context.Context, url string, payload map[string]
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		logger.Error("Auth service returned non-OK status",
+			"status_code", resp.StatusCode,
+			"response", string(responseBody),
+			"url", url,
+		)
 		return nil, fmt.Errorf("auth service returned status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
+	logger.Debug("Auth service request successful", "url", url, "response_size", len(responseBody))
 	return responseBody, nil
 }
 
-// checkResourcePermissions validates user permissions for specific resources via Authorization Service
-func checkResourcePermissions(c *gin.Context, userID string, logger *logger.Logger) bool {
+// checkResourcePermissions validates user permissions for specific resources via Authorization Service with caching
+func checkResourcePermissions(c *gin.Context, userID string, consul *registry.ConsulRegistry, cfg *config.Config, authCtx *AuthContext, logger *logger.Logger) bool {
 	// Determine resource type and name from the request path
 	resourceType, resourceName, requiredLevel := getResourceInfoFromPath(c.Request.URL.Path)
-	
+
 	// Skip permission check for public resources or if resource type is not recognized
 	if resourceType == "" || requiredLevel == "" {
 		return true
 	}
 
+	// Resolve authorization service URL using Consul or fallback
+	authzServiceURL := resolveAuthorizationServiceURL(consul, cfg, logger)
+	checkAccessURL := fmt.Sprintf("%s/api/v1/authorization/check-access", authzServiceURL)
+
 	// Call Authorization Service to check access
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Security.Authorization.Timeout)
 	defer cancel()
 
 	payload := map[string]interface{}{
@@ -386,10 +530,16 @@ func checkResourcePermissions(c *gin.Context, userID string, logger *logger.Logg
 		"required_access_level": requiredLevel,
 	}
 
-	response, err := makeAuthServiceRequest(ctx, "http://localhost:8203/api/v1/authorization/check-access", payload)
+	response, err := makeAuthServiceRequest(ctx, checkAccessURL, payload, logger)
 	if err != nil {
-		logger.Error("Authorization service request failed", "error", err, "user_id", userID)
-		// In case of service failure, allow access for now (fail-open policy)
+		logger.Error("Authorization service request failed", "error", err, "user_id", userID, "url", checkAccessURL)
+		// Apply fail policy from config
+		if cfg.Security.Authorization.FailPolicy == "fail_closed" {
+			logger.Warn("Fail-closed policy: denying access due to authorization service failure")
+			return false
+		}
+		// Fail-open: allow access when service is unavailable
+		logger.Warn("Fail-open policy: allowing access despite authorization service failure")
 		return true
 	}
 
@@ -487,4 +637,50 @@ func getMCPAccessLevel(path string) string {
 		return "read_write" // Tool execution requires read_write
 	}
 	return "read_only"
+}
+
+// verifyTokenWithBreaker verifies a token with circuit breaker protection
+func verifyTokenWithBreaker(token string, consul *registry.ConsulRegistry, cfg *config.Config, authCtx *AuthContext, logger *logger.Logger) (*TokenVerificationResponse, error) {
+	verifyFunc := func() (interface{}, error) {
+		authServiceURL := resolveAuthServiceURL(consul, cfg, logger)
+		verifyTokenURL := fmt.Sprintf("%s/api/v1/auth/verify-token", authServiceURL)
+
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Security.Auth.Timeout)
+		defer cancel()
+
+		payload := map[string]interface{}{
+			"token": token,
+		}
+
+		response, err := makeAuthServiceRequest(ctx, verifyTokenURL, payload, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		var tokenResp TokenVerificationResponse
+		if err := json.Unmarshal(response, &tokenResp); err != nil {
+			return nil, fmt.Errorf("failed to parse token verification response: %w", err)
+		}
+
+		return &tokenResp, nil
+	}
+
+	// Use circuit breaker if enabled
+	if authCtx.authBreaker != nil {
+		result, err := authCtx.authBreaker.Execute(context.Background(), verifyFunc)
+		if err != nil {
+			if circuitbreaker.IsCircuitBreakerError(err) {
+				return nil, circuitbreaker.WrapError(err, "auth_service")
+			}
+			return nil, err
+		}
+		return result.(*TokenVerificationResponse), nil
+	}
+
+	// No circuit breaker, call directly
+	result, err := verifyFunc()
+	if err != nil {
+		return nil, err
+	}
+	return result.(*TokenVerificationResponse), nil
 }

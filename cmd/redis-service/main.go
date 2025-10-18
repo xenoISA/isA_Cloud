@@ -30,12 +30,13 @@ import (
 	"syscall"
 
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip" // Register gzip compressor
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/hashicorp/consul/api"
-	pb "github.com/isa-cloud/isa_cloud/pkg/proto/redis"
+	pb "github.com/isa-cloud/isa_cloud/api/proto/redis"
 	"github.com/isa-cloud/isa_cloud/cmd/redis-service/server"
 	"github.com/isa-cloud/isa_cloud/pkg/infrastructure/cache"
 )
@@ -155,15 +156,32 @@ func registerConsul(cfg *cache.CacheConfig, port int) (*api.Client, string, erro
 
 	serviceID := fmt.Sprintf("%s-%s-%d", serviceName, hostname, port)
 
+	// 获取服务主机名 (优先使用环境变量，适配 Docker Compose)
+	serviceHostname := os.Getenv("SERVICE_HOSTNAME")
+	if serviceHostname == "" {
+		serviceHostname = os.Getenv("HOSTNAME")
+	}
+	if serviceHostname == "" {
+		hostname, _ := os.Hostname()
+		serviceHostname = hostname
+		if serviceHostname == "" {
+			serviceHostname = "isa-redis-grpc"
+		}
+	}
+
 	// 注册服务
 	registration := &api.AgentServiceRegistration{
 		ID:      serviceID,
-		Name:    serviceName,
+		Name:    "redis-grpc-service",  // 使用标准的 grpc-service 命名
 		Port:    port,
-		Address: getLocalIP(),
+		Address: serviceHostname,  // 使用 Docker 网络可解析的主机名
 		Tags:    []string{"grpc", "cache", "redis"},
+		Meta: map[string]string{
+			"container_name": serviceHostname,
+			"service_type":   "grpc",
+		},
 		Check: &api.AgentServiceCheck{
-			GRPC:                           fmt.Sprintf("%s:%d", getLocalIP(), port),
+			GRPC:                           fmt.Sprintf("%s:%d/%s", serviceHostname, port, serviceName),
 			Interval:                       "10s",
 			Timeout:                        "5s",
 			DeregisterCriticalServiceAfter: "30s",

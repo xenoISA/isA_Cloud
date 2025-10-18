@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package isa.mqtt;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/mqtt";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/mqtt";
 
 import "common.proto";
 import "google/protobuf/timestamp.proto";

@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package isa.minio;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/minio";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/minio";
 
 import "common.proto";
 import "google/protobuf/timestamp.proto";
@@ -29,6 +29,14 @@ service MinIOService {
     rpc GetBucketInfo(GetBucketInfoRequest) returns (GetBucketInfoResponse);
     rpc SetBucketPolicy(SetBucketPolicyRequest) returns (SetBucketPolicyResponse);
     rpc GetBucketPolicy(GetBucketPolicyRequest) returns (GetBucketPolicyResponse);
+    rpc SetBucketTags(SetBucketTagsRequest) returns (SetBucketTagsResponse);
+    rpc GetBucketTags(GetBucketTagsRequest) returns (GetBucketTagsResponse);
+    rpc DeleteBucketTags(DeleteBucketTagsRequest) returns (DeleteBucketTagsResponse);
+    rpc SetBucketVersioning(SetBucketVersioningRequest) returns (SetBucketVersioningResponse);
+    rpc GetBucketVersioning(GetBucketVersioningRequest) returns (GetBucketVersioningResponse);
+    rpc SetBucketLifecycle(SetBucketLifecycleRequest) returns (SetBucketLifecycleResponse);
+    rpc GetBucketLifecycle(GetBucketLifecycleRequest) returns (GetBucketLifecycleResponse);
+    rpc DeleteBucketLifecycle(DeleteBucketLifecycleRequest) returns (DeleteBucketLifecycleResponse);
     
     // ========== 对象操作 ==========
     // 流式上传（支持大文件分块上传）
@@ -45,7 +53,11 @@ service MinIOService {
     rpc CopyObject(CopyObjectRequest) returns (CopyObjectResponse);
     // 获取对象信息（不下载内容）
     rpc StatObject(StatObjectRequest) returns (StatObjectResponse);
-    
+    // 对象标签管理
+    rpc SetObjectTags(SetObjectTagsRequest) returns (SetObjectTagsResponse);
+    rpc GetObjectTags(GetObjectTagsRequest) returns (GetObjectTagsResponse);
+    rpc DeleteObjectTags(DeleteObjectTagsRequest) returns (DeleteObjectTagsResponse);
+
     // ========== 预签名 URL ==========
     rpc GetPresignedURL(GetPresignedURLRequest) returns (GetPresignedURLResponse);
     rpc GetPresignedPutURL(GetPresignedPutURLRequest) returns (GetPresignedPutURLResponse);
@@ -57,7 +69,7 @@ service MinIOService {
     rpc AbortMultipartUpload(AbortMultipartUploadRequest) returns (AbortMultipartUploadResponse);
     
     // ========== 健康检查 ==========
-    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+    rpc HealthCheck(MinIOHealthCheckRequest) returns (MinIOHealthCheckResponse);
 }
 
 // ========================================
@@ -178,6 +190,108 @@ message GetBucketPolicyResponse {
     BucketPolicyType policy_type = 2;
     string policy_json = 3;
     string error = 4;
+}
+
+// 桶标签管理
+message SetBucketTagsRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+    map<string, string> tags = 3;
+}
+
+message SetBucketTagsResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetBucketTagsRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+}
+
+message GetBucketTagsResponse {
+    bool success = 1;
+    map<string, string> tags = 2;
+    string error = 3;
+}
+
+message DeleteBucketTagsRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+}
+
+message DeleteBucketTagsResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+// 桶版本控制
+message SetBucketVersioningRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+    bool enabled = 3;                             // 是否启用版本控制
+}
+
+message SetBucketVersioningResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetBucketVersioningRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+}
+
+message GetBucketVersioningResponse {
+    bool success = 1;
+    bool enabled = 2;                             // 版本控制状态
+    string error = 3;
+}
+
+// 桶生命周期策略
+message LifecycleRule {
+    string id = 1;                                // 规则ID
+    string status = 2;                            // Enabled 或 Disabled
+    google.protobuf.Struct filter = 3;            // 过滤条件（前缀等）
+    google.protobuf.Struct expiration = 4;        // 过期配置（天数等）
+    google.protobuf.Struct transition = 5;        // 转换配置（存储类型等）
+}
+
+message SetBucketLifecycleRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+    repeated LifecycleRule rules = 3;
+}
+
+message SetBucketLifecycleResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetBucketLifecycleRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+}
+
+message GetBucketLifecycleResponse {
+    bool success = 1;
+    repeated LifecycleRule rules = 2;
+    string error = 3;
+}
+
+message DeleteBucketLifecycleRequest {
+    string bucket_name = 1;
+    string user_id = 2;
+}
+
+message DeleteBucketLifecycleResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
 }
 
 // ========================================
@@ -317,6 +431,47 @@ message StatObjectResponse {
     string error = 3;
 }
 
+// 对象标签管理
+message SetObjectTagsRequest {
+    string bucket_name = 1;
+    string object_key = 2;
+    string user_id = 3;
+    map<string, string> tags = 4;
+    string version_id = 5;                        // 版本ID（可选）
+}
+
+message SetObjectTagsResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
+message GetObjectTagsRequest {
+    string bucket_name = 1;
+    string object_key = 2;
+    string user_id = 3;
+    string version_id = 4;                        // 版本ID（可选）
+}
+
+message GetObjectTagsResponse {
+    bool success = 1;
+    map<string, string> tags = 2;
+    string error = 3;
+}
+
+message DeleteObjectTagsRequest {
+    string bucket_name = 1;
+    string object_key = 2;
+    string user_id = 3;
+    string version_id = 4;                        // 版本ID（可选）
+}
+
+message DeleteObjectTagsResponse {
+    bool success = 1;
+    string message = 2;
+    string error = 3;
+}
+
 // ========================================
 // 预签名 URL - 请求/响应
 // ========================================
@@ -432,11 +587,11 @@ message AbortMultipartUploadResponse {
 // 健康检查
 // ========================================
 
-message HealthCheckRequest {
+message MinIOHealthCheckRequest {
     bool detailed = 1;                            // 是否返回详细信息
 }
 
-message HealthCheckResponse {
+message MinIOHealthCheckResponse {
     bool success = 1;
     bool healthy = 2;
     string status = 3;

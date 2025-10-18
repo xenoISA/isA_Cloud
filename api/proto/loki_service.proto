@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package isa.loki;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/loki";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/loki";
 
 import "common.proto";
 import "google/protobuf/timestamp.proto";
@@ -240,7 +240,7 @@ message QueryStatsResponse {
     int64 total_bytes = 2;                          // 总字节数
     int64 streams_count = 3;                        // 流数量
     double query_time_ms = 4;                       // 查询耗时（毫秒）
-    map<LogLevel, int64> level_distribution = 5;    // 日志级别分布
+    map<string, int64> level_distribution = 5;      // 日志级别分布 (key: level name)
     repeated string top_labels = 6;                 // 热门标签
 }
 
@@ -374,7 +374,7 @@ message GetStatisticsResponse {
     int64 total_bytes = 2;                          // 总字节数
     int64 streams_count = 3;                        // 流数量
     map<string, int64> entries_by_service = 4;      // 按服务统计
-    map<LogLevel, int64> entries_by_level = 5;      // 按级别统计
+    map<string, int64> entries_by_level = 5;        // 按级别统计 (key: level name)
     repeated DataPoint ingestion_rate = 6;          // 摄入速率时序
     repeated string top_services = 7;               // 热门服务
     map<string, string> metadata = 8;               // 其他元数据

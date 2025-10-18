@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package isa.redis;
 
-option go_package = "github.com/isa-cloud/isa_cloud/pkg/proto/redis";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/redis";
 
 import "common.proto";
 import "google/protobuf/timestamp.proto";
@@ -92,7 +92,7 @@ service RedisService {
     rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse);
     
     // ========== 批量操作 (Batch Operations) ==========
-    rpc ExecuteBatch(ExecuteBatchRequest) returns (ExecuteBatchResponse);
+    rpc ExecuteBatch(RedisBatchRequest) returns (RedisBatchResponse);
     
     // ========== 会话管理 (Session Management) ==========
     rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
@@ -767,13 +767,13 @@ message UnsubscribeResponse {
 // 批量操作请求/响应
 // ========================================
 
-message ExecuteBatchRequest {
+message RedisBatchRequest {
     string user_id = 1;
     string organization_id = 2;
     repeated BatchCommand commands = 3;
 }
 
-message ExecuteBatchResponse {
+message RedisBatchResponse {
     bool success = 1;
     int32 executed_count = 2;
     repeated string errors = 3;
