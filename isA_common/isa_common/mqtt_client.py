@@ -4,30 +4,45 @@
 MQTT gRPC Client
 """
 
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 from .base_client import BaseGRPCClient
 from .proto import mqtt_service_pb2, mqtt_service_pb2_grpc
+
+if TYPE_CHECKING:
+    from .consul_client import ConsulRegistry
 
 
 class MQTTClient(BaseGRPCClient):
     """MQTT gRPC client"""
 
-    def __init__(self, host: str = 'localhost', port: int = 50053, user_id: Optional[str] = None,
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, user_id: Optional[str] = None,
                  organization_id: Optional[str] = None, lazy_connect: bool = True,
-                 enable_compression: bool = True, enable_retry: bool = True):
+                 enable_compression: bool = True, enable_retry: bool = True,
+                 consul_registry: Optional['ConsulRegistry'] = None, service_name_override: Optional[str] = None):
         """
         Initialize MQTT client
 
         Args:
-            host: Service address (default: localhost)
-            port: Service port (default: 50053)
+            host: Service address (optional, will use Consul discovery if not provided)
+            port: Service port (optional, will use Consul discovery if not provided)
             user_id: User ID
             organization_id: Organization ID
             lazy_connect: Lazy connection (default: True)
             enable_compression: Enable compression (default: True)
             enable_retry: Enable retry (default: True)
+            consul_registry: ConsulRegistry instance for service discovery (optional)
+            service_name_override: Override service name for Consul lookup (optional, defaults to 'mqtt')
         """
-        super().__init__(host, port, user_id, lazy_connect, enable_compression, enable_retry)
+        super().__init__(
+            host=host,
+            port=port,
+            user_id=user_id,
+            lazy_connect=lazy_connect,
+            enable_compression=enable_compression,
+            enable_retry=enable_retry,
+            consul_registry=consul_registry,
+            service_name_override=service_name_override
+        )
         self.organization_id = organization_id or 'default-org'
 
     def _create_stub(self):
@@ -36,6 +51,9 @@ class MQTTClient(BaseGRPCClient):
 
     def service_name(self) -> str:
         return "MQTT"
+
+    def default_port(self) -> int:
+        return 50053
 
     def health_check(self, deep_check: bool = False) -> Optional[Dict]:
         """Health check"""
@@ -736,6 +754,216 @@ class MQTTClient(BaseGRPCClient):
 
         except Exception as e:
             return self.handle_error(e, "get device metrics")
+
+    # ============================================
+    # 设备消息监听（新增 - 替代 Gateway MQTT Adapter）
+    # ============================================
+
+    def subscribe_device_messages(self, organization_id: Optional[str] = None,
+                                  message_types: List[int] = None,
+                                  device_ids: List[str] = None,
+                                  topic_patterns: List[str] = None,
+                                  callback=None):
+        """
+        订阅所有设备消息流（替代 Gateway MQTT Adapter）
+
+        这个方法会持续监听 MQTT 设备消息并通过 gRPC Stream 接收
+
+        Args:
+            organization_id: 组织 ID（可选，用于过滤）
+            message_types: 订阅的消息类型列表（可选，默认所有类型）
+                          1=TELEMETRY, 2=STATUS, 3=AUTH, 4=REGISTRATION, 5=COMMAND_RESPONSE, 6=NOTIFICATION_ACK
+            device_ids: 订阅特定设备（可选，默认所有设备）
+            topic_patterns: 自定义 topic 模式（可选，如 ['devices/+/telemetry']）
+            callback: 回调函数 (device_id, message_type, topic, payload, timestamp, metadata)
+
+        Example:
+            def handle_device_message(device_id, message_type, topic, payload, timestamp, metadata):
+                print(f"Device {device_id} sent {message_type}: {payload}")
+
+            mqtt_client.subscribe_device_messages(
+                message_types=[1, 2],  # 只监听 TELEMETRY 和 STATUS
+                callback=handle_device_message
+            )
+        """
+        try:
+            self._ensure_connected()
+            request = mqtt_service_pb2.SubscribeDeviceMessagesRequest(
+                user_id=self.user_id,
+                organization_id=organization_id or '',
+                message_types=message_types or [],
+                device_ids=device_ids or [],
+                topic_patterns=topic_patterns or []
+            )
+
+            print(f"✅ [MQTT] Subscribing to device messages...")
+            if message_types:
+                print(f"   Message types: {message_types}")
+            if device_ids:
+                print(f"   Device IDs: {device_ids}")
+            if topic_patterns:
+                print(f"   Topic patterns: {topic_patterns}")
+
+            for message in self.stub.SubscribeDeviceMessages(request):
+                if callback:
+                    callback(
+                        message.device_id,
+                        message.message_type,
+                        message.topic,
+                        message.payload,
+                        message.timestamp,
+                        dict(message.metadata)
+                    )
+                else:
+                    print(f"📩 [MQTT] Device message from {message.device_id}")
+                    print(f"   Type: {message.message_type}")
+                    print(f"   Topic: {message.topic}")
+                    print(f"   Payload: {message.payload[:100]}")
+
+        except Exception as e:
+            self.handle_error(e, "subscribe device messages")
+
+    # ============================================
+    # Webhook 回调（新增）
+    # ============================================
+
+    def register_webhook(self, url: str,
+                        organization_id: Optional[str] = None,
+                        message_types: List[int] = None,
+                        device_ids: List[str] = None,
+                        topic_patterns: List[str] = None,
+                        headers: Dict[str, str] = None,
+                        secret: Optional[str] = None) -> Optional[Dict]:
+        """
+        注册 webhook 用于接收设备消息
+
+        Args:
+            url: 回调 URL（必须是 http/https）
+            organization_id: 组织 ID
+            message_types: 订阅的消息类型
+            device_ids: 订阅的设备 ID（空表示所有）
+            topic_patterns: Topic 模式（如 ['devices/+/telemetry']）
+            headers: 自定义 HTTP Headers（如认证 token）
+            secret: 签名密钥（用于验证回调）
+
+        Returns:
+            Dict with webhook_id and webhook info
+
+        Example:
+            result = mqtt_client.register_webhook(
+                url="http://device-service:8201/api/v1/mqtt/webhook",
+                message_types=[1, 2],  # TELEMETRY and STATUS
+                headers={"Authorization": "Bearer YOUR_TOKEN"},
+                secret="your-secret-key"
+            )
+            print(f"Webhook ID: {result['webhook_id']}")
+        """
+        try:
+            self._ensure_connected()
+            request = mqtt_service_pb2.RegisterWebhookRequest(
+                user_id=self.user_id,
+                organization_id=organization_id or '',
+                url=url,
+                message_types=message_types or [],
+                device_ids=device_ids or [],
+                topic_patterns=topic_patterns or [],
+                headers=headers or {},
+                secret=secret or ''
+            )
+
+            response = self.stub.RegisterWebhook(request)
+
+            if response.success:
+                print(f"✅ [MQTT] Webhook registered: {response.webhook_id}")
+                print(f"   URL: {url}")
+                return {
+                    'success': True,
+                    'webhook_id': response.webhook_id,
+                    'webhook': {
+                        'webhook_id': response.webhook.webhook_id,
+                        'url': response.webhook.url,
+                        'enabled': response.webhook.enabled,
+                        'success_count': response.webhook.success_count,
+                        'failure_count': response.webhook.failure_count,
+                    }
+                }
+            else:
+                print(f"⚠️  [MQTT] Webhook registration failed: {response.message}")
+                return None
+
+        except Exception as e:
+            return self.handle_error(e, "register webhook")
+
+    def unregister_webhook(self, webhook_id: str) -> bool:
+        """
+        注销 webhook
+
+        Args:
+            webhook_id: Webhook ID
+
+        Returns:
+            True if successful
+        """
+        try:
+            self._ensure_connected()
+            request = mqtt_service_pb2.UnregisterWebhookRequest(
+                user_id=self.user_id,
+                webhook_id=webhook_id
+            )
+
+            response = self.stub.UnregisterWebhook(request)
+
+            if response.success:
+                print(f"✅ [MQTT] Webhook unregistered: {webhook_id}")
+                return True
+            else:
+                print(f"⚠️  [MQTT] Unregister failed: {response.message}")
+                return False
+
+        except Exception as e:
+            self.handle_error(e, "unregister webhook")
+            return False
+
+    def list_webhooks(self, organization_id: Optional[str] = None,
+                     include_disabled: bool = False) -> List[Dict]:
+        """
+        列出已注册的 webhooks
+
+        Args:
+            organization_id: 组织 ID（可选）
+            include_disabled: 是否包含已禁用的
+
+        Returns:
+            List of webhook info dicts
+        """
+        try:
+            self._ensure_connected()
+            request = mqtt_service_pb2.ListWebhooksRequest(
+                user_id=self.user_id,
+                organization_id=organization_id or '',
+                include_disabled=include_disabled
+            )
+
+            response = self.stub.ListWebhooks(request)
+
+            webhooks = []
+            for webhook in response.webhooks:
+                webhooks.append({
+                    'webhook_id': webhook.webhook_id,
+                    'url': webhook.url,
+                    'enabled': webhook.enabled,
+                    'message_types': list(webhook.message_types),
+                    'device_ids': list(webhook.device_ids),
+                    'topic_patterns': list(webhook.topic_patterns),
+                    'success_count': webhook.success_count,
+                    'failure_count': webhook.failure_count,
+                })
+
+            print(f"✅ [MQTT] Listed {len(webhooks)} webhooks")
+            return webhooks
+
+        except Exception as e:
+            return self.handle_error(e, "list webhooks") or []
 
 
 # Quick test

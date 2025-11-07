@@ -381,8 +381,8 @@ func setDefaults() {
 	viper.SetDefault("services.user_service.retry.backoff", "1s")
 
 	viper.SetDefault("services.auth_service.host", "localhost")
-	viper.SetDefault("services.auth_service.http_port", 8101)
-	viper.SetDefault("services.auth_service.grpc_port", 9101)
+	viper.SetDefault("services.auth_service.http_port", 8201)
+	viper.SetDefault("services.auth_service.grpc_port", 9201)
 	viper.SetDefault("services.auth_service.timeout", "10s")
 
 	viper.SetDefault("services.agent_service.host", "localhost")

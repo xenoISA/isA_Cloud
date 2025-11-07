@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package isa.common;
 
-option go_package = "github.com/isa-cloud/isa_cloud/api/proto";
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/common";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";

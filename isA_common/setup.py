@@ -11,7 +11,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="isa-common",
-    version="0.1.4",
+    version="0.1.8",
     author="isA Platform",
     author_email="dev@isa-platform.com",
     description="Shared Python infrastructure library for isA platform",
@@ -34,7 +34,8 @@ setup(
         "grpcio-tools>=1.50.0",
         "pydantic>=2.0.0",
         "tenacity>=8.0.0",
-        "python-consul>=1.1.0",
+        "python-consul2>=0.1.5",
+        "asyncpg>=0.29.0",  # PostgreSQL async client
     ],
     extras_require={
         "dev": [

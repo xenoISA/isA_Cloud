@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-config
+  namespace: isa-cloud-staging
+  labels:
+    app: user
+    tier: applications
+data:
+  ENVIRONMENT: "staging"
+  DEBUG: "true"

@@ -1,0 +1,62 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: isa-cloud-staging
+
+bases:
+  - ../../base/infrastructure
+  - ../../base/grpc-services
+  # - ../../base/gateway
+  # - ../../base/applications
+
+# Override namespace
+namespace: isa-cloud-staging
+
+# Environment-specific labels
+commonLabels:
+  environment: staging
+
+# Replica count overrides
+replicas:
+  - name: consul
+    count: 3
+  - name: redis-grpc
+    count: 2
+
+# Resource patches for staging (smaller than production)
+patches:
+  - target:
+      kind: StatefulSet
+      name: consul
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "256m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "512Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "512m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+
+# ConfigMap generator for environment-specific configs
+configMapGenerator:
+  - name: env-config
+    literals:
+      - ENVIRONMENT=staging
+      - LOG_LEVEL=debug
+      - CONSUL_ADDR=consul-ui.isa-cloud-staging.svc.cluster.local:8500
+
+# Secret generator (for non-sensitive staging secrets)
+# For production, use External Secrets Operator
+secretGenerator:
+  - name: basic-auth
+    literals:
+      - username=admin
+      - password=changeme123  # TODO: Use proper secrets management
+
+generatorOptions:
+  disableNameSuffixHash: true

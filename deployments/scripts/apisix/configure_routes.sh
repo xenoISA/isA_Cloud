@@ -1,0 +1,235 @@
+#!/bin/bash
+# Configure APISIX Routes with Consul Service Discovery
+# This script creates routes for all microservices using the Admin API
+#
+# Usage: ./configure_routes.sh
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://localhost:9180}"
+ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+
+# Functions
+print_header() {
+    echo -e "${BLUE}================================================${NC}"
+    echo -e "${BLUE}$1${NC}"
+    echo -e "${BLUE}================================================${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+# Create a route with Consul service discovery
+create_route() {
+    local route_name=$1
+    local uri_pattern=$2
+    local service_name=$3
+    local enable_auth=${4:-false}
+    local rate_limit=${5:-100}
+
+    print_info "Creating route: $route_name -> $service_name"
+
+    # Build plugins JSON
+    local plugins='{}'
+
+    # Always add CORS
+    plugins=$(echo "$plugins" | jq '. + {
+        "cors": {
+            "allow_origins": "*",
+            "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+            "expose_headers": "X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
+            "max_age": 86400,
+            "allow_credentials": true
+        }
+    }')
+
+    # Add rate limiting
+    plugins=$(echo "$plugins" | jq --arg limit "$rate_limit" '. + {
+        "limit-count": {
+            "count": ($limit | tonumber),
+            "time_window": 60,
+            "rejected_code": 429,
+            "rejected_msg": "Rate limit exceeded",
+            "policy": "local"
+        }
+    }')
+
+    # Add JWT auth if enabled
+    if [ "$enable_auth" = "true" ]; then
+        plugins=$(echo "$plugins" | jq '. + {
+            "jwt-auth": {}
+        }')
+    fi
+
+    # Add request ID
+    plugins=$(echo "$plugins" | jq '. + {
+        "request-id": {
+            "algorithm": "uuid",
+            "include_in_response": true
+        }
+    }')
+
+    # Add Prometheus
+    plugins=$(echo "$plugins" | jq '. + {
+        "prometheus": {}
+    }')
+
+    # Create the route
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"name\": \"${route_name}\",
+            \"uri\": \"${uri_pattern}\",
+            \"upstream\": {
+                \"service_name\": \"${service_name}\",
+                \"type\": \"roundrobin\",
+                \"discovery_type\": \"consul\",
+                \"timeout\": {
+                    \"connect\": 6,
+                    \"send\": 6,
+                    \"read\": 10
+                },
+                \"keepalive_pool\": {
+                    \"size\": 320,
+                    \"idle_timeout\": 60,
+                    \"requests\": 1000
+                }
+            },
+            \"plugins\": ${plugins},
+            \"enable_websocket\": true,
+            \"status\": 1
+        }")
+
+    local http_code=$(echo "$response" | tail -n1)
+    local body=$(echo "$response" | head -n-1)
+
+    if [[ "$http_code" =~ ^20[0-9]$ ]]; then
+        print_success "Route created: $route_name"
+    else
+        print_error "Failed to create route: $route_name (HTTP $http_code)"
+        echo "$body" | jq '.' 2>/dev/null || echo "$body"
+        return 1
+    fi
+}
+
+# Check APISIX health
+check_apisix_health() {
+    print_header "Checking APISIX Health"
+
+    local status_code=$(curl -s -o /dev/null -w "%{http_code}" "${APISIX_ADMIN_URL}/apisix/admin/routes" -H "X-API-KEY: ${ADMIN_KEY}")
+
+    if [ "$status_code" -eq 200 ]; then
+        print_success "APISIX Admin API is healthy"
+        return 0
+    else
+        print_error "APISIX Admin API is not responding (HTTP $status_code)"
+        return 1
+    fi
+}
+
+# Main configuration
+main() {
+    print_header "APISIX Route Configuration"
+
+    # Check APISIX health
+    if ! check_apisix_health; then
+        print_error "APISIX is not ready. Please start APISIX first."
+        exit 1
+    fi
+
+    print_header "Creating Service Routes with Consul Discovery"
+
+    # Core Services
+    print_info "Configuring Core Services..."
+    create_route "auth_route" "/api/v1/auth/*" "auth_service" false 200
+    create_route "accounts_route" "/api/v1/accounts/*" "account_service" true 100
+    create_route "users_route" "/api/v1/users/*" "account_service" true 100
+    create_route "sessions_route" "/api/v1/sessions/*" "session_service" true 100
+    create_route "authorization_route" "/api/v1/authorization/*" "authorization_service" true 100
+
+    # AI/Platform Services
+    print_info "Configuring AI/Platform Services..."
+    create_route "agent_route" "/api/v1/agent/*" "agent_service" true 50
+    create_route "agents_route" "/api/v1/agents/*" "agent_service" true 50
+    create_route "model_route" "/api/v1/model/*" "model_service" true 50
+    create_route "models_route" "/api/v1/models/*" "model_service" true 50
+    create_route "mcp_route" "/api/v1/mcp/*" "mcp_service" true 50
+
+    # Business Services
+    print_info "Configuring Business Services..."
+    create_route "billing_route" "/api/v1/billing/*" "billing_service" true 100
+    create_route "orders_route" "/api/v1/orders/*" "order_service" true 100
+    create_route "payments_route" "/api/v1/payments/*" "payment_service" true 100
+    create_route "products_route" "/api/v1/products/*" "product_service" true 100
+    create_route "wallets_route" "/api/v1/wallets/*" "wallet_service" true 100
+    create_route "notifications_route" "/api/v1/notifications/*" "notification_service" true 200
+    create_route "compliance_route" "/api/v1/compliance/*" "compliance_service" true 50
+    create_route "vaults_route" "/api/v1/vaults/*" "vault_service" true 100
+
+    # Storage & Media Services
+    print_info "Configuring Storage & Media Services..."
+    create_route "storage_route" "/api/v1/storage/*" "storage_service" true 100
+    create_route "files_route" "/api/v1/files/*" "storage_service" true 100
+    create_route "albums_route" "/api/v1/albums/*" "album_service" true 100
+    create_route "media_route" "/api/v1/media/*" "media_service" true 100
+
+    # Personal & Social Services
+    print_info "Configuring Personal & Social Services..."
+    create_route "calendar_route" "/api/v1/calendar/*" "calendar_service" true 100
+    create_route "location_route" "/api/v1/location/*" "location_service" true 150
+    create_route "memory_route" "/api/v1/memory/*" "memory_service" true 100
+    create_route "weather_route" "/api/v1/weather/*" "weather_service" true 200
+
+    # Organizational Services
+    print_info "Configuring Organizational Services..."
+    create_route "audit_route" "/api/v1/audit/*" "audit_service" true 100
+    create_route "tasks_route" "/api/v1/tasks/*" "task_service" true 100
+    create_route "organizations_route" "/api/v1/organizations/*" "organization_service" true 100
+    create_route "invitations_route" "/api/v1/invitations/*" "invitation_service" true 100
+    create_route "events_route" "/api/v1/events/*" "event_service" true 150
+
+    # IoT Services
+    print_info "Configuring IoT Services..."
+    create_route "devices_route" "/api/v1/devices/*" "device_service" true 150
+    create_route "telemetry_route" "/api/v1/telemetry/*" "telemetry_service" true 200
+    create_route "firmware_route" "/api/v1/firmware/*" "ota_service" true 50
+
+    print_header "Route Configuration Complete"
+
+    # List all routes
+    print_info "Listing all configured routes..."
+    curl -s "${APISIX_ADMIN_URL}/apisix/admin/routes" -H "X-API-KEY: ${ADMIN_KEY}" | jq -r '.list[] | "\(.value.name): \(.value.uri) -> \(.value.upstream.service_name)"'
+
+    print_success "All routes configured successfully!"
+    echo ""
+    print_info "APISIX Admin API: ${APISIX_ADMIN_URL}"
+    print_info "APISIX Dashboard: http://localhost:9000"
+    print_info "Prometheus Metrics: http://localhost:9091/apisix/prometheus/metrics"
+}
+
+# Run main function
+main

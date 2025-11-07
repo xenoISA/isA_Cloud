@@ -3,13 +3,20 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -32,7 +39,27 @@ type MQTTServer struct {
 	devices     map[string]*DeviceState
 	topics      map[string]*TopicState
 	retained    map[string]*pb.MQTTMessage
+	webhooks    map[string]*WebhookState  // 新增：webhook 管理
 	mu          sync.RWMutex
+}
+
+// WebhookState Webhook 状态
+type WebhookState struct {
+	WebhookID       string
+	UserID          string
+	OrganizationID  string
+	URL             string
+	MessageTypes    []pb.DeviceMessageType
+	DeviceIDs       []string
+	TopicPatterns   []string
+	Headers         map[string]string
+	Secret          string
+	Enabled         bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	SuccessCount    int64
+	FailureCount    int64
+	cancelFunc      context.CancelFunc  // 用于停止 webhook
 }
 
 // Session 用户会话
@@ -89,6 +116,7 @@ func NewMQTTServer(mqttClient *mqtt.Client, cfg *messaging.MessagingConfig) (*MQ
 		devices:     make(map[string]*DeviceState),
 		topics:      make(map[string]*TopicState),
 		retained:    make(map[string]*pb.MQTTMessage),
+		webhooks:    make(map[string]*WebhookState),
 	}, nil
 }
 
@@ -847,6 +875,480 @@ func (s *MQTTServer) logAudit(userID, operation string, metadata map[string]stri
 	}
 	s.lokiClient.PushLog("mqtt", "info", fmt.Sprintf("User %s executed %s", userID, operation), labels)
 }
+
+// ========================================
+// 设备消息监听（新增 - 替代 Gateway MQTT Adapter）
+// ========================================
+
+// SubscribeDeviceMessages 订阅所有设备消息流
+func (s *MQTTServer) SubscribeDeviceMessages(req *pb.SubscribeDeviceMessagesRequest, stream pb.MQTTService_SubscribeDeviceMessagesServer) error {
+	fmt.Printf("[STREAM] SubscribeDeviceMessages called by user: %s\n", req.UserId)
+
+	// 构建要订阅的 topic 列表
+	var topics []string
+
+	if len(req.TopicPatterns) > 0 {
+		// 使用自定义 topic 模式
+		topics = req.TopicPatterns
+		fmt.Printf("[STREAM] Using custom topic patterns: %v\n", topics)
+	} else {
+		// 默认订阅所有设备相关 topic
+		topics = []string{
+			"devices/+/telemetry",
+			"devices/+/status",
+			"devices/+/auth",
+			"devices/+/registration",
+			"devices/+/commands/response",
+			"notifications/users/+/ack",
+			"notifications/system/+",
+		}
+		fmt.Printf("[STREAM] Using default topics: %v\n", topics)
+	}
+
+	// 创建消息通道
+	messageChan := make(chan *pb.DeviceMessage, 100)
+	done := make(chan bool)
+	fmt.Printf("[STREAM] Message channel created with buffer size 100\n")
+
+	// 订阅每个 topic
+	for _, topic := range topics {
+		topicPattern := topic // 避免闭包问题
+		fmt.Printf("[STREAM] Attempting to subscribe to: %s\n", topicPattern)
+
+		err := s.mqttClient.SubscribeWithQoS(topicPattern, 1, func(msgTopic string, payload []byte) error {
+			fmt.Printf("[MQTT-CALLBACK] ✅ Message received! Topic: %s, Size: %d bytes\n", msgTopic, len(payload))
+
+			// 解析设备 ID 和消息类型
+			deviceID := extractDeviceIDFromTopic(msgTopic)
+			messageType := classifyDeviceMessage(msgTopic)
+			fmt.Printf("[MQTT-CALLBACK] Parsed - DeviceID: %s, Type: %v\n", deviceID, messageType)
+
+			// 过滤：如果指定了设备 ID，只处理匹配的
+			if len(req.DeviceIds) > 0 {
+				if !contains(req.DeviceIds, deviceID) {
+					return nil
+				}
+			}
+
+			// 过滤：如果指定了消息类型，只处理匹配的
+			if len(req.MessageTypes) > 0 {
+				if !containsMessageType(req.MessageTypes, messageType) {
+					return nil
+				}
+			}
+
+			// 构建设备消息
+			deviceMessage := &pb.DeviceMessage{
+				DeviceId:    deviceID,
+				MessageType: messageType,
+				Topic:       msgTopic,
+				Payload:     payload,
+				Timestamp:   timestamppb.Now(),
+				Metadata: map[string]string{
+					"qos": "1",
+				},
+				Qos: pb.QoSLevel_QOS_AT_LEAST_ONCE,
+			}
+
+			// 发送到通道
+			select {
+			case messageChan <- deviceMessage:
+				fmt.Printf("[MQTT-CALLBACK] Message sent to channel successfully\n")
+			case <-done:
+				fmt.Printf("[MQTT-CALLBACK] Stream closed, dropping message\n")
+				return nil
+			default:
+				fmt.Printf("[MQTT-CALLBACK] ⚠️ Channel full, dropping message\n")
+			}
+			return nil
+		})
+
+		if err != nil {
+			fmt.Printf("[STREAM] ❌ Failed to subscribe to %s: %v\n", topicPattern, err)
+			close(done)
+			return status.Errorf(codes.Internal, "failed to subscribe to topic %s: %v", topicPattern, err)
+		}
+		fmt.Printf("[STREAM] ✅ Successfully subscribed to: %s\n", topicPattern)
+	}
+
+	// 监听客户端断开和消息发送
+	go func() {
+		<-stream.Context().Done()
+		fmt.Printf("[STREAM] Client disconnected, cleaning up\n")
+		close(done)
+	}()
+
+	fmt.Printf("[STREAM] Entering message forwarding loop...\n")
+
+	// 持续发送消息到客户端
+	for {
+		select {
+		case msg := <-messageChan:
+			fmt.Printf("[STREAM] Forwarding message to client: %s - %s\n", msg.DeviceId, msg.Topic)
+			if err := stream.Send(msg); err != nil {
+				fmt.Printf("[STREAM] ❌ Error sending to client: %v\n", err)
+				// 清理订阅
+				for _, topic := range topics {
+					s.mqttClient.Unsubscribe(topic)
+				}
+				return err
+			}
+			fmt.Printf("[STREAM] ✅ Message sent to client successfully\n")
+		case <-done:
+			fmt.Printf("[STREAM] Stream done, unsubscribing from all topics\n")
+			// 清理订阅
+			for _, topic := range topics {
+				s.mqttClient.Unsubscribe(topic)
+				fmt.Printf("[STREAM] Unsubscribed from: %s\n", topic)
+			}
+			return nil
+		}
+	}
+}
+
+// extractDeviceIDFromTopic 从 topic 中提取设备 ID
+func extractDeviceIDFromTopic(topic string) string {
+	parts := strings.Split(topic, "/")
+	if len(parts) >= 2 && parts[0] == "devices" {
+		return parts[1]
+	}
+	if len(parts) >= 3 && parts[0] == "notifications" && parts[1] == "users" {
+		return parts[2] // 用户 ID 作为设备 ID
+	}
+	if len(parts) >= 3 && parts[0] == "notifications" && parts[1] == "system" {
+		return parts[2] // 系统 ID
+	}
+	return "unknown"
+}
+
+// classifyDeviceMessage 根据 topic 分类消息类型
+func classifyDeviceMessage(topic string) pb.DeviceMessageType {
+	if strings.Contains(topic, "/telemetry") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_TELEMETRY
+	}
+	if strings.Contains(topic, "/status") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_STATUS
+	}
+	if strings.Contains(topic, "/auth") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_AUTH
+	}
+	if strings.Contains(topic, "/registration") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_REGISTRATION
+	}
+	if strings.Contains(topic, "/commands/response") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_COMMAND_RESPONSE
+	}
+	if strings.Contains(topic, "/ack") {
+		return pb.DeviceMessageType_DEVICE_MESSAGE_NOTIFICATION_ACK
+	}
+	return pb.DeviceMessageType_DEVICE_MESSAGE_UNKNOWN
+}
+
+// contains 检查字符串切片是否包含某个值
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
+}
+
+// containsMessageType 检查消息类型切片是否包含某个类型
+func containsMessageType(types []pb.DeviceMessageType, val pb.DeviceMessageType) bool {
+	for _, t := range types {
+		if t == val {
+			return true
+		}
+	}
+	return false
+}
+
+// ========================================
+// Webhook 回调（新增）
+// ========================================
+
+// RegisterWebhook 注册 webhook
+func (s *MQTTServer) RegisterWebhook(ctx context.Context, req *pb.RegisterWebhookRequest) (*pb.RegisterWebhookResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 生成 webhook ID
+	webhookID := uuid.New().String()
+
+	// 创建 webhook 状态
+	webhook := &WebhookState{
+		WebhookID:      webhookID,
+		UserID:         req.UserId,
+		OrganizationID: req.OrganizationId,
+		URL:            req.Url,
+		MessageTypes:   req.MessageTypes,
+		DeviceIDs:      req.DeviceIds,
+		TopicPatterns:  req.TopicPatterns,
+		Headers:        req.Headers,
+		Secret:         req.Secret,
+		Enabled:        true,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		SuccessCount:   0,
+		FailureCount:   0,
+	}
+
+	// 启动 webhook 监听器
+	webhookCtx, cancel := context.WithCancel(context.Background())
+	webhook.cancelFunc = cancel
+
+	go s.runWebhookListener(webhookCtx, webhook)
+
+	// 保存 webhook
+	s.webhooks[webhookID] = webhook
+
+	// 构建响应
+	webhookInfo := &pb.WebhookInfo{
+		WebhookId:      webhook.WebhookID,
+		UserId:         webhook.UserID,
+		Url:            webhook.URL,
+		MessageTypes:   webhook.MessageTypes,
+		DeviceIds:      webhook.DeviceIDs,
+		TopicPatterns:  webhook.TopicPatterns,
+		Headers:        webhook.Headers,
+		Enabled:        webhook.Enabled,
+		CreatedAt:      timestamppb.New(webhook.CreatedAt),
+		UpdatedAt:      timestamppb.New(webhook.UpdatedAt),
+		SuccessCount:   webhook.SuccessCount,
+		FailureCount:   webhook.FailureCount,
+	}
+
+	return &pb.RegisterWebhookResponse{
+		Success:   true,
+		WebhookId: webhookID,
+		Webhook:   webhookInfo,
+		Message:   "Webhook registered successfully",
+	}, nil
+}
+
+// UnregisterWebhook 注销 webhook
+func (s *MQTTServer) UnregisterWebhook(ctx context.Context, req *pb.UnregisterWebhookRequest) (*pb.UnregisterWebhookResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	webhook, exists := s.webhooks[req.WebhookId]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "webhook not found: %s", req.WebhookId)
+	}
+
+	// 检查权限
+	if webhook.UserID != req.UserId {
+		return nil, status.Errorf(codes.PermissionDenied, "permission denied")
+	}
+
+	// 停止 webhook 监听器
+	if webhook.cancelFunc != nil {
+		webhook.cancelFunc()
+	}
+
+	// 删除 webhook
+	delete(s.webhooks, req.WebhookId)
+
+	return &pb.UnregisterWebhookResponse{
+		Success: true,
+		Message: "Webhook unregistered successfully",
+	}, nil
+}
+
+// ListWebhooks 列出 webhooks
+func (s *MQTTServer) ListWebhooks(ctx context.Context, req *pb.ListWebhooksRequest) (*pb.ListWebhooksResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var webhookInfos []*pb.WebhookInfo
+	for _, webhook := range s.webhooks {
+		// 过滤：只返回当前用户的 webhooks
+		if webhook.UserID != req.UserId {
+			continue
+		}
+
+		// 过滤：如果指定了组织，只返回该组织的
+		if req.OrganizationId != "" && webhook.OrganizationID != req.OrganizationId {
+			continue
+		}
+
+		// 过滤：是否包含已禁用的
+		if !req.IncludeDisabled && !webhook.Enabled {
+			continue
+		}
+
+		webhookInfo := &pb.WebhookInfo{
+			WebhookId:      webhook.WebhookID,
+			UserId:         webhook.UserID,
+			Url:            webhook.URL,
+			MessageTypes:   webhook.MessageTypes,
+			DeviceIds:      webhook.DeviceIDs,
+			TopicPatterns:  webhook.TopicPatterns,
+			Headers:        webhook.Headers,
+			Enabled:        webhook.Enabled,
+			CreatedAt:      timestamppb.New(webhook.CreatedAt),
+			UpdatedAt:      timestamppb.New(webhook.UpdatedAt),
+			SuccessCount:   webhook.SuccessCount,
+			FailureCount:   webhook.FailureCount,
+		}
+		webhookInfos = append(webhookInfos, webhookInfo)
+	}
+
+	return &pb.ListWebhooksResponse{
+		Webhooks:   webhookInfos,
+		TotalCount: int32(len(webhookInfos)),
+	}, nil
+}
+
+// runWebhookListener 运行 webhook 监听器
+func (s *MQTTServer) runWebhookListener(ctx context.Context, webhook *WebhookState) {
+	// 构建要订阅的 topic 列表
+	var topics []string
+	if len(webhook.TopicPatterns) > 0 {
+		topics = webhook.TopicPatterns
+	} else {
+		// 默认订阅所有设备 topic
+		topics = []string{
+			"devices/+/telemetry",
+			"devices/+/status",
+			"devices/+/auth",
+			"devices/+/registration",
+			"devices/+/commands/response",
+		}
+	}
+
+	// HTTP 客户端
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	// 订阅每个 topic
+	for _, topic := range topics {
+		topicPattern := topic
+		s.mqttClient.SubscribeWithQoS(topicPattern, 1, func(msgTopic string, msgPayload []byte) error {
+			// 检查 context 是否已取消
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+
+			// 过滤设备 ID
+			deviceID := extractDeviceIDFromTopic(msgTopic)
+			if len(webhook.DeviceIDs) > 0 && !contains(webhook.DeviceIDs, deviceID) {
+				return nil
+			}
+
+			// 过滤消息类型
+			messageType := classifyDeviceMessage(msgTopic)
+			if len(webhook.MessageTypes) > 0 && !containsMessageType(webhook.MessageTypes, messageType) {
+				return nil
+			}
+
+			// 构建 webhook payload
+			payload := map[string]interface{}{
+				"webhook_id":   webhook.WebhookID,
+				"device_id":    deviceID,
+				"message_type": messageType.String(),
+				"topic":        msgTopic,
+				"payload":      string(msgPayload),
+				"timestamp":    time.Now().UTC().Format(time.RFC3339),
+				"qos":          1,
+			}
+
+			// 发送 HTTP 请求
+			go s.sendWebhookRequest(httpClient, webhook, payload)
+			return nil
+		})
+	}
+
+	// 等待 context 取消
+	<-ctx.Done()
+
+	// 清理订阅
+	for _, topic := range topics {
+		s.mqttClient.Unsubscribe(topic)
+	}
+}
+
+// sendWebhookRequest 发送 webhook HTTP 请求
+func (s *MQTTServer) sendWebhookRequest(client *http.Client, webhook *WebhookState, payload map[string]interface{}) {
+	// 序列化 payload
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		s.incrementWebhookFailure(webhook.WebhookID)
+		return
+	}
+
+	// 创建 HTTP 请求
+	req, err := http.NewRequest("POST", webhook.URL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		s.incrementWebhookFailure(webhook.WebhookID)
+		return
+	}
+
+	// 设置 Headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "isA-MQTT-Webhook/1.0")
+	req.Header.Set("X-Webhook-ID", webhook.WebhookID)
+	req.Header.Set("X-Timestamp", time.Now().UTC().Format(time.RFC3339))
+
+	// 添加自定义 headers
+	for key, value := range webhook.Headers {
+		req.Header.Set(key, value)
+	}
+
+	// 添加签名（如果有 secret）
+	if webhook.Secret != "" {
+		signature := generateHMACSHA256(jsonData, webhook.Secret)
+		req.Header.Set("X-Webhook-Signature", signature)
+	}
+
+	// 发送请求
+	resp, err := client.Do(req)
+	if err != nil {
+		s.incrementWebhookFailure(webhook.WebhookID)
+		return
+	}
+	defer resp.Body.Close()
+
+	// 检查响应状态
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		s.incrementWebhookSuccess(webhook.WebhookID)
+	} else {
+		s.incrementWebhookFailure(webhook.WebhookID)
+	}
+}
+
+// incrementWebhookSuccess 增加 webhook 成功计数
+func (s *MQTTServer) incrementWebhookSuccess(webhookID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if webhook, exists := s.webhooks[webhookID]; exists {
+		webhook.SuccessCount++
+		webhook.UpdatedAt = time.Now()
+	}
+}
+
+// incrementWebhookFailure 增加 webhook 失败计数
+func (s *MQTTServer) incrementWebhookFailure(webhookID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if webhook, exists := s.webhooks[webhookID]; exists {
+		webhook.FailureCount++
+		webhook.UpdatedAt = time.Now()
+	}
+}
+
+// generateHMACSHA256 生成 HMAC-SHA256 签名
+func generateHMACSHA256(data []byte, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ========================================
+// 辅助函数
+// ========================================
 
 func (s *MQTTServer) logError(userID, operation string, err error) {
 	if s.lokiClient == nil {

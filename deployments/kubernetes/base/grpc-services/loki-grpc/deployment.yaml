@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki-grpc
+  namespace: isa-cloud-staging
+  labels:
+    app: loki-grpc
+    tier: grpc-services
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: loki-grpc
+  template:
+    metadata:
+      labels:
+        app: loki-grpc
+        tier: grpc-services
+    spec:
+      containers:
+      - name: loki-grpc
+        image: isa-loki-service:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: grpc
+          containerPort: 50054
+          protocol: TCP
+
+        env:
+        - name: SERVICE_HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ISA_CLOUD_LOKI_URL
+          value: "http://loki.isa-cloud-staging.svc.cluster.local:3100"
+        - name: ISA_CLOUD_LOKI_TENANT_ID
+          value: ""
+        - name: ISA_CLOUD_CONSUL_ENABLED
+          value: "true"
+        - name: ISA_CLOUD_CONSUL_HOST
+          value: "consul.isa-cloud-staging.svc.cluster.local"
+        - name: ISA_CLOUD_CONSUL_PORT
+          value: "8500"
+        - name: GRPC_PORT
+          value: "50054"
+        - name: SERVICE_NAME
+          value: "loki-grpc-service"
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 256m
+            memory: 512Mi
+
+        livenessProbe:
+          tcpSocket:
+            port: 50054
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          tcpSocket:
+            port: 50054
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+      initContainers:
+      - name: wait-for-loki
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        command: ['sh', '-c', 'until nc -z loki.isa-cloud-staging.svc.cluster.local 3100; do echo waiting for loki; sleep 2; done']

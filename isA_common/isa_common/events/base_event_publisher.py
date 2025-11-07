@@ -8,11 +8,14 @@ Generic event publisher that can be extended for business-specific needs.
 
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from abc import ABC, abstractmethod
 
 from ..nats_client import NATSClient
 from .base_event_models import BaseEvent
+
+if TYPE_CHECKING:
+    from ..consul_client import ConsulRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -39,34 +42,38 @@ class BaseEventPublisher(ABC):
 
     def __init__(
         self,
-        nats_host: str = 'localhost',
-        nats_port: int = 50056,
+        nats_host: Optional[str] = None,
+        nats_port: Optional[int] = None,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         enable_compression: bool = False,
-        service_name: Optional[str] = None
+        service_name: Optional[str] = None,
+        consul_registry: Optional['ConsulRegistry'] = None
     ):
         """
         Initialize event publisher.
 
         Args:
-            nats_host: NATS service host
-            nats_port: NATS service gRPC port
+            nats_host: NATS service host (optional, will use Consul discovery if not provided)
+            nats_port: NATS service gRPC port (optional, will use Consul discovery if not provided)
             user_id: Default user ID for events
             organization_id: Default organization ID
             enable_compression: Enable message compression
             service_name: Name of the service publishing events
+            consul_registry: ConsulRegistry instance for service discovery (optional)
         """
         self.nats_client = NATSClient(
             host=nats_host,
             port=nats_port,
             user_id=user_id or service_name,
             organization_id=organization_id,
-            enable_compression=enable_compression
+            enable_compression=enable_compression,
+            consul_registry=consul_registry
         )
         self.default_user_id = user_id
         self.default_org_id = organization_id
         self._service_name = service_name
+        self.consul_registry = consul_registry
 
     @abstractmethod
     def service_name(self) -> str:
@@ -85,9 +92,24 @@ class BaseEventPublisher(ABC):
         """Context manager exit"""
         self.close()
 
+    async def __aenter__(self):
+        """Async context manager entry"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.aclose()
+
     def close(self):
         """Close NATS connection"""
         if hasattr(self.nats_client, 'close'):
+            self.nats_client.close()
+
+    async def aclose(self):
+        """Async close NATS connection"""
+        if hasattr(self.nats_client, 'aclose'):
+            await self.nats_client.aclose()
+        elif hasattr(self.nats_client, 'close'):
             self.nats_client.close()
 
     def _serialize_event(self, event: BaseEvent) -> bytes:

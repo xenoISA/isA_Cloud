@@ -10,7 +10,7 @@
 package mqtt
 
 import (
-	_ "github.com/isa-cloud/isa_cloud/api/proto"
+	_ "github.com/isa-cloud/isa_cloud/api/proto/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -131,6 +131,68 @@ func (x DeviceStatus) Number() protoreflect.EnumNumber {
 // Deprecated: Use DeviceStatus.Descriptor instead.
 func (DeviceStatus) EnumDescriptor() ([]byte, []int) {
 	return file_mqtt_service_proto_rawDescGZIP(), []int{1}
+}
+
+// 设备消息类型
+type DeviceMessageType int32
+
+const (
+	DeviceMessageType_DEVICE_MESSAGE_UNKNOWN          DeviceMessageType = 0
+	DeviceMessageType_DEVICE_MESSAGE_TELEMETRY        DeviceMessageType = 1 // 遥测数据
+	DeviceMessageType_DEVICE_MESSAGE_STATUS           DeviceMessageType = 2 // 状态更新
+	DeviceMessageType_DEVICE_MESSAGE_AUTH             DeviceMessageType = 3 // 认证请求
+	DeviceMessageType_DEVICE_MESSAGE_REGISTRATION     DeviceMessageType = 4 // 注册请求
+	DeviceMessageType_DEVICE_MESSAGE_COMMAND_RESPONSE DeviceMessageType = 5 // 命令响应
+	DeviceMessageType_DEVICE_MESSAGE_NOTIFICATION_ACK DeviceMessageType = 6 // 通知确认
+)
+
+// Enum value maps for DeviceMessageType.
+var (
+	DeviceMessageType_name = map[int32]string{
+		0: "DEVICE_MESSAGE_UNKNOWN",
+		1: "DEVICE_MESSAGE_TELEMETRY",
+		2: "DEVICE_MESSAGE_STATUS",
+		3: "DEVICE_MESSAGE_AUTH",
+		4: "DEVICE_MESSAGE_REGISTRATION",
+		5: "DEVICE_MESSAGE_COMMAND_RESPONSE",
+		6: "DEVICE_MESSAGE_NOTIFICATION_ACK",
+	}
+	DeviceMessageType_value = map[string]int32{
+		"DEVICE_MESSAGE_UNKNOWN":          0,
+		"DEVICE_MESSAGE_TELEMETRY":        1,
+		"DEVICE_MESSAGE_STATUS":           2,
+		"DEVICE_MESSAGE_AUTH":             3,
+		"DEVICE_MESSAGE_REGISTRATION":     4,
+		"DEVICE_MESSAGE_COMMAND_RESPONSE": 5,
+		"DEVICE_MESSAGE_NOTIFICATION_ACK": 6,
+	}
+)
+
+func (x DeviceMessageType) Enum() *DeviceMessageType {
+	p := new(DeviceMessageType)
+	*p = x
+	return p
+}
+
+func (x DeviceMessageType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DeviceMessageType) Descriptor() protoreflect.EnumDescriptor {
+	return file_mqtt_service_proto_enumTypes[2].Descriptor()
+}
+
+func (DeviceMessageType) Type() protoreflect.EnumType {
+	return &file_mqtt_service_proto_enumTypes[2]
+}
+
+func (x DeviceMessageType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DeviceMessageType.Descriptor instead.
+func (DeviceMessageType) EnumDescriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{2}
 }
 
 // 设备信息
@@ -3508,6 +3570,696 @@ func (x *MQTTHealthCheckResponse) GetMessage() string {
 	return ""
 }
 
+// 订阅设备消息请求
+type SubscribeDeviceMessagesRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	UserId         string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                                                           // 用户 ID
+	OrganizationId string                 `protobuf:"bytes,2,opt,name=organization_id,json=organizationId,proto3" json:"organization_id,omitempty"`                                   // 组织 ID（可选，用于过滤）
+	MessageTypes   []DeviceMessageType    `protobuf:"varint,3,rep,packed,name=message_types,json=messageTypes,proto3,enum=isa.mqtt.DeviceMessageType" json:"message_types,omitempty"` // 订阅的消息类型（空表示所有类型）
+	DeviceIds      []string               `protobuf:"bytes,4,rep,name=device_ids,json=deviceIds,proto3" json:"device_ids,omitempty"`                                                  // 订阅特定设备（空表示所有设备）
+	TopicPatterns  []string               `protobuf:"bytes,5,rep,name=topic_patterns,json=topicPatterns,proto3" json:"topic_patterns,omitempty"`                                      // 自定义 topic 模式（如 devices/+/telemetry）
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SubscribeDeviceMessagesRequest) Reset() {
+	*x = SubscribeDeviceMessagesRequest{}
+	mi := &file_mqtt_service_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeDeviceMessagesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeDeviceMessagesRequest) ProtoMessage() {}
+
+func (x *SubscribeDeviceMessagesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeDeviceMessagesRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeDeviceMessagesRequest) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *SubscribeDeviceMessagesRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SubscribeDeviceMessagesRequest) GetOrganizationId() string {
+	if x != nil {
+		return x.OrganizationId
+	}
+	return ""
+}
+
+func (x *SubscribeDeviceMessagesRequest) GetMessageTypes() []DeviceMessageType {
+	if x != nil {
+		return x.MessageTypes
+	}
+	return nil
+}
+
+func (x *SubscribeDeviceMessagesRequest) GetDeviceIds() []string {
+	if x != nil {
+		return x.DeviceIds
+	}
+	return nil
+}
+
+func (x *SubscribeDeviceMessagesRequest) GetTopicPatterns() []string {
+	if x != nil {
+		return x.TopicPatterns
+	}
+	return nil
+}
+
+// 设备消息（流式返回）
+type DeviceMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`                                                           // 设备 ID
+	MessageType   DeviceMessageType      `protobuf:"varint,2,opt,name=message_type,json=messageType,proto3,enum=isa.mqtt.DeviceMessageType" json:"message_type,omitempty"`                 // 消息类型
+	Topic         string                 `protobuf:"bytes,3,opt,name=topic,proto3" json:"topic,omitempty"`                                                                                 // 原始 MQTT topic
+	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`                                                                             // 消息内容
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                                                         // 时间戳
+	Metadata      map[string]string      `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 额外元数据
+	Qos           QoSLevel               `protobuf:"varint,7,opt,name=qos,proto3,enum=isa.mqtt.QoSLevel" json:"qos,omitempty"`                                                             // QoS 级别
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceMessage) Reset() {
+	*x = DeviceMessage{}
+	mi := &file_mqtt_service_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceMessage) ProtoMessage() {}
+
+func (x *DeviceMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceMessage.ProtoReflect.Descriptor instead.
+func (*DeviceMessage) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *DeviceMessage) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DeviceMessage) GetMessageType() DeviceMessageType {
+	if x != nil {
+		return x.MessageType
+	}
+	return DeviceMessageType_DEVICE_MESSAGE_UNKNOWN
+}
+
+func (x *DeviceMessage) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *DeviceMessage) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *DeviceMessage) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *DeviceMessage) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *DeviceMessage) GetQos() QoSLevel {
+	if x != nil {
+		return x.Qos
+	}
+	return QoSLevel_QOS_AT_MOST_ONCE
+}
+
+// Webhook 信息
+type WebhookInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WebhookId     string                 `protobuf:"bytes,1,opt,name=webhook_id,json=webhookId,proto3" json:"webhook_id,omitempty"`                                                      // Webhook ID
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                                                               // 用户 ID
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`                                                                                   // 回调 URL
+	MessageTypes  []DeviceMessageType    `protobuf:"varint,4,rep,packed,name=message_types,json=messageTypes,proto3,enum=isa.mqtt.DeviceMessageType" json:"message_types,omitempty"`     // 订阅的消息类型
+	DeviceIds     []string               `protobuf:"bytes,5,rep,name=device_ids,json=deviceIds,proto3" json:"device_ids,omitempty"`                                                      // 订阅的设备 ID
+	TopicPatterns []string               `protobuf:"bytes,6,rep,name=topic_patterns,json=topicPatterns,proto3" json:"topic_patterns,omitempty"`                                          // Topic 模式
+	Headers       map[string]string      `protobuf:"bytes,7,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 自定义 HTTP Headers
+	Enabled       bool                   `protobuf:"varint,8,opt,name=enabled,proto3" json:"enabled,omitempty"`                                                                          // 是否启用
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`                                                      // 创建时间
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                                                     // 更新时间
+	SuccessCount  int64                  `protobuf:"varint,11,opt,name=success_count,json=successCount,proto3" json:"success_count,omitempty"`                                           // 成功调用次数
+	FailureCount  int64                  `protobuf:"varint,12,opt,name=failure_count,json=failureCount,proto3" json:"failure_count,omitempty"`                                           // 失败调用次数
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WebhookInfo) Reset() {
+	*x = WebhookInfo{}
+	mi := &file_mqtt_service_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebhookInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebhookInfo) ProtoMessage() {}
+
+func (x *WebhookInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebhookInfo.ProtoReflect.Descriptor instead.
+func (*WebhookInfo) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *WebhookInfo) GetWebhookId() string {
+	if x != nil {
+		return x.WebhookId
+	}
+	return ""
+}
+
+func (x *WebhookInfo) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WebhookInfo) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *WebhookInfo) GetMessageTypes() []DeviceMessageType {
+	if x != nil {
+		return x.MessageTypes
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetDeviceIds() []string {
+	if x != nil {
+		return x.DeviceIds
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetTopicPatterns() []string {
+	if x != nil {
+		return x.TopicPatterns
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *WebhookInfo) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *WebhookInfo) GetSuccessCount() int64 {
+	if x != nil {
+		return x.SuccessCount
+	}
+	return 0
+}
+
+func (x *WebhookInfo) GetFailureCount() int64 {
+	if x != nil {
+		return x.FailureCount
+	}
+	return 0
+}
+
+// 注册 Webhook 请求
+type RegisterWebhookRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	UserId         string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                                                               // 用户 ID
+	OrganizationId string                 `protobuf:"bytes,2,opt,name=organization_id,json=organizationId,proto3" json:"organization_id,omitempty"`                                       // 组织 ID
+	Url            string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`                                                                                   // 回调 URL（必须是 http/https）
+	MessageTypes   []DeviceMessageType    `protobuf:"varint,4,rep,packed,name=message_types,json=messageTypes,proto3,enum=isa.mqtt.DeviceMessageType" json:"message_types,omitempty"`     // 订阅的消息类型
+	DeviceIds      []string               `protobuf:"bytes,5,rep,name=device_ids,json=deviceIds,proto3" json:"device_ids,omitempty"`                                                      // 订阅的设备 ID（空表示所有）
+	TopicPatterns  []string               `protobuf:"bytes,6,rep,name=topic_patterns,json=topicPatterns,proto3" json:"topic_patterns,omitempty"`                                          // Topic 模式（如 devices/+/telemetry）
+	Headers        map[string]string      `protobuf:"bytes,7,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 自定义 HTTP Headers（如认证 token）
+	Secret         string                 `protobuf:"bytes,8,opt,name=secret,proto3" json:"secret,omitempty"`                                                                             // 签名密钥（用于验证回调）
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RegisterWebhookRequest) Reset() {
+	*x = RegisterWebhookRequest{}
+	mi := &file_mqtt_service_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterWebhookRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterWebhookRequest) ProtoMessage() {}
+
+func (x *RegisterWebhookRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterWebhookRequest.ProtoReflect.Descriptor instead.
+func (*RegisterWebhookRequest) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *RegisterWebhookRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RegisterWebhookRequest) GetOrganizationId() string {
+	if x != nil {
+		return x.OrganizationId
+	}
+	return ""
+}
+
+func (x *RegisterWebhookRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *RegisterWebhookRequest) GetMessageTypes() []DeviceMessageType {
+	if x != nil {
+		return x.MessageTypes
+	}
+	return nil
+}
+
+func (x *RegisterWebhookRequest) GetDeviceIds() []string {
+	if x != nil {
+		return x.DeviceIds
+	}
+	return nil
+}
+
+func (x *RegisterWebhookRequest) GetTopicPatterns() []string {
+	if x != nil {
+		return x.TopicPatterns
+	}
+	return nil
+}
+
+func (x *RegisterWebhookRequest) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *RegisterWebhookRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+type RegisterWebhookResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	WebhookId     string                 `protobuf:"bytes,2,opt,name=webhook_id,json=webhookId,proto3" json:"webhook_id,omitempty"` // 生成的 Webhook ID
+	Webhook       *WebhookInfo           `protobuf:"bytes,3,opt,name=webhook,proto3" json:"webhook,omitempty"`
+	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterWebhookResponse) Reset() {
+	*x = RegisterWebhookResponse{}
+	mi := &file_mqtt_service_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterWebhookResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterWebhookResponse) ProtoMessage() {}
+
+func (x *RegisterWebhookResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterWebhookResponse.ProtoReflect.Descriptor instead.
+func (*RegisterWebhookResponse) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *RegisterWebhookResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *RegisterWebhookResponse) GetWebhookId() string {
+	if x != nil {
+		return x.WebhookId
+	}
+	return ""
+}
+
+func (x *RegisterWebhookResponse) GetWebhook() *WebhookInfo {
+	if x != nil {
+		return x.Webhook
+	}
+	return nil
+}
+
+func (x *RegisterWebhookResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// 注销 Webhook 请求
+type UnregisterWebhookRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WebhookId     string                 `protobuf:"bytes,2,opt,name=webhook_id,json=webhookId,proto3" json:"webhook_id,omitempty"` // Webhook ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterWebhookRequest) Reset() {
+	*x = UnregisterWebhookRequest{}
+	mi := &file_mqtt_service_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterWebhookRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterWebhookRequest) ProtoMessage() {}
+
+func (x *UnregisterWebhookRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterWebhookRequest.ProtoReflect.Descriptor instead.
+func (*UnregisterWebhookRequest) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *UnregisterWebhookRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *UnregisterWebhookRequest) GetWebhookId() string {
+	if x != nil {
+		return x.WebhookId
+	}
+	return ""
+}
+
+type UnregisterWebhookResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterWebhookResponse) Reset() {
+	*x = UnregisterWebhookResponse{}
+	mi := &file_mqtt_service_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterWebhookResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterWebhookResponse) ProtoMessage() {}
+
+func (x *UnregisterWebhookResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterWebhookResponse.ProtoReflect.Descriptor instead.
+func (*UnregisterWebhookResponse) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *UnregisterWebhookResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UnregisterWebhookResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// 列出 Webhooks 请求
+type ListWebhooksRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	OrganizationId  string                 `protobuf:"bytes,2,opt,name=organization_id,json=organizationId,proto3" json:"organization_id,omitempty"`
+	IncludeDisabled bool                   `protobuf:"varint,3,opt,name=include_disabled,json=includeDisabled,proto3" json:"include_disabled,omitempty"` // 是否包含已禁用的
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListWebhooksRequest) Reset() {
+	*x = ListWebhooksRequest{}
+	mi := &file_mqtt_service_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWebhooksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWebhooksRequest) ProtoMessage() {}
+
+func (x *ListWebhooksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWebhooksRequest.ProtoReflect.Descriptor instead.
+func (*ListWebhooksRequest) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *ListWebhooksRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListWebhooksRequest) GetOrganizationId() string {
+	if x != nil {
+		return x.OrganizationId
+	}
+	return ""
+}
+
+func (x *ListWebhooksRequest) GetIncludeDisabled() bool {
+	if x != nil {
+		return x.IncludeDisabled
+	}
+	return false
+}
+
+type ListWebhooksResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Webhooks      []*WebhookInfo         `protobuf:"bytes,1,rep,name=webhooks,proto3" json:"webhooks,omitempty"`
+	TotalCount    int32                  `protobuf:"varint,2,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListWebhooksResponse) Reset() {
+	*x = ListWebhooksResponse{}
+	mi := &file_mqtt_service_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListWebhooksResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListWebhooksResponse) ProtoMessage() {}
+
+func (x *ListWebhooksResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mqtt_service_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListWebhooksResponse.ProtoReflect.Descriptor instead.
+func (*ListWebhooksResponse) Descriptor() ([]byte, []int) {
+	return file_mqtt_service_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *ListWebhooksResponse) GetWebhooks() []*WebhookInfo {
+	if x != nil {
+		return x.Webhooks
+	}
+	return nil
+}
+
+func (x *ListWebhooksResponse) GetTotalCount() int32 {
+	if x != nil {
+		return x.TotalCount
+	}
+	return 0
+}
+
 var File_mqtt_service_proto protoreflect.FileDescriptor
 
 const file_mqtt_service_proto_rawDesc = "" +
@@ -3813,7 +4565,80 @@ const file_mqtt_service_proto_rawDesc = "" +
 	"\x12active_connections\x18\x03 \x01(\x03R\x11activeConnections\x129\n" +
 	"\n" +
 	"checked_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcheckedAt\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage*M\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\"\xea\x01\n" +
+	"\x1eSubscribeDeviceMessagesRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12'\n" +
+	"\x0forganization_id\x18\x02 \x01(\tR\x0eorganizationId\x12@\n" +
+	"\rmessage_types\x18\x03 \x03(\x0e2\x1b.isa.mqtt.DeviceMessageTypeR\fmessageTypes\x12\x1d\n" +
+	"\n" +
+	"device_ids\x18\x04 \x03(\tR\tdeviceIds\x12%\n" +
+	"\x0etopic_patterns\x18\x05 \x03(\tR\rtopicPatterns\"\xfc\x02\n" +
+	"\rDeviceMessage\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12>\n" +
+	"\fmessage_type\x18\x02 \x01(\x0e2\x1b.isa.mqtt.DeviceMessageTypeR\vmessageType\x12\x14\n" +
+	"\x05topic\x18\x03 \x01(\tR\x05topic\x12\x18\n" +
+	"\apayload\x18\x04 \x01(\fR\apayload\x128\n" +
+	"\ttimestamp\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12A\n" +
+	"\bmetadata\x18\x06 \x03(\v2%.isa.mqtt.DeviceMessage.MetadataEntryR\bmetadata\x12$\n" +
+	"\x03qos\x18\a \x01(\x0e2\x12.isa.mqtt.QoSLevelR\x03qos\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb3\x04\n" +
+	"\vWebhookInfo\x12\x1d\n" +
+	"\n" +
+	"webhook_id\x18\x01 \x01(\tR\twebhookId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12@\n" +
+	"\rmessage_types\x18\x04 \x03(\x0e2\x1b.isa.mqtt.DeviceMessageTypeR\fmessageTypes\x12\x1d\n" +
+	"\n" +
+	"device_ids\x18\x05 \x03(\tR\tdeviceIds\x12%\n" +
+	"\x0etopic_patterns\x18\x06 \x03(\tR\rtopicPatterns\x12<\n" +
+	"\aheaders\x18\a \x03(\v2\".isa.mqtt.WebhookInfo.HeadersEntryR\aheaders\x12\x18\n" +
+	"\aenabled\x18\b \x01(\bR\aenabled\x129\n" +
+	"\n" +
+	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12#\n" +
+	"\rsuccess_count\x18\v \x01(\x03R\fsuccessCount\x12#\n" +
+	"\rfailure_count\x18\f \x01(\x03R\ffailureCount\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x91\x03\n" +
+	"\x16RegisterWebhookRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12'\n" +
+	"\x0forganization_id\x18\x02 \x01(\tR\x0eorganizationId\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12@\n" +
+	"\rmessage_types\x18\x04 \x03(\x0e2\x1b.isa.mqtt.DeviceMessageTypeR\fmessageTypes\x12\x1d\n" +
+	"\n" +
+	"device_ids\x18\x05 \x03(\tR\tdeviceIds\x12%\n" +
+	"\x0etopic_patterns\x18\x06 \x03(\tR\rtopicPatterns\x12G\n" +
+	"\aheaders\x18\a \x03(\v2-.isa.mqtt.RegisterWebhookRequest.HeadersEntryR\aheaders\x12\x16\n" +
+	"\x06secret\x18\b \x01(\tR\x06secret\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9d\x01\n" +
+	"\x17RegisterWebhookResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1d\n" +
+	"\n" +
+	"webhook_id\x18\x02 \x01(\tR\twebhookId\x12/\n" +
+	"\awebhook\x18\x03 \x01(\v2\x15.isa.mqtt.WebhookInfoR\awebhook\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"R\n" +
+	"\x18UnregisterWebhookRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"webhook_id\x18\x02 \x01(\tR\twebhookId\"O\n" +
+	"\x19UnregisterWebhookResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x82\x01\n" +
+	"\x13ListWebhooksRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12'\n" +
+	"\x0forganization_id\x18\x02 \x01(\tR\x0eorganizationId\x12)\n" +
+	"\x10include_disabled\x18\x03 \x01(\bR\x0fincludeDisabled\"j\n" +
+	"\x14ListWebhooksResponse\x121\n" +
+	"\bwebhooks\x18\x01 \x03(\v2\x15.isa.mqtt.WebhookInfoR\bwebhooks\x12\x1f\n" +
+	"\vtotal_count\x18\x02 \x01(\x05R\n" +
+	"totalCount*M\n" +
 	"\bQoSLevel\x12\x14\n" +
 	"\x10QOS_AT_MOST_ONCE\x10\x00\x12\x15\n" +
 	"\x11QOS_AT_LEAST_ONCE\x10\x01\x12\x14\n" +
@@ -3823,7 +4648,15 @@ const file_mqtt_service_proto_rawDesc = "" +
 	"\rDEVICE_ONLINE\x10\x01\x12\x12\n" +
 	"\x0eDEVICE_OFFLINE\x10\x02\x12\x13\n" +
 	"\x0fDEVICE_SLEEPING\x10\x03\x12\x10\n" +
-	"\fDEVICE_ERROR\x10\x042\xd7\x0f\n" +
+	"\fDEVICE_ERROR\x10\x04*\xec\x01\n" +
+	"\x11DeviceMessageType\x12\x1a\n" +
+	"\x16DEVICE_MESSAGE_UNKNOWN\x10\x00\x12\x1c\n" +
+	"\x18DEVICE_MESSAGE_TELEMETRY\x10\x01\x12\x19\n" +
+	"\x15DEVICE_MESSAGE_STATUS\x10\x02\x12\x17\n" +
+	"\x13DEVICE_MESSAGE_AUTH\x10\x03\x12\x1f\n" +
+	"\x1bDEVICE_MESSAGE_REGISTRATION\x10\x04\x12#\n" +
+	"\x1fDEVICE_MESSAGE_COMMAND_RESPONSE\x10\x05\x12#\n" +
+	"\x1fDEVICE_MESSAGE_NOTIFICATION_ACK\x10\x062\xbc\x12\n" +
 	"\vMQTTService\x12>\n" +
 	"\aConnect\x12\x18.isa.mqtt.ConnectRequest\x1a\x19.isa.mqtt.ConnectResponse\x12G\n" +
 	"\n" +
@@ -3850,7 +4683,11 @@ const file_mqtt_service_proto_rawDesc = "" +
 	"\x15DeleteRetainedMessage\x12&.isa.mqtt.DeleteRetainedMessageRequest\x1a'.isa.mqtt.DeleteRetainedMessageResponse\x12P\n" +
 	"\rGetStatistics\x12\x1e.isa.mqtt.GetStatisticsRequest\x1a\x1f.isa.mqtt.GetStatisticsResponse\x12Y\n" +
 	"\x10GetDeviceMetrics\x12!.isa.mqtt.GetDeviceMetricsRequest\x1a\".isa.mqtt.GetDeviceMetricsResponse\x12R\n" +
-	"\vHealthCheck\x12 .isa.mqtt.MQTTHealthCheckRequest\x1a!.isa.mqtt.MQTTHealthCheckResponseB/Z-github.com/isa-cloud/isa_cloud/api/proto/mqttb\x06proto3"
+	"\vHealthCheck\x12 .isa.mqtt.MQTTHealthCheckRequest\x1a!.isa.mqtt.MQTTHealthCheckResponse\x12^\n" +
+	"\x17SubscribeDeviceMessages\x12(.isa.mqtt.SubscribeDeviceMessagesRequest\x1a\x17.isa.mqtt.DeviceMessage0\x01\x12V\n" +
+	"\x0fRegisterWebhook\x12 .isa.mqtt.RegisterWebhookRequest\x1a!.isa.mqtt.RegisterWebhookResponse\x12\\\n" +
+	"\x11UnregisterWebhook\x12\".isa.mqtt.UnregisterWebhookRequest\x1a#.isa.mqtt.UnregisterWebhookResponse\x12M\n" +
+	"\fListWebhooks\x12\x1d.isa.mqtt.ListWebhooksRequest\x1a\x1e.isa.mqtt.ListWebhooksResponseB/Z-github.com/isa-cloud/isa_cloud/api/proto/mqttb\x06proto3"
 
 var (
 	file_mqtt_service_proto_rawDescOnce sync.Once
@@ -3864,168 +4701,202 @@ func file_mqtt_service_proto_rawDescGZIP() []byte {
 	return file_mqtt_service_proto_rawDescData
 }
 
-var file_mqtt_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_mqtt_service_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
+var file_mqtt_service_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_mqtt_service_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_mqtt_service_proto_goTypes = []any{
-	(QoSLevel)(0),                         // 0: isa.mqtt.QoSLevel
-	(DeviceStatus)(0),                     // 1: isa.mqtt.DeviceStatus
-	(*DeviceInfo)(nil),                    // 2: isa.mqtt.DeviceInfo
-	(*TopicInfo)(nil),                     // 3: isa.mqtt.TopicInfo
-	(*MQTTMessage)(nil),                   // 4: isa.mqtt.MQTTMessage
-	(*ConnectRequest)(nil),                // 5: isa.mqtt.ConnectRequest
-	(*ConnectResponse)(nil),               // 6: isa.mqtt.ConnectResponse
-	(*DisconnectRequest)(nil),             // 7: isa.mqtt.DisconnectRequest
-	(*DisconnectResponse)(nil),            // 8: isa.mqtt.DisconnectResponse
-	(*ConnectionStatusRequest)(nil),       // 9: isa.mqtt.ConnectionStatusRequest
-	(*ConnectionStatusResponse)(nil),      // 10: isa.mqtt.ConnectionStatusResponse
-	(*PublishRequest)(nil),                // 11: isa.mqtt.PublishRequest
-	(*PublishResponse)(nil),               // 12: isa.mqtt.PublishResponse
-	(*PublishBatchRequest)(nil),           // 13: isa.mqtt.PublishBatchRequest
-	(*PublishBatchResponse)(nil),          // 14: isa.mqtt.PublishBatchResponse
-	(*PublishJSONRequest)(nil),            // 15: isa.mqtt.PublishJSONRequest
-	(*SubscribeRequest)(nil),              // 16: isa.mqtt.SubscribeRequest
-	(*SubscribeMultipleRequest)(nil),      // 17: isa.mqtt.SubscribeMultipleRequest
-	(*TopicSubscription)(nil),             // 18: isa.mqtt.TopicSubscription
-	(*MessageResponse)(nil),               // 19: isa.mqtt.MessageResponse
-	(*UnsubscribeRequest)(nil),            // 20: isa.mqtt.UnsubscribeRequest
-	(*UnsubscribeResponse)(nil),           // 21: isa.mqtt.UnsubscribeResponse
-	(*ListSubscriptionsRequest)(nil),      // 22: isa.mqtt.ListSubscriptionsRequest
-	(*ListSubscriptionsResponse)(nil),     // 23: isa.mqtt.ListSubscriptionsResponse
-	(*RegisterDeviceRequest)(nil),         // 24: isa.mqtt.RegisterDeviceRequest
-	(*RegisterDeviceResponse)(nil),        // 25: isa.mqtt.RegisterDeviceResponse
-	(*UnregisterDeviceRequest)(nil),       // 26: isa.mqtt.UnregisterDeviceRequest
-	(*UnregisterDeviceResponse)(nil),      // 27: isa.mqtt.UnregisterDeviceResponse
-	(*ListDevicesRequest)(nil),            // 28: isa.mqtt.ListDevicesRequest
-	(*ListDevicesResponse)(nil),           // 29: isa.mqtt.ListDevicesResponse
-	(*GetDeviceInfoRequest)(nil),          // 30: isa.mqtt.GetDeviceInfoRequest
-	(*GetDeviceInfoResponse)(nil),         // 31: isa.mqtt.GetDeviceInfoResponse
-	(*UpdateDeviceStatusRequest)(nil),     // 32: isa.mqtt.UpdateDeviceStatusRequest
-	(*UpdateDeviceStatusResponse)(nil),    // 33: isa.mqtt.UpdateDeviceStatusResponse
-	(*GetTopicInfoRequest)(nil),           // 34: isa.mqtt.GetTopicInfoRequest
-	(*GetTopicInfoResponse)(nil),          // 35: isa.mqtt.GetTopicInfoResponse
-	(*ListTopicsRequest)(nil),             // 36: isa.mqtt.ListTopicsRequest
-	(*ListTopicsResponse)(nil),            // 37: isa.mqtt.ListTopicsResponse
-	(*ValidateTopicRequest)(nil),          // 38: isa.mqtt.ValidateTopicRequest
-	(*ValidateTopicResponse)(nil),         // 39: isa.mqtt.ValidateTopicResponse
-	(*SetRetainedMessageRequest)(nil),     // 40: isa.mqtt.SetRetainedMessageRequest
-	(*SetRetainedMessageResponse)(nil),    // 41: isa.mqtt.SetRetainedMessageResponse
-	(*GetRetainedMessageRequest)(nil),     // 42: isa.mqtt.GetRetainedMessageRequest
-	(*GetRetainedMessageResponse)(nil),    // 43: isa.mqtt.GetRetainedMessageResponse
-	(*DeleteRetainedMessageRequest)(nil),  // 44: isa.mqtt.DeleteRetainedMessageRequest
-	(*DeleteRetainedMessageResponse)(nil), // 45: isa.mqtt.DeleteRetainedMessageResponse
-	(*GetStatisticsRequest)(nil),          // 46: isa.mqtt.GetStatisticsRequest
-	(*GetStatisticsResponse)(nil),         // 47: isa.mqtt.GetStatisticsResponse
-	(*GetDeviceMetricsRequest)(nil),       // 48: isa.mqtt.GetDeviceMetricsRequest
-	(*GetDeviceMetricsResponse)(nil),      // 49: isa.mqtt.GetDeviceMetricsResponse
-	(*TimeSeriesPoint)(nil),               // 50: isa.mqtt.TimeSeriesPoint
-	(*MQTTHealthCheckRequest)(nil),        // 51: isa.mqtt.MQTTHealthCheckRequest
-	(*MQTTHealthCheckResponse)(nil),       // 52: isa.mqtt.MQTTHealthCheckResponse
-	nil,                                   // 53: isa.mqtt.DeviceInfo.MetadataEntry
-	nil,                                   // 54: isa.mqtt.MQTTMessage.PropertiesEntry
-	nil,                                   // 55: isa.mqtt.PublishRequest.PropertiesEntry
-	nil,                                   // 56: isa.mqtt.MessageResponse.PropertiesEntry
-	nil,                                   // 57: isa.mqtt.RegisterDeviceRequest.MetadataEntry
-	nil,                                   // 58: isa.mqtt.UpdateDeviceStatusRequest.MetadataEntry
-	nil,                                   // 59: isa.mqtt.GetStatisticsResponse.DeviceTypeDistributionEntry
-	(*timestamppb.Timestamp)(nil),         // 60: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),               // 61: google.protobuf.Struct
+	(QoSLevel)(0),                          // 0: isa.mqtt.QoSLevel
+	(DeviceStatus)(0),                      // 1: isa.mqtt.DeviceStatus
+	(DeviceMessageType)(0),                 // 2: isa.mqtt.DeviceMessageType
+	(*DeviceInfo)(nil),                     // 3: isa.mqtt.DeviceInfo
+	(*TopicInfo)(nil),                      // 4: isa.mqtt.TopicInfo
+	(*MQTTMessage)(nil),                    // 5: isa.mqtt.MQTTMessage
+	(*ConnectRequest)(nil),                 // 6: isa.mqtt.ConnectRequest
+	(*ConnectResponse)(nil),                // 7: isa.mqtt.ConnectResponse
+	(*DisconnectRequest)(nil),              // 8: isa.mqtt.DisconnectRequest
+	(*DisconnectResponse)(nil),             // 9: isa.mqtt.DisconnectResponse
+	(*ConnectionStatusRequest)(nil),        // 10: isa.mqtt.ConnectionStatusRequest
+	(*ConnectionStatusResponse)(nil),       // 11: isa.mqtt.ConnectionStatusResponse
+	(*PublishRequest)(nil),                 // 12: isa.mqtt.PublishRequest
+	(*PublishResponse)(nil),                // 13: isa.mqtt.PublishResponse
+	(*PublishBatchRequest)(nil),            // 14: isa.mqtt.PublishBatchRequest
+	(*PublishBatchResponse)(nil),           // 15: isa.mqtt.PublishBatchResponse
+	(*PublishJSONRequest)(nil),             // 16: isa.mqtt.PublishJSONRequest
+	(*SubscribeRequest)(nil),               // 17: isa.mqtt.SubscribeRequest
+	(*SubscribeMultipleRequest)(nil),       // 18: isa.mqtt.SubscribeMultipleRequest
+	(*TopicSubscription)(nil),              // 19: isa.mqtt.TopicSubscription
+	(*MessageResponse)(nil),                // 20: isa.mqtt.MessageResponse
+	(*UnsubscribeRequest)(nil),             // 21: isa.mqtt.UnsubscribeRequest
+	(*UnsubscribeResponse)(nil),            // 22: isa.mqtt.UnsubscribeResponse
+	(*ListSubscriptionsRequest)(nil),       // 23: isa.mqtt.ListSubscriptionsRequest
+	(*ListSubscriptionsResponse)(nil),      // 24: isa.mqtt.ListSubscriptionsResponse
+	(*RegisterDeviceRequest)(nil),          // 25: isa.mqtt.RegisterDeviceRequest
+	(*RegisterDeviceResponse)(nil),         // 26: isa.mqtt.RegisterDeviceResponse
+	(*UnregisterDeviceRequest)(nil),        // 27: isa.mqtt.UnregisterDeviceRequest
+	(*UnregisterDeviceResponse)(nil),       // 28: isa.mqtt.UnregisterDeviceResponse
+	(*ListDevicesRequest)(nil),             // 29: isa.mqtt.ListDevicesRequest
+	(*ListDevicesResponse)(nil),            // 30: isa.mqtt.ListDevicesResponse
+	(*GetDeviceInfoRequest)(nil),           // 31: isa.mqtt.GetDeviceInfoRequest
+	(*GetDeviceInfoResponse)(nil),          // 32: isa.mqtt.GetDeviceInfoResponse
+	(*UpdateDeviceStatusRequest)(nil),      // 33: isa.mqtt.UpdateDeviceStatusRequest
+	(*UpdateDeviceStatusResponse)(nil),     // 34: isa.mqtt.UpdateDeviceStatusResponse
+	(*GetTopicInfoRequest)(nil),            // 35: isa.mqtt.GetTopicInfoRequest
+	(*GetTopicInfoResponse)(nil),           // 36: isa.mqtt.GetTopicInfoResponse
+	(*ListTopicsRequest)(nil),              // 37: isa.mqtt.ListTopicsRequest
+	(*ListTopicsResponse)(nil),             // 38: isa.mqtt.ListTopicsResponse
+	(*ValidateTopicRequest)(nil),           // 39: isa.mqtt.ValidateTopicRequest
+	(*ValidateTopicResponse)(nil),          // 40: isa.mqtt.ValidateTopicResponse
+	(*SetRetainedMessageRequest)(nil),      // 41: isa.mqtt.SetRetainedMessageRequest
+	(*SetRetainedMessageResponse)(nil),     // 42: isa.mqtt.SetRetainedMessageResponse
+	(*GetRetainedMessageRequest)(nil),      // 43: isa.mqtt.GetRetainedMessageRequest
+	(*GetRetainedMessageResponse)(nil),     // 44: isa.mqtt.GetRetainedMessageResponse
+	(*DeleteRetainedMessageRequest)(nil),   // 45: isa.mqtt.DeleteRetainedMessageRequest
+	(*DeleteRetainedMessageResponse)(nil),  // 46: isa.mqtt.DeleteRetainedMessageResponse
+	(*GetStatisticsRequest)(nil),           // 47: isa.mqtt.GetStatisticsRequest
+	(*GetStatisticsResponse)(nil),          // 48: isa.mqtt.GetStatisticsResponse
+	(*GetDeviceMetricsRequest)(nil),        // 49: isa.mqtt.GetDeviceMetricsRequest
+	(*GetDeviceMetricsResponse)(nil),       // 50: isa.mqtt.GetDeviceMetricsResponse
+	(*TimeSeriesPoint)(nil),                // 51: isa.mqtt.TimeSeriesPoint
+	(*MQTTHealthCheckRequest)(nil),         // 52: isa.mqtt.MQTTHealthCheckRequest
+	(*MQTTHealthCheckResponse)(nil),        // 53: isa.mqtt.MQTTHealthCheckResponse
+	(*SubscribeDeviceMessagesRequest)(nil), // 54: isa.mqtt.SubscribeDeviceMessagesRequest
+	(*DeviceMessage)(nil),                  // 55: isa.mqtt.DeviceMessage
+	(*WebhookInfo)(nil),                    // 56: isa.mqtt.WebhookInfo
+	(*RegisterWebhookRequest)(nil),         // 57: isa.mqtt.RegisterWebhookRequest
+	(*RegisterWebhookResponse)(nil),        // 58: isa.mqtt.RegisterWebhookResponse
+	(*UnregisterWebhookRequest)(nil),       // 59: isa.mqtt.UnregisterWebhookRequest
+	(*UnregisterWebhookResponse)(nil),      // 60: isa.mqtt.UnregisterWebhookResponse
+	(*ListWebhooksRequest)(nil),            // 61: isa.mqtt.ListWebhooksRequest
+	(*ListWebhooksResponse)(nil),           // 62: isa.mqtt.ListWebhooksResponse
+	nil,                                    // 63: isa.mqtt.DeviceInfo.MetadataEntry
+	nil,                                    // 64: isa.mqtt.MQTTMessage.PropertiesEntry
+	nil,                                    // 65: isa.mqtt.PublishRequest.PropertiesEntry
+	nil,                                    // 66: isa.mqtt.MessageResponse.PropertiesEntry
+	nil,                                    // 67: isa.mqtt.RegisterDeviceRequest.MetadataEntry
+	nil,                                    // 68: isa.mqtt.UpdateDeviceStatusRequest.MetadataEntry
+	nil,                                    // 69: isa.mqtt.GetStatisticsResponse.DeviceTypeDistributionEntry
+	nil,                                    // 70: isa.mqtt.DeviceMessage.MetadataEntry
+	nil,                                    // 71: isa.mqtt.WebhookInfo.HeadersEntry
+	nil,                                    // 72: isa.mqtt.RegisterWebhookRequest.HeadersEntry
+	(*timestamppb.Timestamp)(nil),          // 73: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                // 74: google.protobuf.Struct
 }
 var file_mqtt_service_proto_depIdxs = []int32{
 	1,  // 0: isa.mqtt.DeviceInfo.status:type_name -> isa.mqtt.DeviceStatus
-	60, // 1: isa.mqtt.DeviceInfo.registered_at:type_name -> google.protobuf.Timestamp
-	60, // 2: isa.mqtt.DeviceInfo.last_seen:type_name -> google.protobuf.Timestamp
-	53, // 3: isa.mqtt.DeviceInfo.metadata:type_name -> isa.mqtt.DeviceInfo.MetadataEntry
-	60, // 4: isa.mqtt.TopicInfo.last_message_time:type_name -> google.protobuf.Timestamp
+	73, // 1: isa.mqtt.DeviceInfo.registered_at:type_name -> google.protobuf.Timestamp
+	73, // 2: isa.mqtt.DeviceInfo.last_seen:type_name -> google.protobuf.Timestamp
+	63, // 3: isa.mqtt.DeviceInfo.metadata:type_name -> isa.mqtt.DeviceInfo.MetadataEntry
+	73, // 4: isa.mqtt.TopicInfo.last_message_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: isa.mqtt.MQTTMessage.qos:type_name -> isa.mqtt.QoSLevel
-	60, // 6: isa.mqtt.MQTTMessage.timestamp:type_name -> google.protobuf.Timestamp
-	54, // 7: isa.mqtt.MQTTMessage.properties:type_name -> isa.mqtt.MQTTMessage.PropertiesEntry
+	73, // 6: isa.mqtt.MQTTMessage.timestamp:type_name -> google.protobuf.Timestamp
+	64, // 7: isa.mqtt.MQTTMessage.properties:type_name -> isa.mqtt.MQTTMessage.PropertiesEntry
 	0,  // 8: isa.mqtt.ConnectRequest.will_qos:type_name -> isa.mqtt.QoSLevel
-	60, // 9: isa.mqtt.ConnectionStatusResponse.connected_at:type_name -> google.protobuf.Timestamp
+	73, // 9: isa.mqtt.ConnectionStatusResponse.connected_at:type_name -> google.protobuf.Timestamp
 	0,  // 10: isa.mqtt.PublishRequest.qos:type_name -> isa.mqtt.QoSLevel
-	55, // 11: isa.mqtt.PublishRequest.properties:type_name -> isa.mqtt.PublishRequest.PropertiesEntry
-	60, // 12: isa.mqtt.PublishResponse.published_at:type_name -> google.protobuf.Timestamp
-	11, // 13: isa.mqtt.PublishBatchRequest.messages:type_name -> isa.mqtt.PublishRequest
-	61, // 14: isa.mqtt.PublishJSONRequest.data:type_name -> google.protobuf.Struct
+	65, // 11: isa.mqtt.PublishRequest.properties:type_name -> isa.mqtt.PublishRequest.PropertiesEntry
+	73, // 12: isa.mqtt.PublishResponse.published_at:type_name -> google.protobuf.Timestamp
+	12, // 13: isa.mqtt.PublishBatchRequest.messages:type_name -> isa.mqtt.PublishRequest
+	74, // 14: isa.mqtt.PublishJSONRequest.data:type_name -> google.protobuf.Struct
 	0,  // 15: isa.mqtt.PublishJSONRequest.qos:type_name -> isa.mqtt.QoSLevel
 	0,  // 16: isa.mqtt.SubscribeRequest.qos:type_name -> isa.mqtt.QoSLevel
-	18, // 17: isa.mqtt.SubscribeMultipleRequest.subscriptions:type_name -> isa.mqtt.TopicSubscription
+	19, // 17: isa.mqtt.SubscribeMultipleRequest.subscriptions:type_name -> isa.mqtt.TopicSubscription
 	0,  // 18: isa.mqtt.TopicSubscription.qos:type_name -> isa.mqtt.QoSLevel
 	0,  // 19: isa.mqtt.MessageResponse.qos:type_name -> isa.mqtt.QoSLevel
-	60, // 20: isa.mqtt.MessageResponse.timestamp:type_name -> google.protobuf.Timestamp
-	56, // 21: isa.mqtt.MessageResponse.properties:type_name -> isa.mqtt.MessageResponse.PropertiesEntry
-	18, // 22: isa.mqtt.ListSubscriptionsResponse.subscriptions:type_name -> isa.mqtt.TopicSubscription
-	57, // 23: isa.mqtt.RegisterDeviceRequest.metadata:type_name -> isa.mqtt.RegisterDeviceRequest.MetadataEntry
-	2,  // 24: isa.mqtt.RegisterDeviceResponse.device:type_name -> isa.mqtt.DeviceInfo
+	73, // 20: isa.mqtt.MessageResponse.timestamp:type_name -> google.protobuf.Timestamp
+	66, // 21: isa.mqtt.MessageResponse.properties:type_name -> isa.mqtt.MessageResponse.PropertiesEntry
+	19, // 22: isa.mqtt.ListSubscriptionsResponse.subscriptions:type_name -> isa.mqtt.TopicSubscription
+	67, // 23: isa.mqtt.RegisterDeviceRequest.metadata:type_name -> isa.mqtt.RegisterDeviceRequest.MetadataEntry
+	3,  // 24: isa.mqtt.RegisterDeviceResponse.device:type_name -> isa.mqtt.DeviceInfo
 	1,  // 25: isa.mqtt.ListDevicesRequest.status:type_name -> isa.mqtt.DeviceStatus
-	2,  // 26: isa.mqtt.ListDevicesResponse.devices:type_name -> isa.mqtt.DeviceInfo
-	2,  // 27: isa.mqtt.GetDeviceInfoResponse.device:type_name -> isa.mqtt.DeviceInfo
+	3,  // 26: isa.mqtt.ListDevicesResponse.devices:type_name -> isa.mqtt.DeviceInfo
+	3,  // 27: isa.mqtt.GetDeviceInfoResponse.device:type_name -> isa.mqtt.DeviceInfo
 	1,  // 28: isa.mqtt.UpdateDeviceStatusRequest.status:type_name -> isa.mqtt.DeviceStatus
-	58, // 29: isa.mqtt.UpdateDeviceStatusRequest.metadata:type_name -> isa.mqtt.UpdateDeviceStatusRequest.MetadataEntry
-	2,  // 30: isa.mqtt.UpdateDeviceStatusResponse.device:type_name -> isa.mqtt.DeviceInfo
-	3,  // 31: isa.mqtt.GetTopicInfoResponse.topic_info:type_name -> isa.mqtt.TopicInfo
-	3,  // 32: isa.mqtt.ListTopicsResponse.topics:type_name -> isa.mqtt.TopicInfo
+	68, // 29: isa.mqtt.UpdateDeviceStatusRequest.metadata:type_name -> isa.mqtt.UpdateDeviceStatusRequest.MetadataEntry
+	3,  // 30: isa.mqtt.UpdateDeviceStatusResponse.device:type_name -> isa.mqtt.DeviceInfo
+	4,  // 31: isa.mqtt.GetTopicInfoResponse.topic_info:type_name -> isa.mqtt.TopicInfo
+	4,  // 32: isa.mqtt.ListTopicsResponse.topics:type_name -> isa.mqtt.TopicInfo
 	0,  // 33: isa.mqtt.SetRetainedMessageRequest.qos:type_name -> isa.mqtt.QoSLevel
-	4,  // 34: isa.mqtt.GetRetainedMessageResponse.message:type_name -> isa.mqtt.MQTTMessage
-	59, // 35: isa.mqtt.GetStatisticsResponse.device_type_distribution:type_name -> isa.mqtt.GetStatisticsResponse.DeviceTypeDistributionEntry
-	60, // 36: isa.mqtt.GetDeviceMetricsRequest.start_time:type_name -> google.protobuf.Timestamp
-	60, // 37: isa.mqtt.GetDeviceMetricsRequest.end_time:type_name -> google.protobuf.Timestamp
-	50, // 38: isa.mqtt.GetDeviceMetricsResponse.message_rate:type_name -> isa.mqtt.TimeSeriesPoint
-	50, // 39: isa.mqtt.GetDeviceMetricsResponse.error_rate:type_name -> isa.mqtt.TimeSeriesPoint
-	60, // 40: isa.mqtt.TimeSeriesPoint.timestamp:type_name -> google.protobuf.Timestamp
-	60, // 41: isa.mqtt.MQTTHealthCheckResponse.checked_at:type_name -> google.protobuf.Timestamp
-	5,  // 42: isa.mqtt.MQTTService.Connect:input_type -> isa.mqtt.ConnectRequest
-	7,  // 43: isa.mqtt.MQTTService.Disconnect:input_type -> isa.mqtt.DisconnectRequest
-	9,  // 44: isa.mqtt.MQTTService.GetConnectionStatus:input_type -> isa.mqtt.ConnectionStatusRequest
-	11, // 45: isa.mqtt.MQTTService.Publish:input_type -> isa.mqtt.PublishRequest
-	13, // 46: isa.mqtt.MQTTService.PublishBatch:input_type -> isa.mqtt.PublishBatchRequest
-	15, // 47: isa.mqtt.MQTTService.PublishJSON:input_type -> isa.mqtt.PublishJSONRequest
-	16, // 48: isa.mqtt.MQTTService.Subscribe:input_type -> isa.mqtt.SubscribeRequest
-	17, // 49: isa.mqtt.MQTTService.SubscribeMultiple:input_type -> isa.mqtt.SubscribeMultipleRequest
-	20, // 50: isa.mqtt.MQTTService.Unsubscribe:input_type -> isa.mqtt.UnsubscribeRequest
-	22, // 51: isa.mqtt.MQTTService.ListSubscriptions:input_type -> isa.mqtt.ListSubscriptionsRequest
-	24, // 52: isa.mqtt.MQTTService.RegisterDevice:input_type -> isa.mqtt.RegisterDeviceRequest
-	26, // 53: isa.mqtt.MQTTService.UnregisterDevice:input_type -> isa.mqtt.UnregisterDeviceRequest
-	28, // 54: isa.mqtt.MQTTService.ListDevices:input_type -> isa.mqtt.ListDevicesRequest
-	30, // 55: isa.mqtt.MQTTService.GetDeviceInfo:input_type -> isa.mqtt.GetDeviceInfoRequest
-	32, // 56: isa.mqtt.MQTTService.UpdateDeviceStatus:input_type -> isa.mqtt.UpdateDeviceStatusRequest
-	34, // 57: isa.mqtt.MQTTService.GetTopicInfo:input_type -> isa.mqtt.GetTopicInfoRequest
-	36, // 58: isa.mqtt.MQTTService.ListTopics:input_type -> isa.mqtt.ListTopicsRequest
-	38, // 59: isa.mqtt.MQTTService.ValidateTopic:input_type -> isa.mqtt.ValidateTopicRequest
-	40, // 60: isa.mqtt.MQTTService.SetRetainedMessage:input_type -> isa.mqtt.SetRetainedMessageRequest
-	42, // 61: isa.mqtt.MQTTService.GetRetainedMessage:input_type -> isa.mqtt.GetRetainedMessageRequest
-	44, // 62: isa.mqtt.MQTTService.DeleteRetainedMessage:input_type -> isa.mqtt.DeleteRetainedMessageRequest
-	46, // 63: isa.mqtt.MQTTService.GetStatistics:input_type -> isa.mqtt.GetStatisticsRequest
-	48, // 64: isa.mqtt.MQTTService.GetDeviceMetrics:input_type -> isa.mqtt.GetDeviceMetricsRequest
-	51, // 65: isa.mqtt.MQTTService.HealthCheck:input_type -> isa.mqtt.MQTTHealthCheckRequest
-	6,  // 66: isa.mqtt.MQTTService.Connect:output_type -> isa.mqtt.ConnectResponse
-	8,  // 67: isa.mqtt.MQTTService.Disconnect:output_type -> isa.mqtt.DisconnectResponse
-	10, // 68: isa.mqtt.MQTTService.GetConnectionStatus:output_type -> isa.mqtt.ConnectionStatusResponse
-	12, // 69: isa.mqtt.MQTTService.Publish:output_type -> isa.mqtt.PublishResponse
-	14, // 70: isa.mqtt.MQTTService.PublishBatch:output_type -> isa.mqtt.PublishBatchResponse
-	12, // 71: isa.mqtt.MQTTService.PublishJSON:output_type -> isa.mqtt.PublishResponse
-	19, // 72: isa.mqtt.MQTTService.Subscribe:output_type -> isa.mqtt.MessageResponse
-	19, // 73: isa.mqtt.MQTTService.SubscribeMultiple:output_type -> isa.mqtt.MessageResponse
-	21, // 74: isa.mqtt.MQTTService.Unsubscribe:output_type -> isa.mqtt.UnsubscribeResponse
-	23, // 75: isa.mqtt.MQTTService.ListSubscriptions:output_type -> isa.mqtt.ListSubscriptionsResponse
-	25, // 76: isa.mqtt.MQTTService.RegisterDevice:output_type -> isa.mqtt.RegisterDeviceResponse
-	27, // 77: isa.mqtt.MQTTService.UnregisterDevice:output_type -> isa.mqtt.UnregisterDeviceResponse
-	29, // 78: isa.mqtt.MQTTService.ListDevices:output_type -> isa.mqtt.ListDevicesResponse
-	31, // 79: isa.mqtt.MQTTService.GetDeviceInfo:output_type -> isa.mqtt.GetDeviceInfoResponse
-	33, // 80: isa.mqtt.MQTTService.UpdateDeviceStatus:output_type -> isa.mqtt.UpdateDeviceStatusResponse
-	35, // 81: isa.mqtt.MQTTService.GetTopicInfo:output_type -> isa.mqtt.GetTopicInfoResponse
-	37, // 82: isa.mqtt.MQTTService.ListTopics:output_type -> isa.mqtt.ListTopicsResponse
-	39, // 83: isa.mqtt.MQTTService.ValidateTopic:output_type -> isa.mqtt.ValidateTopicResponse
-	41, // 84: isa.mqtt.MQTTService.SetRetainedMessage:output_type -> isa.mqtt.SetRetainedMessageResponse
-	43, // 85: isa.mqtt.MQTTService.GetRetainedMessage:output_type -> isa.mqtt.GetRetainedMessageResponse
-	45, // 86: isa.mqtt.MQTTService.DeleteRetainedMessage:output_type -> isa.mqtt.DeleteRetainedMessageResponse
-	47, // 87: isa.mqtt.MQTTService.GetStatistics:output_type -> isa.mqtt.GetStatisticsResponse
-	49, // 88: isa.mqtt.MQTTService.GetDeviceMetrics:output_type -> isa.mqtt.GetDeviceMetricsResponse
-	52, // 89: isa.mqtt.MQTTService.HealthCheck:output_type -> isa.mqtt.MQTTHealthCheckResponse
-	66, // [66:90] is the sub-list for method output_type
-	42, // [42:66] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	5,  // 34: isa.mqtt.GetRetainedMessageResponse.message:type_name -> isa.mqtt.MQTTMessage
+	69, // 35: isa.mqtt.GetStatisticsResponse.device_type_distribution:type_name -> isa.mqtt.GetStatisticsResponse.DeviceTypeDistributionEntry
+	73, // 36: isa.mqtt.GetDeviceMetricsRequest.start_time:type_name -> google.protobuf.Timestamp
+	73, // 37: isa.mqtt.GetDeviceMetricsRequest.end_time:type_name -> google.protobuf.Timestamp
+	51, // 38: isa.mqtt.GetDeviceMetricsResponse.message_rate:type_name -> isa.mqtt.TimeSeriesPoint
+	51, // 39: isa.mqtt.GetDeviceMetricsResponse.error_rate:type_name -> isa.mqtt.TimeSeriesPoint
+	73, // 40: isa.mqtt.TimeSeriesPoint.timestamp:type_name -> google.protobuf.Timestamp
+	73, // 41: isa.mqtt.MQTTHealthCheckResponse.checked_at:type_name -> google.protobuf.Timestamp
+	2,  // 42: isa.mqtt.SubscribeDeviceMessagesRequest.message_types:type_name -> isa.mqtt.DeviceMessageType
+	2,  // 43: isa.mqtt.DeviceMessage.message_type:type_name -> isa.mqtt.DeviceMessageType
+	73, // 44: isa.mqtt.DeviceMessage.timestamp:type_name -> google.protobuf.Timestamp
+	70, // 45: isa.mqtt.DeviceMessage.metadata:type_name -> isa.mqtt.DeviceMessage.MetadataEntry
+	0,  // 46: isa.mqtt.DeviceMessage.qos:type_name -> isa.mqtt.QoSLevel
+	2,  // 47: isa.mqtt.WebhookInfo.message_types:type_name -> isa.mqtt.DeviceMessageType
+	71, // 48: isa.mqtt.WebhookInfo.headers:type_name -> isa.mqtt.WebhookInfo.HeadersEntry
+	73, // 49: isa.mqtt.WebhookInfo.created_at:type_name -> google.protobuf.Timestamp
+	73, // 50: isa.mqtt.WebhookInfo.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 51: isa.mqtt.RegisterWebhookRequest.message_types:type_name -> isa.mqtt.DeviceMessageType
+	72, // 52: isa.mqtt.RegisterWebhookRequest.headers:type_name -> isa.mqtt.RegisterWebhookRequest.HeadersEntry
+	56, // 53: isa.mqtt.RegisterWebhookResponse.webhook:type_name -> isa.mqtt.WebhookInfo
+	56, // 54: isa.mqtt.ListWebhooksResponse.webhooks:type_name -> isa.mqtt.WebhookInfo
+	6,  // 55: isa.mqtt.MQTTService.Connect:input_type -> isa.mqtt.ConnectRequest
+	8,  // 56: isa.mqtt.MQTTService.Disconnect:input_type -> isa.mqtt.DisconnectRequest
+	10, // 57: isa.mqtt.MQTTService.GetConnectionStatus:input_type -> isa.mqtt.ConnectionStatusRequest
+	12, // 58: isa.mqtt.MQTTService.Publish:input_type -> isa.mqtt.PublishRequest
+	14, // 59: isa.mqtt.MQTTService.PublishBatch:input_type -> isa.mqtt.PublishBatchRequest
+	16, // 60: isa.mqtt.MQTTService.PublishJSON:input_type -> isa.mqtt.PublishJSONRequest
+	17, // 61: isa.mqtt.MQTTService.Subscribe:input_type -> isa.mqtt.SubscribeRequest
+	18, // 62: isa.mqtt.MQTTService.SubscribeMultiple:input_type -> isa.mqtt.SubscribeMultipleRequest
+	21, // 63: isa.mqtt.MQTTService.Unsubscribe:input_type -> isa.mqtt.UnsubscribeRequest
+	23, // 64: isa.mqtt.MQTTService.ListSubscriptions:input_type -> isa.mqtt.ListSubscriptionsRequest
+	25, // 65: isa.mqtt.MQTTService.RegisterDevice:input_type -> isa.mqtt.RegisterDeviceRequest
+	27, // 66: isa.mqtt.MQTTService.UnregisterDevice:input_type -> isa.mqtt.UnregisterDeviceRequest
+	29, // 67: isa.mqtt.MQTTService.ListDevices:input_type -> isa.mqtt.ListDevicesRequest
+	31, // 68: isa.mqtt.MQTTService.GetDeviceInfo:input_type -> isa.mqtt.GetDeviceInfoRequest
+	33, // 69: isa.mqtt.MQTTService.UpdateDeviceStatus:input_type -> isa.mqtt.UpdateDeviceStatusRequest
+	35, // 70: isa.mqtt.MQTTService.GetTopicInfo:input_type -> isa.mqtt.GetTopicInfoRequest
+	37, // 71: isa.mqtt.MQTTService.ListTopics:input_type -> isa.mqtt.ListTopicsRequest
+	39, // 72: isa.mqtt.MQTTService.ValidateTopic:input_type -> isa.mqtt.ValidateTopicRequest
+	41, // 73: isa.mqtt.MQTTService.SetRetainedMessage:input_type -> isa.mqtt.SetRetainedMessageRequest
+	43, // 74: isa.mqtt.MQTTService.GetRetainedMessage:input_type -> isa.mqtt.GetRetainedMessageRequest
+	45, // 75: isa.mqtt.MQTTService.DeleteRetainedMessage:input_type -> isa.mqtt.DeleteRetainedMessageRequest
+	47, // 76: isa.mqtt.MQTTService.GetStatistics:input_type -> isa.mqtt.GetStatisticsRequest
+	49, // 77: isa.mqtt.MQTTService.GetDeviceMetrics:input_type -> isa.mqtt.GetDeviceMetricsRequest
+	52, // 78: isa.mqtt.MQTTService.HealthCheck:input_type -> isa.mqtt.MQTTHealthCheckRequest
+	54, // 79: isa.mqtt.MQTTService.SubscribeDeviceMessages:input_type -> isa.mqtt.SubscribeDeviceMessagesRequest
+	57, // 80: isa.mqtt.MQTTService.RegisterWebhook:input_type -> isa.mqtt.RegisterWebhookRequest
+	59, // 81: isa.mqtt.MQTTService.UnregisterWebhook:input_type -> isa.mqtt.UnregisterWebhookRequest
+	61, // 82: isa.mqtt.MQTTService.ListWebhooks:input_type -> isa.mqtt.ListWebhooksRequest
+	7,  // 83: isa.mqtt.MQTTService.Connect:output_type -> isa.mqtt.ConnectResponse
+	9,  // 84: isa.mqtt.MQTTService.Disconnect:output_type -> isa.mqtt.DisconnectResponse
+	11, // 85: isa.mqtt.MQTTService.GetConnectionStatus:output_type -> isa.mqtt.ConnectionStatusResponse
+	13, // 86: isa.mqtt.MQTTService.Publish:output_type -> isa.mqtt.PublishResponse
+	15, // 87: isa.mqtt.MQTTService.PublishBatch:output_type -> isa.mqtt.PublishBatchResponse
+	13, // 88: isa.mqtt.MQTTService.PublishJSON:output_type -> isa.mqtt.PublishResponse
+	20, // 89: isa.mqtt.MQTTService.Subscribe:output_type -> isa.mqtt.MessageResponse
+	20, // 90: isa.mqtt.MQTTService.SubscribeMultiple:output_type -> isa.mqtt.MessageResponse
+	22, // 91: isa.mqtt.MQTTService.Unsubscribe:output_type -> isa.mqtt.UnsubscribeResponse
+	24, // 92: isa.mqtt.MQTTService.ListSubscriptions:output_type -> isa.mqtt.ListSubscriptionsResponse
+	26, // 93: isa.mqtt.MQTTService.RegisterDevice:output_type -> isa.mqtt.RegisterDeviceResponse
+	28, // 94: isa.mqtt.MQTTService.UnregisterDevice:output_type -> isa.mqtt.UnregisterDeviceResponse
+	30, // 95: isa.mqtt.MQTTService.ListDevices:output_type -> isa.mqtt.ListDevicesResponse
+	32, // 96: isa.mqtt.MQTTService.GetDeviceInfo:output_type -> isa.mqtt.GetDeviceInfoResponse
+	34, // 97: isa.mqtt.MQTTService.UpdateDeviceStatus:output_type -> isa.mqtt.UpdateDeviceStatusResponse
+	36, // 98: isa.mqtt.MQTTService.GetTopicInfo:output_type -> isa.mqtt.GetTopicInfoResponse
+	38, // 99: isa.mqtt.MQTTService.ListTopics:output_type -> isa.mqtt.ListTopicsResponse
+	40, // 100: isa.mqtt.MQTTService.ValidateTopic:output_type -> isa.mqtt.ValidateTopicResponse
+	42, // 101: isa.mqtt.MQTTService.SetRetainedMessage:output_type -> isa.mqtt.SetRetainedMessageResponse
+	44, // 102: isa.mqtt.MQTTService.GetRetainedMessage:output_type -> isa.mqtt.GetRetainedMessageResponse
+	46, // 103: isa.mqtt.MQTTService.DeleteRetainedMessage:output_type -> isa.mqtt.DeleteRetainedMessageResponse
+	48, // 104: isa.mqtt.MQTTService.GetStatistics:output_type -> isa.mqtt.GetStatisticsResponse
+	50, // 105: isa.mqtt.MQTTService.GetDeviceMetrics:output_type -> isa.mqtt.GetDeviceMetricsResponse
+	53, // 106: isa.mqtt.MQTTService.HealthCheck:output_type -> isa.mqtt.MQTTHealthCheckResponse
+	55, // 107: isa.mqtt.MQTTService.SubscribeDeviceMessages:output_type -> isa.mqtt.DeviceMessage
+	58, // 108: isa.mqtt.MQTTService.RegisterWebhook:output_type -> isa.mqtt.RegisterWebhookResponse
+	60, // 109: isa.mqtt.MQTTService.UnregisterWebhook:output_type -> isa.mqtt.UnregisterWebhookResponse
+	62, // 110: isa.mqtt.MQTTService.ListWebhooks:output_type -> isa.mqtt.ListWebhooksResponse
+	83, // [83:111] is the sub-list for method output_type
+	55, // [55:83] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_mqtt_service_proto_init() }
@@ -4038,8 +4909,8 @@ func file_mqtt_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mqtt_service_proto_rawDesc), len(file_mqtt_service_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   58,
+			NumEnums:      3,
+			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

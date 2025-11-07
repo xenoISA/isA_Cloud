@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  namespace: isa-cloud-staging
+  labels:
+    app: neo4j
+    tier: infrastructure
+spec:
+  serviceName: neo4j
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+        tier: infrastructure
+    spec:
+      containers:
+      - name: neo4j
+        image: staging-isa-neo4j:amd64
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 7474
+          protocol: TCP
+        - name: bolt
+          containerPort: 7687
+          protocol: TCP
+
+        env:
+        - name: NEO4J_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: neo4j-secret
+              key: auth
+        - name: NEO4J_server_http_listen__address
+          value: "0.0.0.0:7474"
+        - name: NEO4J_server_bolt_listen__address
+          value: "0.0.0.0:7687"
+        - name: NEO4J_server_config_strict__validation_enabled
+          value: "false"
+        - name: HTTP_PORT
+          value: "7474"
+        - name: BOLT_PORT
+          value: "7687"
+        - name: CONSUL_ENABLED
+          value: "false"
+        - name: CONSUL_HOST
+          value: "consul"
+        - name: CONSUL_PORT
+          value: "8500"
+        - name: SERVICE_NAME
+          value: "neo4j-db"
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: logs
+          mountPath: /logs
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 7474
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 7474
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi
+  - metadata:
+      name: logs
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi

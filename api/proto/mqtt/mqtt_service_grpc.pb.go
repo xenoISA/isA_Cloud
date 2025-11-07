@@ -22,30 +22,34 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MQTTService_Connect_FullMethodName               = "/isa.mqtt.MQTTService/Connect"
-	MQTTService_Disconnect_FullMethodName            = "/isa.mqtt.MQTTService/Disconnect"
-	MQTTService_GetConnectionStatus_FullMethodName   = "/isa.mqtt.MQTTService/GetConnectionStatus"
-	MQTTService_Publish_FullMethodName               = "/isa.mqtt.MQTTService/Publish"
-	MQTTService_PublishBatch_FullMethodName          = "/isa.mqtt.MQTTService/PublishBatch"
-	MQTTService_PublishJSON_FullMethodName           = "/isa.mqtt.MQTTService/PublishJSON"
-	MQTTService_Subscribe_FullMethodName             = "/isa.mqtt.MQTTService/Subscribe"
-	MQTTService_SubscribeMultiple_FullMethodName     = "/isa.mqtt.MQTTService/SubscribeMultiple"
-	MQTTService_Unsubscribe_FullMethodName           = "/isa.mqtt.MQTTService/Unsubscribe"
-	MQTTService_ListSubscriptions_FullMethodName     = "/isa.mqtt.MQTTService/ListSubscriptions"
-	MQTTService_RegisterDevice_FullMethodName        = "/isa.mqtt.MQTTService/RegisterDevice"
-	MQTTService_UnregisterDevice_FullMethodName      = "/isa.mqtt.MQTTService/UnregisterDevice"
-	MQTTService_ListDevices_FullMethodName           = "/isa.mqtt.MQTTService/ListDevices"
-	MQTTService_GetDeviceInfo_FullMethodName         = "/isa.mqtt.MQTTService/GetDeviceInfo"
-	MQTTService_UpdateDeviceStatus_FullMethodName    = "/isa.mqtt.MQTTService/UpdateDeviceStatus"
-	MQTTService_GetTopicInfo_FullMethodName          = "/isa.mqtt.MQTTService/GetTopicInfo"
-	MQTTService_ListTopics_FullMethodName            = "/isa.mqtt.MQTTService/ListTopics"
-	MQTTService_ValidateTopic_FullMethodName         = "/isa.mqtt.MQTTService/ValidateTopic"
-	MQTTService_SetRetainedMessage_FullMethodName    = "/isa.mqtt.MQTTService/SetRetainedMessage"
-	MQTTService_GetRetainedMessage_FullMethodName    = "/isa.mqtt.MQTTService/GetRetainedMessage"
-	MQTTService_DeleteRetainedMessage_FullMethodName = "/isa.mqtt.MQTTService/DeleteRetainedMessage"
-	MQTTService_GetStatistics_FullMethodName         = "/isa.mqtt.MQTTService/GetStatistics"
-	MQTTService_GetDeviceMetrics_FullMethodName      = "/isa.mqtt.MQTTService/GetDeviceMetrics"
-	MQTTService_HealthCheck_FullMethodName           = "/isa.mqtt.MQTTService/HealthCheck"
+	MQTTService_Connect_FullMethodName                 = "/isa.mqtt.MQTTService/Connect"
+	MQTTService_Disconnect_FullMethodName              = "/isa.mqtt.MQTTService/Disconnect"
+	MQTTService_GetConnectionStatus_FullMethodName     = "/isa.mqtt.MQTTService/GetConnectionStatus"
+	MQTTService_Publish_FullMethodName                 = "/isa.mqtt.MQTTService/Publish"
+	MQTTService_PublishBatch_FullMethodName            = "/isa.mqtt.MQTTService/PublishBatch"
+	MQTTService_PublishJSON_FullMethodName             = "/isa.mqtt.MQTTService/PublishJSON"
+	MQTTService_Subscribe_FullMethodName               = "/isa.mqtt.MQTTService/Subscribe"
+	MQTTService_SubscribeMultiple_FullMethodName       = "/isa.mqtt.MQTTService/SubscribeMultiple"
+	MQTTService_Unsubscribe_FullMethodName             = "/isa.mqtt.MQTTService/Unsubscribe"
+	MQTTService_ListSubscriptions_FullMethodName       = "/isa.mqtt.MQTTService/ListSubscriptions"
+	MQTTService_RegisterDevice_FullMethodName          = "/isa.mqtt.MQTTService/RegisterDevice"
+	MQTTService_UnregisterDevice_FullMethodName        = "/isa.mqtt.MQTTService/UnregisterDevice"
+	MQTTService_ListDevices_FullMethodName             = "/isa.mqtt.MQTTService/ListDevices"
+	MQTTService_GetDeviceInfo_FullMethodName           = "/isa.mqtt.MQTTService/GetDeviceInfo"
+	MQTTService_UpdateDeviceStatus_FullMethodName      = "/isa.mqtt.MQTTService/UpdateDeviceStatus"
+	MQTTService_GetTopicInfo_FullMethodName            = "/isa.mqtt.MQTTService/GetTopicInfo"
+	MQTTService_ListTopics_FullMethodName              = "/isa.mqtt.MQTTService/ListTopics"
+	MQTTService_ValidateTopic_FullMethodName           = "/isa.mqtt.MQTTService/ValidateTopic"
+	MQTTService_SetRetainedMessage_FullMethodName      = "/isa.mqtt.MQTTService/SetRetainedMessage"
+	MQTTService_GetRetainedMessage_FullMethodName      = "/isa.mqtt.MQTTService/GetRetainedMessage"
+	MQTTService_DeleteRetainedMessage_FullMethodName   = "/isa.mqtt.MQTTService/DeleteRetainedMessage"
+	MQTTService_GetStatistics_FullMethodName           = "/isa.mqtt.MQTTService/GetStatistics"
+	MQTTService_GetDeviceMetrics_FullMethodName        = "/isa.mqtt.MQTTService/GetDeviceMetrics"
+	MQTTService_HealthCheck_FullMethodName             = "/isa.mqtt.MQTTService/HealthCheck"
+	MQTTService_SubscribeDeviceMessages_FullMethodName = "/isa.mqtt.MQTTService/SubscribeDeviceMessages"
+	MQTTService_RegisterWebhook_FullMethodName         = "/isa.mqtt.MQTTService/RegisterWebhook"
+	MQTTService_UnregisterWebhook_FullMethodName       = "/isa.mqtt.MQTTService/UnregisterWebhook"
+	MQTTService_ListWebhooks_FullMethodName            = "/isa.mqtt.MQTTService/ListWebhooks"
 )
 
 // MQTTServiceClient is the client API for MQTTService service.
@@ -91,6 +95,16 @@ type MQTTServiceClient interface {
 	GetDeviceMetrics(ctx context.Context, in *GetDeviceMetricsRequest, opts ...grpc.CallOption) (*GetDeviceMetricsResponse, error)
 	// ========== 健康检查 ==========
 	HealthCheck(ctx context.Context, in *MQTTHealthCheckRequest, opts ...grpc.CallOption) (*MQTTHealthCheckResponse, error)
+	// ========== 设备消息监听（新增）==========
+	// 订阅所有设备消息流（替代 Gateway MQTT Adapter）
+	SubscribeDeviceMessages(ctx context.Context, in *SubscribeDeviceMessagesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMessage], error)
+	// ========== Webhook 回调（新增）==========
+	// 注册 webhook 用于接收设备消息
+	RegisterWebhook(ctx context.Context, in *RegisterWebhookRequest, opts ...grpc.CallOption) (*RegisterWebhookResponse, error)
+	// 注销 webhook
+	UnregisterWebhook(ctx context.Context, in *UnregisterWebhookRequest, opts ...grpc.CallOption) (*UnregisterWebhookResponse, error)
+	// 列出已注册的 webhooks
+	ListWebhooks(ctx context.Context, in *ListWebhooksRequest, opts ...grpc.CallOption) (*ListWebhooksResponse, error)
 }
 
 type mQTTServiceClient struct {
@@ -359,6 +373,55 @@ func (c *mQTTServiceClient) HealthCheck(ctx context.Context, in *MQTTHealthCheck
 	return out, nil
 }
 
+func (c *mQTTServiceClient) SubscribeDeviceMessages(ctx context.Context, in *SubscribeDeviceMessagesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &MQTTService_ServiceDesc.Streams[2], MQTTService_SubscribeDeviceMessages_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeDeviceMessagesRequest, DeviceMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MQTTService_SubscribeDeviceMessagesClient = grpc.ServerStreamingClient[DeviceMessage]
+
+func (c *mQTTServiceClient) RegisterWebhook(ctx context.Context, in *RegisterWebhookRequest, opts ...grpc.CallOption) (*RegisterWebhookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterWebhookResponse)
+	err := c.cc.Invoke(ctx, MQTTService_RegisterWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *mQTTServiceClient) UnregisterWebhook(ctx context.Context, in *UnregisterWebhookRequest, opts ...grpc.CallOption) (*UnregisterWebhookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnregisterWebhookResponse)
+	err := c.cc.Invoke(ctx, MQTTService_UnregisterWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *mQTTServiceClient) ListWebhooks(ctx context.Context, in *ListWebhooksRequest, opts ...grpc.CallOption) (*ListWebhooksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWebhooksResponse)
+	err := c.cc.Invoke(ctx, MQTTService_ListWebhooks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MQTTServiceServer is the server API for MQTTService service.
 // All implementations must embed UnimplementedMQTTServiceServer
 // for forward compatibility.
@@ -402,6 +465,16 @@ type MQTTServiceServer interface {
 	GetDeviceMetrics(context.Context, *GetDeviceMetricsRequest) (*GetDeviceMetricsResponse, error)
 	// ========== 健康检查 ==========
 	HealthCheck(context.Context, *MQTTHealthCheckRequest) (*MQTTHealthCheckResponse, error)
+	// ========== 设备消息监听（新增）==========
+	// 订阅所有设备消息流（替代 Gateway MQTT Adapter）
+	SubscribeDeviceMessages(*SubscribeDeviceMessagesRequest, grpc.ServerStreamingServer[DeviceMessage]) error
+	// ========== Webhook 回调（新增）==========
+	// 注册 webhook 用于接收设备消息
+	RegisterWebhook(context.Context, *RegisterWebhookRequest) (*RegisterWebhookResponse, error)
+	// 注销 webhook
+	UnregisterWebhook(context.Context, *UnregisterWebhookRequest) (*UnregisterWebhookResponse, error)
+	// 列出已注册的 webhooks
+	ListWebhooks(context.Context, *ListWebhooksRequest) (*ListWebhooksResponse, error)
 	mustEmbedUnimplementedMQTTServiceServer()
 }
 
@@ -483,6 +556,18 @@ func (UnimplementedMQTTServiceServer) GetDeviceMetrics(context.Context, *GetDevi
 }
 func (UnimplementedMQTTServiceServer) HealthCheck(context.Context, *MQTTHealthCheckRequest) (*MQTTHealthCheckResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HealthCheck not implemented")
+}
+func (UnimplementedMQTTServiceServer) SubscribeDeviceMessages(*SubscribeDeviceMessagesRequest, grpc.ServerStreamingServer[DeviceMessage]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeDeviceMessages not implemented")
+}
+func (UnimplementedMQTTServiceServer) RegisterWebhook(context.Context, *RegisterWebhookRequest) (*RegisterWebhookResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterWebhook not implemented")
+}
+func (UnimplementedMQTTServiceServer) UnregisterWebhook(context.Context, *UnregisterWebhookRequest) (*UnregisterWebhookResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnregisterWebhook not implemented")
+}
+func (UnimplementedMQTTServiceServer) ListWebhooks(context.Context, *ListWebhooksRequest) (*ListWebhooksResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWebhooks not implemented")
 }
 func (UnimplementedMQTTServiceServer) mustEmbedUnimplementedMQTTServiceServer() {}
 func (UnimplementedMQTTServiceServer) testEmbeddedByValue()                     {}
@@ -923,6 +1008,71 @@ func _MQTTService_HealthCheck_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MQTTService_SubscribeDeviceMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeDeviceMessagesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(MQTTServiceServer).SubscribeDeviceMessages(m, &grpc.GenericServerStream[SubscribeDeviceMessagesRequest, DeviceMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MQTTService_SubscribeDeviceMessagesServer = grpc.ServerStreamingServer[DeviceMessage]
+
+func _MQTTService_RegisterWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterWebhookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MQTTServiceServer).RegisterWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MQTTService_RegisterWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MQTTServiceServer).RegisterWebhook(ctx, req.(*RegisterWebhookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MQTTService_UnregisterWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterWebhookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MQTTServiceServer).UnregisterWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MQTTService_UnregisterWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MQTTServiceServer).UnregisterWebhook(ctx, req.(*UnregisterWebhookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MQTTService_ListWebhooks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWebhooksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MQTTServiceServer).ListWebhooks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MQTTService_ListWebhooks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MQTTServiceServer).ListWebhooks(ctx, req.(*ListWebhooksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MQTTService_ServiceDesc is the grpc.ServiceDesc for MQTTService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1018,6 +1168,18 @@ var MQTTService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "HealthCheck",
 			Handler:    _MQTTService_HealthCheck_Handler,
 		},
+		{
+			MethodName: "RegisterWebhook",
+			Handler:    _MQTTService_RegisterWebhook_Handler,
+		},
+		{
+			MethodName: "UnregisterWebhook",
+			Handler:    _MQTTService_UnregisterWebhook_Handler,
+		},
+		{
+			MethodName: "ListWebhooks",
+			Handler:    _MQTTService_ListWebhooks_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1028,6 +1190,11 @@ var MQTTService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeMultiple",
 			Handler:       _MQTTService_SubscribeMultiple_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeDeviceMessages",
+			Handler:       _MQTTService_SubscribeDeviceMessages_Handler,
 			ServerStreams: true,
 		},
 	},

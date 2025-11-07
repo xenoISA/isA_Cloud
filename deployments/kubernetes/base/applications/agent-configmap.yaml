@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: isa-cloud-staging
+  labels:
+    app: agent
+    tier: applications
+data:
+  # Add agent-specific environment variables here
+  # These will be loaded from .env.staging in Docker Compose
+  ENVIRONMENT: "staging"
+  DEBUG: "true"

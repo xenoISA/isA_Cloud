@@ -4,31 +4,47 @@
 NATS gRPC Client
 """
 
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 from .base_client import BaseGRPCClient
 from .proto import nats_service_pb2, nats_service_pb2_grpc
 from google.protobuf.duration_pb2 import Duration
+
+if TYPE_CHECKING:
+    from .consul_client import ConsulRegistry
 
 
 class NATSClient(BaseGRPCClient):
     """NATS gRPC client"""
 
-    def __init__(self, host: str = 'localhost', port: int = 50056, user_id: Optional[str] = None,
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, user_id: Optional[str] = None,
                  organization_id: Optional[str] = None, lazy_connect: bool = True,
-                 enable_compression: bool = False, enable_retry: bool = True):
+                 enable_compression: bool = False, enable_retry: bool = True,
+                 consul_registry: Optional['ConsulRegistry'] = None, service_name_override: Optional[str] = None):
         """
         Initialize NATS client
 
         Args:
-            host: Service address (default: localhost)
-            port: Service port (default: 50056)
+            host: Service address (optional, will use Consul discovery if not provided)
+            port: Service port (optional, will use Consul discovery if not provided)
             user_id: User ID
             organization_id: Organization ID
             lazy_connect: Lazy connection (default: True)
             enable_compression: Enable compression (default: False)
             enable_retry: Enable retry (default: True)
+            consul_registry: ConsulRegistry instance for service discovery (optional)
+            service_name_override: Override service name for Consul lookup (optional, defaults to 'nats')
         """
-        super().__init__(host, port, user_id, lazy_connect, enable_compression, enable_retry)
+        # Let BaseGRPCClient handle Consul discovery and fallback defaults
+        super().__init__(
+            host=host,
+            port=port,
+            user_id=user_id,
+            lazy_connect=lazy_connect,
+            enable_compression=enable_compression,
+            enable_retry=enable_retry,
+            consul_registry=consul_registry,
+            service_name_override=service_name_override
+        )
         self.organization_id = organization_id or 'default-org'
 
     def _create_stub(self):
@@ -37,6 +53,9 @@ class NATSClient(BaseGRPCClient):
 
     def service_name(self) -> str:
         return "NATS"
+
+    def default_port(self) -> int:
+        return 50056
 
     def health_check(self, deep_check: bool = False) -> Optional[Dict]:
         """Health check"""

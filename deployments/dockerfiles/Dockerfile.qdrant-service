@@ -1,0 +1,39 @@
+# Qdrant gRPC Service Dockerfile
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
+ENV GOTOOLCHAIN=auto
+ENV CGO_ENABLED=1
+
+WORKDIR /app
+COPY go.mod go.sum ./
+
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/qdrant-service cmd/qdrant-service/main.go
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/bin/qdrant-service /app/qdrant-service
+
+# Environment variables
+ENV QDRANT_HOST=localhost
+ENV QDRANT_PORT=6334
+ENV QDRANT_API_KEY=
+ENV QDRANT_USE_SSL=false
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV GRPC_PORT=50062
+
+EXPOSE 50062
+CMD ["/app/qdrant-service"]

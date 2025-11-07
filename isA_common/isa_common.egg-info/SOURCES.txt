@@ -9,9 +9,10 @@ isa_common/loki_client.py
 isa_common/minio_client.py
 isa_common/mqtt_client.py
 isa_common/nats_client.py
+isa_common/neo4j_client.py
+isa_common/postgres_client.py
+isa_common/qdrant_client.py
 isa_common/redis_client.py
-isa_common/service_discovery.py
-isa_common/supabase_client.py
 isa_common.egg-info/PKG-INFO
 isa_common.egg-info/SOURCES.txt
 isa_common.egg-info/dependency_links.txt
@@ -36,7 +37,11 @@ isa_common/proto/mqtt_service_pb2.py
 isa_common/proto/mqtt_service_pb2_grpc.py
 isa_common/proto/nats_service_pb2.py
 isa_common/proto/nats_service_pb2_grpc.py
+isa_common/proto/neo4j_service_pb2.py
+isa_common/proto/neo4j_service_pb2_grpc.py
+isa_common/proto/postgres_service_pb2.py
+isa_common/proto/postgres_service_pb2_grpc.py
+isa_common/proto/qdrant_service_pb2.py
+isa_common/proto/qdrant_service_pb2_grpc.py
 isa_common/proto/redis_service_pb2.py
 isa_common/proto/redis_service_pb2_grpc.py
-isa_common/proto/supabase_service_pb2.py
-isa_common/proto/supabase_service_pb2_grpc.py

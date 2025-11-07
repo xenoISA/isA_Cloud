@@ -44,7 +44,7 @@ if command -v protoc &> /dev/null; then
         api/proto/common.proto
 
     # 生成所有服务的 proto
-    SERVICES=("minio" "duckdb" "mqtt" "loki" "redis" "nats" "supabase")
+    SERVICES=("minio" "duckdb" "mqtt" "loki" "redis" "nats" "postgres" "qdrant" "neo4j")
 
     for service in "${SERVICES[@]}"; do
         echo "→ Generating ${service}_service.proto..."
@@ -59,7 +59,7 @@ else
     echo "   Run: brew install protobuf (macOS) or apt-get install protobuf-compiler (Linux)"
 fi
 
-SERVICES=("minio" "duckdb" "mqtt" "loki" "redis" "nats" "supabase")
+SERVICES=("minio" "duckdb" "mqtt" "loki" "redis" "nats" "postgres" "qdrant" "neo4j")
 
 echo ""
 echo "============================================"
@@ -94,8 +94,10 @@ for file in isA_common/isa_common/proto/*_pb2.py isA_common/isa_common/proto/*_p
     if [ -f "$file" ]; then
         # Fix: import common_pb2 -> from . import common_pb2
         sed -i.bak 's/^import common_pb2/from . import common_pb2/g' "$file"
-        # Fix: import xxx_service_pb2 -> from . import xxx_service_pb2
-        sed -i.bak 's/^import \([a-z_]*\)_service_pb2 /from . import \1_service_pb2 /g' "$file"
+        # Fix: import xxx_service_pb2 as -> from . import xxx_service_pb2 as
+        sed -i.bak 's/^import \([a-z0-9_]*\)_service_pb2 as/from . import \1_service_pb2 as/g' "$file"
+        # Fix: import xxx_service_pb2 (with space at end) -> from . import xxx_service_pb2
+        sed -i.bak 's/^import \([a-z0-9_]*\)_service_pb2 /from . import \1_service_pb2 /g' "$file"
         # Remove backup files
         rm -f "$file.bak"
     fi
@@ -114,7 +116,9 @@ from . import mqtt_service_pb2, mqtt_service_pb2_grpc
 from . import loki_service_pb2, loki_service_pb2_grpc
 from . import redis_service_pb2, redis_service_pb2_grpc
 from . import nats_service_pb2, nats_service_pb2_grpc
-from . import supabase_service_pb2, supabase_service_pb2_grpc
+from . import postgres_service_pb2, postgres_service_pb2_grpc
+from . import qdrant_service_pb2, qdrant_service_pb2_grpc
+from . import neo4j_service_pb2, neo4j_service_pb2_grpc
 
 __all__ = [
     'common_pb2',
@@ -124,7 +128,9 @@ __all__ = [
     'loki_service_pb2', 'loki_service_pb2_grpc',
     'redis_service_pb2', 'redis_service_pb2_grpc',
     'nats_service_pb2', 'nats_service_pb2_grpc',
-    'supabase_service_pb2', 'supabase_service_pb2_grpc',
+    'postgres_service_pb2', 'postgres_service_pb2_grpc',
+    'qdrant_service_pb2', 'qdrant_service_pb2_grpc',
+    'neo4j_service_pb2', 'neo4j_service_pb2_grpc',
 ]
 EOF
 

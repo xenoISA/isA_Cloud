@@ -52,6 +52,7 @@ import time
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List
+from isa_common.consul_client import ConsulRegistry
 
 # Import the LokiClient from isa_common
 try:
@@ -820,15 +821,50 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser.add_argument('--host', default='localhost',
-                       help='Loki gRPC service host (default: localhost)')
-    parser.add_argument('--port', type=int, default=50054,
-                       help='Loki gRPC service port (default: 50054)')
+    parser.add_argument('--host', default=None,
+                       help='Loki gRPC service host (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--port', type=int, default=None,
+                       help='Loki gRPC service port (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--consul-host', default='localhost',
+                       help='Consul host (default: localhost)')
+    parser.add_argument('--consul-port', type=int, default=8500,
+                       help='Consul port (default: 8500)')
+    parser.add_argument('--use-consul', action='store_true',
+                       help='Use Consul for service discovery')
     parser.add_argument('--example', type=int, choices=range(1, 16),
                        help='Run specific example (1-15, default: all)')
-    
+
     args = parser.parse_args()
-    
+
+    # Default: Try Consul first, fallback to localhost
+    host = args.host
+    port = args.port
+
+    if host is None or port is None:
+        if not args.use_consul:
+            try:
+                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                consul = ConsulRegistry(consul_host=args.consul_host, consul_port=args.consul_port)
+                url = consul.get_loki_url()
+
+                if '://' in url:
+                    url = url.split('://', 1)[1]
+                discovered_host, port_str = url.rsplit(':', 1)
+                discovered_port = int(port_str)
+
+                host = host or discovered_host
+                port = port or discovered_port
+                print(f"✅ Discovered from Consul: {host}:{port}")
+            except Exception as e:
+                print(f"⚠️  Consul discovery failed: {e}")
+                print(f"📍 Falling back to localhost...")
+
+        # Fallback to defaults
+        host = host or 'localhost'
+        port = port or 50054
+
+    print(f"🔗 Connecting to Loki at {host}:{port}\n")
+
     if args.example:
         # Run specific example
         examples_map = {

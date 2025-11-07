@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -130,6 +131,23 @@ func (g *Gateway) SetupHTTPRoutes() *gin.Engine {
 			AllowHeaders:     g.config.Security.CORS.AllowHeaders,
 			AllowCredentials: g.config.Security.CORS.AllowCredentials,
 			MaxAge:           12 * time.Hour,
+			// Allow all localhost origins dynamically (any port)
+			AllowOriginFunc: func(origin string) bool {
+				// Always allow if origin is in AllowOrigins list
+				for _, allowed := range g.config.Security.CORS.AllowOrigins {
+					if allowed == "*" || allowed == origin {
+						return true
+					}
+				}
+				// Allow all localhost origins regardless of port
+				if strings.HasPrefix(origin, "http://localhost") ||
+				   strings.HasPrefix(origin, "http://127.0.0.1") ||
+				   strings.HasPrefix(origin, "https://localhost") ||
+				   strings.HasPrefix(origin, "https://127.0.0.1") {
+					return true
+				}
+				return false
+			},
 		}
 		router.Use(cors.New(corsConfig))
 	}

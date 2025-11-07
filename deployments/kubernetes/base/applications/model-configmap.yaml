@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-config
+  namespace: isa-cloud-staging
+  labels:
+    app: model
+    tier: applications
+data:
+  ENVIRONMENT: "staging"
+  DEBUG: "true"
+  RELOAD: "false"  # Disable hot-reload in K8s

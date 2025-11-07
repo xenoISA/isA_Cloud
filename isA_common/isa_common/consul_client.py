@@ -1,6 +1,6 @@
 """
 Consul Service Registry Module
-
+w
 Provides service registration and health check functionality for microservices
 """
 
@@ -16,49 +16,110 @@ logger = logging.getLogger(__name__)
 
 
 class ConsulRegistry:
-    """Handles service registration with Consul"""
-    
+    """Handles service registration and discovery with Consul"""
+
     def __init__(
         self,
-        service_name: str,
-        service_port: int,
+        service_name: Optional[str] = None,
+        service_port: Optional[int] = None,
         consul_host: str = "localhost",
         consul_port: int = 8500,
         service_host: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        meta: Optional[Dict[str, str]] = None,
         health_check_type: str = "ttl"  # ttl or http
     ):
         """
         Initialize Consul registry
-        
+
         Args:
-            service_name: Name of the service to register
-            service_port: Port the service is running on
+            service_name: Name of the service to register (optional, required only for registration)
+            service_port: Port the service is running on (optional, required only for registration)
             consul_host: Consul server host
             consul_port: Consul server port
             service_host: Service host (defaults to hostname)
             tags: Service tags for discovery
+            meta: Service metadata for APISIX routing (e.g., {"api_path": "/api/v1/billing", "auth_required": "true"})
             health_check_type: Type of health check (ttl or http)
+
+        Note:
+            - For discovery-only usage, you can omit service_name and service_port
+            - For registration, both service_name and service_port are required
+            - meta can contain routing information for dynamic APISIX configuration
         """
         self.consul = consul.Consul(host=consul_host, port=consul_port)
         self.service_name = service_name
         self.service_port = service_port
-        # Handle 0.0.0.0 which is invalid for Consul service registration
-        if service_host and service_host != "0.0.0.0":
-            self.service_host = service_host
+        self.meta = meta or {}
+
+        # Only set these if we're registering (have service_name and service_port)
+        if service_name and service_port is not None:
+            # Handle 0.0.0.0 which is invalid for Consul service registration
+            # Priority: 1. Explicit service_host, 2. HOSTNAME env var, 3. socket.gethostname()
+            # In Docker, HOSTNAME is set to the container name which is DNS resolvable
+            import os
+            if service_host and service_host != "0.0.0.0":
+                self.service_host = service_host
+            else:
+                # Use HOSTNAME env var (container name in Docker) instead of socket.gethostname()
+                # socket.gethostname() returns short container ID which is NOT DNS resolvable
+                self.service_host = os.getenv('HOSTNAME', socket.gethostname())
+            self.service_id = f"{service_name}-{self.service_host}-{service_port}"
         else:
-            self.service_host = socket.gethostname()
-        self.service_id = f"{service_name}-{self.service_host}-{service_port}"
+            import os
+            self.service_host = service_host or os.getenv('HOSTNAME', socket.gethostname())
+            self.service_id = None  # No service ID for discovery-only mode
+
         self.tags = tags or []
         self.check_interval = "15s"
         self.deregister_after = "90s"  # 增加到90秒，给服务更多时间
         self._health_check_task = None
         self.health_check_type = health_check_type
         self.ttl_interval = 30  # 标准30秒TTL间隔
-        
-    def register(self) -> bool:
-        """Register service with Consul"""
+
+    def cleanup_stale_registrations(self) -> int:
+        """
+        Clean up stale registrations for this service before registering.
+        Removes any existing registrations with different hostnames (e.g., old container IDs).
+
+        Returns:
+            Number of stale registrations removed
+        """
         try:
+            removed_count = 0
+            services = self.consul.agent.services()
+
+            # Find all registrations for this service name on the same port
+            for service_id, service_info in services.items():
+                if (service_info['Service'] == self.service_name and
+                    service_info['Port'] == self.service_port and
+                    service_id != self.service_id):  # Different service_id = stale
+
+                    logger.info(f"🧹 Removing stale registration: {service_id} (address: {service_info['Address']})")
+                    self.consul.agent.service.deregister(service_id)
+                    removed_count += 1
+
+            if removed_count > 0:
+                logger.info(f"✨ Cleaned up {removed_count} stale registration(s) for {self.service_name}")
+
+            return removed_count
+
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to cleanup stale registrations: {e}")
+            return 0
+
+    def register(self, cleanup_stale: bool = True) -> bool:
+        """
+        Register service with Consul
+
+        Args:
+            cleanup_stale: If True, remove stale registrations before registering (default: True)
+        """
+        try:
+            # Clean up stale registrations first
+            if cleanup_stale:
+                self.cleanup_stale_registrations()
+
             # Choose health check type
             if self.health_check_type == "ttl":
                 check = consul.Check.ttl(f"{self.ttl_interval}s")
@@ -69,7 +130,7 @@ class ConsulRegistry:
                     timeout="5s",
                     deregister=self.deregister_after
                 )
-            
+
             # Register service with selected health check
             self.consul.agent.service.register(
                 name=self.service_name,
@@ -77,13 +138,14 @@ class ConsulRegistry:
                 address=self.service_host,
                 port=self.service_port,
                 tags=self.tags,
+                meta=self.meta,
                 check=check
             )
-            
+
             # If TTL, immediately pass the health check
             if self.health_check_type == "ttl":
                 self.consul.agent.check.ttl_pass(f"service:{self.service_id}")
-            
+
             logger.info(
                 f"✅ Service registered with Consul: {self.service_name} "
                 f"({self.service_id}) at {self.service_host}:{self.service_port} "
@@ -91,7 +153,7 @@ class ConsulRegistry:
             )
             self._log_service_metrics("register", True)
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to register service with Consul: {e}")
             self._log_service_metrics("register", False)
@@ -388,9 +450,9 @@ class ConsulRegistry:
         while True:
             try:
                 index, services = self.consul.health.service(
-                    service_name, 
-                    passing=True, 
-                    index=index, 
+                    service_name,
+                    passing=True,
+                    index=index,
                     wait=wait_time
                 )
                 # Convert to simplified format
@@ -406,6 +468,116 @@ class ConsulRegistry:
                 logger.error(f"Error watching service {service_name}: {e}")
                 break
 
+    # ============================================
+    # Convenience Methods for Service Discovery
+    # ============================================
+
+    def get_auth_service_url(self) -> str:
+        """Get auth service URL"""
+        endpoint = self.get_service_endpoint("auth_service")
+        if not endpoint:
+            raise ValueError("Service auth_service not found in Consul")
+        return endpoint
+
+    def get_payment_service_url(self) -> str:
+        """Get payment service URL"""
+        endpoint = self.get_service_endpoint("payment_service")
+        if not endpoint:
+            raise ValueError("Service payment_service not found in Consul")
+        return endpoint
+
+    def get_storage_service_url(self) -> str:
+        """Get storage service URL"""
+        endpoint = self.get_service_endpoint("storage_service")
+        if not endpoint:
+            raise ValueError("Service storage_service not found in Consul")
+        return endpoint
+
+    def get_notification_service_url(self) -> str:
+        """Get notification service URL"""
+        endpoint = self.get_service_endpoint("notification_service")
+        if not endpoint:
+            raise ValueError("Service notification_service not found in Consul")
+        return endpoint
+
+    def get_account_service_url(self) -> str:
+        """Get account service URL"""
+        endpoint = self.get_service_endpoint("account_service")
+        if not endpoint:
+            raise ValueError("Service account_service not found in Consul")
+        return endpoint
+
+    def get_session_service_url(self) -> str:
+        """Get session service URL"""
+        endpoint = self.get_service_endpoint("session_service")
+        if not endpoint:
+            raise ValueError("Service session_service not found in Consul")
+        return endpoint
+
+    def get_order_service_url(self) -> str:
+        """Get order service URL"""
+        endpoint = self.get_service_endpoint("order_service")
+        if not endpoint:
+            raise ValueError("Service order_service not found in Consul")
+        return endpoint
+
+    def get_task_service_url(self) -> str:
+        """Get task service URL"""
+        endpoint = self.get_service_endpoint("task_service")
+        if not endpoint:
+            raise ValueError("Service task_service not found in Consul")
+        return endpoint
+
+    def get_device_service_url(self) -> str:
+        """Get device service URL"""
+        endpoint = self.get_service_endpoint("device_service")
+        if not endpoint:
+            raise ValueError("Service device_service not found in Consul")
+        return endpoint
+
+    def get_organization_service_url(self) -> str:
+        """Get organization service URL"""
+        endpoint = self.get_service_endpoint("organization_service")
+        if not endpoint:
+            raise ValueError("Service organization_service not found in Consul")
+        return endpoint
+
+    # Infrastructure Services Discovery
+    def get_nats_url(self) -> str:
+        """Get NATS message queue URL"""
+        endpoint = self.get_service_endpoint("nats-grpc-service")
+        if not endpoint:
+            raise ValueError("Service nats-grpc-service not found in Consul")
+        return endpoint
+
+    def get_redis_url(self) -> str:
+        """Get Redis cache URL"""
+        endpoint = self.get_service_endpoint("redis-grpc-service")
+        if not endpoint:
+            raise ValueError("Service redis-grpc-service not found in Consul")
+        return endpoint
+
+    def get_loki_url(self) -> str:
+        """Get Loki logging service URL"""
+        endpoint = self.get_service_endpoint("loki-grpc-service")
+        if not endpoint:
+            raise ValueError("Service loki-grpc-service not found in Consul")
+        return endpoint
+
+    def get_minio_endpoint(self) -> str:
+        """Get MinIO object storage endpoint"""
+        endpoint = self.get_service_endpoint("minio-grpc-service")
+        if not endpoint:
+            raise ValueError("Service minio-grpc-service not found in Consul")
+        return endpoint
+
+    def get_duckdb_url(self) -> str:
+        """Get DuckDB service URL"""
+        endpoint = self.get_service_endpoint("duckdb-grpc-service")
+        if not endpoint:
+            raise ValueError("Service duckdb-grpc-service not found in Consul")
+        return endpoint
+
 
 @asynccontextmanager
 async def consul_lifespan(
@@ -415,13 +587,19 @@ async def consul_lifespan(
     consul_host: str = "localhost",
     consul_port: int = 8500,
     tags: Optional[List[str]] = None,
+    meta: Optional[Dict[str, str]] = None,
     health_check_type: str = "ttl"
 ):
     """
     FastAPI lifespan context manager for Consul registration
-    
+
     Usage:
-        app = FastAPI(lifespan=lambda app: consul_lifespan(app, "my-service", 8080))
+        app = FastAPI(lifespan=lambda app: consul_lifespan(
+            app,
+            "my-service",
+            8080,
+            meta={"api_path": "/api/v1/myservice", "auth_required": "true"}
+        ))
     """
     # Startup
     # Use SERVICE_HOST env var if available, otherwise use hostname
@@ -435,6 +613,7 @@ async def consul_lifespan(
         consul_port=consul_port,
         service_host=service_host,  # Use SERVICE_HOST from env or hostname
         tags=tags,
+        meta=meta,
         health_check_type=health_check_type
     )
     

@@ -4,30 +4,46 @@ Redis gRPC Client
 Redis cache client
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 from .base_client import BaseGRPCClient
 from .proto import redis_service_pb2, redis_service_pb2_grpc
+
+if TYPE_CHECKING:
+    from .consul_client import ConsulRegistry
 
 
 class RedisClient(BaseGRPCClient):
     """Redis gRPC Client"""
 
-    def __init__(self, host: str = 'localhost', port: int = 50055, user_id: Optional[str] = None,
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, user_id: Optional[str] = None,
                  organization_id: Optional[str] = None, lazy_connect: bool = True,
-                 enable_compression: bool = True, enable_retry: bool = True):
+                 enable_compression: bool = True, enable_retry: bool = True,
+                 consul_registry: Optional['ConsulRegistry'] = None, service_name_override: Optional[str] = None):
         """
         Initialize Redis client
 
         Args:
-            host: Service host (default: localhost)
-            port: Service port (default: 50055)
+            host: Service host (optional, will use Consul discovery if not provided)
+            port: Service port (optional, will use Consul discovery if not provided)
             user_id: User ID
             organization_id: Organization ID
             lazy_connect: Lazy connection (default: True)
             enable_compression: Enable compression (default: True)
             enable_retry: Enable retry (default: True)
+            consul_registry: ConsulRegistry instance for service discovery (optional)
+            service_name_override: Override service name for Consul lookup (optional, defaults to 'redis')
         """
-        super().__init__(host, port, user_id, lazy_connect, enable_compression, enable_retry)
+        # Let BaseGRPCClient handle Consul discovery and fallback defaults
+        super().__init__(
+            host=host,
+            port=port,
+            user_id=user_id,
+            lazy_connect=lazy_connect,
+            enable_compression=enable_compression,
+            enable_retry=enable_retry,
+            consul_registry=consul_registry,
+            service_name_override=service_name_override
+        )
         self.organization_id = organization_id or 'default-org'
 
     def _create_stub(self):
@@ -37,6 +53,9 @@ class RedisClient(BaseGRPCClient):
     def service_name(self) -> str:
         return "Redis"
 
+    def default_port(self) -> int:
+        return 50055
+
     def health_check(self) -> Optional[Dict]:
         """Health check"""
         try:
@@ -45,11 +64,6 @@ class RedisClient(BaseGRPCClient):
                 deep_check=False
             )
             response = self.stub.HealthCheck(request)
-
-            print(f"✅ [Redis] Service healthy: {response.healthy}")
-            print(f"   Redis status: {response.redis_status}")
-            print(f"   Connected clients: {response.connected_clients}")
-            print(f"   Used memory: {response.used_memory_bytes / 1024 / 1024:.2f}MB")
 
             return {
                 'healthy': response.healthy,
@@ -90,10 +104,8 @@ class RedisClient(BaseGRPCClient):
                 response = self.stub.Set(request)
 
             if response.success:
-                print(f"✅ [Redis] Set successful: {key}")
                 return True
             else:
-                print(f"⚠️  [Redis] Set failed: {response.message}")
                 return False
 
         except Exception as e:
@@ -113,10 +125,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.Get(request)
 
             if response.found:
-                print(f"✅ [Redis] Get successful: {key} = {response.value[:50]}...")
                 return response.value
             else:
-                print(f"⚠️  [Redis] Key not found: {key}")
                 return None
 
         except Exception as e:
@@ -135,10 +145,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.Delete(request)
 
             if response.success:
-                print(f"✅ [Redis] Delete successful: {key} (deleted {response.deleted_count} keys)")
                 return True
             else:
-                print(f"⚠️  [Redis] Delete failed: {response.error}")
                 return False
 
         except Exception as e:
@@ -157,7 +165,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.Exists(request)
 
-            print(f"✅ [Redis] Key '{key}' exists: {response.exists}")
             return response.exists
 
         except Exception as e:
@@ -181,7 +188,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.Append(request)
 
-            print(f"✅ [Redis] Append successful: {key} new length = {response.length}")
             return response.length
 
         except Exception as e:
@@ -206,10 +212,8 @@ class RedisClient(BaseGRPCClient):
                     success_count += 1
 
             if success_count == len(key_values):
-                print(f"✅ [Redis] Batch set successful: {len(key_values)} keys")
                 return True
             else:
-                print(f"⚠️  [Redis] Batch set partial: {success_count}/{len(key_values)} keys")
                 return False
 
         except Exception as e:
@@ -230,7 +234,6 @@ class RedisClient(BaseGRPCClient):
 
             # Convert KeyValue list to dict
             values = {kv.key: kv.value for kv in response.values}
-            print(f"✅ [Redis] Batch get successful: requested {len(keys)} keys, returned {len(values)} values")
             return values
 
         except Exception as e:
@@ -249,7 +252,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.Increment(request)
 
-            print(f"✅ [Redis] Increment successful: {key} = {response.value}")
             return response.value
 
         except Exception as e:
@@ -268,7 +270,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.Decrement(request)
 
-            print(f"✅ [Redis] Decrement successful: {key} = {response.value}")
             return response.value
 
         except Exception as e:
@@ -293,10 +294,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.Expire(request)
 
             if response.success:
-                print(f"✅ [Redis] Expire set successful: {key} will expire in {seconds} seconds")
                 return True
             else:
-                print(f"⚠️  [Redis] Expire set failed")
                 return False
 
         except Exception as e:
@@ -314,13 +313,6 @@ class RedisClient(BaseGRPCClient):
             )
 
             response = self.stub.GetTTL(request)
-
-            if response.ttl_seconds >= 0:
-                print(f"✅ [Redis] TTL: {key} has {response.ttl_seconds} seconds remaining")
-            elif response.ttl_seconds == -1:
-                print(f"✅ [Redis] TTL: {key} never expires")
-            else:
-                print(f"⚠️  [Redis] TTL: {key} does not exist")
 
             return response.ttl_seconds
 
@@ -340,10 +332,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.DeleteMultiple(request)
 
             if response.success:
-                print(f"✅ [Redis] Delete multiple successful: deleted {response.deleted_count} keys")
                 return response.deleted_count
             else:
-                print(f"⚠️  [Redis] Delete multiple failed")
                 return 0
 
         except Exception as e:
@@ -364,10 +354,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.Rename(request)
 
             if response.success:
-                print(f"✅ [Redis] Rename successful: {old_key} -> {new_key}")
                 return True
             else:
-                print(f"⚠️  [Redis] Rename failed")
                 return False
 
         except Exception as e:
@@ -387,7 +375,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.ListKeys(request)
 
-            print(f"✅ [Redis] List keys: found {len(response.keys)} keys (total: {response.total_count})")
             return list(response.keys)
 
         except Exception as e:
@@ -406,7 +393,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.LPush(request)
 
-            print(f"✅ [Redis] Left push successful: {key} length = {response.length}")
             return response.length
 
         except Exception as e:
@@ -425,7 +411,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.RPush(request)
 
-            print(f"✅ [Redis] Right push successful: {key} length = {response.length}")
             return response.length
 
         except Exception as e:
@@ -445,7 +430,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.LRange(request)
 
-            print(f"✅ [Redis] Get list successful: {key} returned {len(response.values)} elements")
             return list(response.values)
 
         except Exception as e:
@@ -464,10 +448,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.LPop(request)
 
             if response.found:
-                print(f"✅ [Redis] Left pop successful: {key} = {response.value[:50]}...")
                 return response.value
             else:
-                print(f"⚠️  [Redis] List empty or key not found: {key}")
                 return None
 
         except Exception as e:
@@ -486,10 +468,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.RPop(request)
 
             if response.found:
-                print(f"✅ [Redis] Right pop successful: {key} = {response.value[:50]}...")
                 return response.value
             else:
-                print(f"⚠️  [Redis] List empty or key not found: {key}")
                 return None
 
         except Exception as e:
@@ -507,7 +487,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.LLen(request)
 
-            print(f"✅ [Redis] List length: {key} = {response.length}")
             return response.length
 
         except Exception as e:
@@ -527,10 +506,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.LIndex(request)
 
             if response.found:
-                print(f"✅ [Redis] List index: {key}[{index}] = {response.value[:50]}...")
                 return response.value
             else:
-                print(f"⚠️  [Redis] Index out of range: {key}[{index}]")
                 return None
 
         except Exception as e:
@@ -551,10 +528,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.LTrim(request)
 
             if response.success:
-                print(f"✅ [Redis] List trim successful: {key}[{start}:{stop}]")
                 return True
             else:
-                print(f"⚠️  [Redis] List trim failed")
                 return False
 
         except Exception as e:
@@ -579,10 +554,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.HSet(request)
 
             if response.success:
-                print(f"✅ [Redis] Hash set successful: {key}.{field}")
                 return True
             else:
-                print(f"⚠️  [Redis] Hash set failed")
                 return False
 
         except Exception as e:
@@ -603,10 +576,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.HGet(request)
 
             if response.found:
-                print(f"✅ [Redis] Hash get successful: {key}.{field} = {response.value[:50]}...")
                 return response.value
             else:
-                print(f"⚠️  [Redis] Hash field not found: {key}.{field}")
                 return None
 
         except Exception as e:
@@ -626,7 +597,6 @@ class RedisClient(BaseGRPCClient):
 
             # Convert repeated HashField to dict
             fields = {f.field: f.value for f in response.fields}
-            print(f"✅ [Redis] Hash get all successful: {key} has {len(fields)} fields")
             return fields
 
         except Exception as e:
@@ -646,10 +616,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.HDelete(request)
 
             if response.success:
-                print(f"✅ [Redis] Hash delete successful: {key} deleted {response.deleted_count} fields")
                 return response.deleted_count
             else:
-                print(f"⚠️  [Redis] Hash delete failed")
                 return 0
 
         except Exception as e:
@@ -669,7 +637,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.HExists(request)
 
-            print(f"✅ [Redis] Hash field '{key}.{field}' exists: {response.exists}")
             return response.exists
 
         except Exception as e:
@@ -688,7 +655,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.HKeys(request)
 
-            print(f"✅ [Redis] Hash keys: {key} has {len(response.fields)} fields")
             return list(response.fields)
 
         except Exception as e:
@@ -706,7 +672,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.HValues(request)
 
-            print(f"✅ [Redis] Hash values: {key} has {len(response.values)} values")
             return list(response.values)
 
         except Exception as e:
@@ -726,7 +691,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.HIncrement(request)
 
-            print(f"✅ [Redis] Hash increment successful: {key}.{field} = {response.value}")
             return response.value
 
         except Exception as e:
@@ -749,7 +713,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SAdd(request)
 
-            print(f"✅ [Redis] Set add successful: {key} added {response.added_count} members")
             return response.added_count
 
         except Exception as e:
@@ -768,7 +731,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SRemove(request)
 
-            print(f"✅ [Redis] Set remove successful: {key} removed {response.removed_count} members")
             return response.removed_count
 
         except Exception as e:
@@ -786,7 +748,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SMembers(request)
 
-            print(f"✅ [Redis] Set members: {key} has {len(response.members)} members")
             return list(response.members)
 
         except Exception as e:
@@ -805,7 +766,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SIsMember(request)
 
-            print(f"✅ [Redis] Set member check: {member} in {key} = {response.is_member}")
             return response.is_member
 
         except Exception as e:
@@ -824,7 +784,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SCard(request)
 
-            print(f"✅ [Redis] Set cardinality: {key} = {response.count}")
             return response.count
 
         except Exception as e:
@@ -842,7 +801,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SUnion(request)
 
-            print(f"✅ [Redis] Set union: {len(response.members)} members")
             return list(response.members)
 
         except Exception as e:
@@ -860,7 +818,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SInter(request)
 
-            print(f"✅ [Redis] Set intersection: {len(response.members)} members")
             return list(response.members)
 
         except Exception as e:
@@ -878,7 +835,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.SDiff(request)
 
-            print(f"✅ [Redis] Set difference: {len(response.members)} members")
             return list(response.members)
 
         except Exception as e:
@@ -917,7 +873,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.ZAdd(request)
 
-            print(f"✅ [Redis] Sorted set add successful: {key} added {response.added_count} members")
             return response.added_count
 
         except Exception as e:
@@ -952,10 +907,8 @@ class RedisClient(BaseGRPCClient):
 
             if with_scores:
                 result = [(m.member, m.score) for m in response.members]
-                print(f"✅ [Redis] Sorted set range successful: {key} returned {len(result)} members with scores")
             else:
                 result = [m.member for m in response.members]
-                print(f"✅ [Redis] Sorted set range successful: {key} returned {len(result)} members")
 
             return result
 
@@ -984,7 +937,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.ZRemove(request)
 
-            print(f"✅ [Redis] Sorted set remove successful: {key} removed {response.removed_count} members")
             return response.removed_count
 
         except Exception as e:
@@ -1047,7 +999,6 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.ZRangeByScore(request)
 
             result = [(m.member, m.score) for m in response.members]
-            print(f"✅ [Redis] Sorted set range by score: {key} returned {len(result)} members")
             return result
 
         except Exception as e:
@@ -1067,10 +1018,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.ZRank(request)
 
             if response.found:
-                print(f"✅ [Redis] Sorted set rank: {member} in {key} = {response.rank}")
                 return response.rank
             else:
-                print(f"⚠️  [Redis] Member not found in sorted set: {member}")
                 return None
 
         except Exception as e:
@@ -1090,10 +1039,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.ZScore(request)
 
             if response.found:
-                print(f"✅ [Redis] Sorted set score: {member} in {key} = {response.score}")
                 return response.score
             else:
-                print(f"⚠️  [Redis] Member not found in sorted set: {member}")
                 return None
 
         except Exception as e:
@@ -1111,7 +1058,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.ZCard(request)
 
-            print(f"✅ [Redis] Sorted set cardinality: {key} = {response.count}")
             return response.count
 
         except Exception as e:
@@ -1131,7 +1077,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.ZIncrement(request)
 
-            print(f"✅ [Redis] Sorted set increment: {member} in {key} = {response.score}")
             return response.score
 
         except Exception as e:
@@ -1174,10 +1119,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.AcquireLock(request)
 
             if response.acquired:
-                print(f"✅ [Redis] Lock acquired: {lock_key} (ID: {response.lock_id})")
                 return response.lock_id
             else:
-                print(f"⚠️  [Redis] Lock acquisition failed: {lock_key}")
                 return None
 
         except Exception as e:
@@ -1198,10 +1141,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.ReleaseLock(request)
 
             if response.released:
-                print(f"✅ [Redis] Lock released: {lock_key}")
                 return True
             else:
-                print(f"⚠️  [Redis] Lock release failed: {lock_key}")
                 return False
 
         except Exception as e:
@@ -1228,10 +1169,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.RenewLock(request)
 
             if response.renewed:
-                print(f"✅ [Redis] Lock renewed: {lock_key}")
                 return True
             else:
-                print(f"⚠️  [Redis] Lock renewal failed: {lock_key}")
                 return False
 
         except Exception as e:
@@ -1255,7 +1194,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.Publish(request)
 
-            print(f"✅ [Redis] Published to {channel}: {response.subscriber_count} subscribers")
             return response.subscriber_count
 
         except Exception as e:
@@ -1277,13 +1215,9 @@ class RedisClient(BaseGRPCClient):
                 channels=channels
             )
 
-            print(f"✅ [Redis] Subscribing to channels: {', '.join(channels)}")
-            
             for message in self.stub.Subscribe(request):
                 if callback:
                     callback(message.channel, message.message, message.timestamp)
-                else:
-                    print(f"📩 [Redis] Message from {message.channel}: {message.message}")
 
         except Exception as e:
             self.handle_error(e, "Subscribe to channels")
@@ -1301,10 +1235,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.Unsubscribe(request)
 
             if response.success:
-                print(f"✅ [Redis] Unsubscribed from channels: {', '.join(channels)}")
                 return True
             else:
-                print(f"⚠️  [Redis] Unsubscribe failed")
                 return False
 
         except Exception as e:
@@ -1351,14 +1283,12 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.ExecuteBatch(request)
 
             if response.success:
-                print(f"✅ [Redis] Batch executed: {response.executed_count}/{len(commands)} commands")
                 return {
                     'success': True,
                     'executed_count': response.executed_count,
                     'errors': list(response.errors)
                 }
             else:
-                print(f"⚠️  [Redis] Batch execution had errors")
                 return {
                     'success': False,
                     'executed_count': response.executed_count,
@@ -1391,7 +1321,6 @@ class RedisClient(BaseGRPCClient):
 
             response = self.stub.CreateSession(request)
 
-            print(f"✅ [Redis] Session created: {response.session_id}")
             return response.session_id
 
         except Exception as e:
@@ -1409,10 +1338,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.GetSession(request)
 
             if response.found:
-                print(f"✅ [Redis] Session found: {session_id}")
                 return dict(response.session.data)
             else:
-                print(f"⚠️  [Redis] Session not found: {session_id}")
                 return None
 
         except Exception as e:
@@ -1432,10 +1359,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.UpdateSession(request)
 
             if response.success:
-                print(f"✅ [Redis] Session updated: {session_id}")
                 return True
             else:
-                print(f"⚠️  [Redis] Session update failed")
                 return False
 
         except Exception as e:
@@ -1454,10 +1379,8 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.DeleteSession(request)
 
             if response.success:
-                print(f"✅ [Redis] Session deleted: {session_id}")
                 return True
             else:
-                print(f"⚠️  [Redis] Session deletion failed")
                 return False
 
         except Exception as e:
@@ -1484,8 +1407,7 @@ class RedisClient(BaseGRPCClient):
                     'created_at': session.created_at,
                     'expires_at': session.expires_at
                 })
-            
-            print(f"✅ [Redis] Listed {len(sessions)} sessions")
+
             return sessions
 
         except Exception as e:
@@ -1514,8 +1436,7 @@ class RedisClient(BaseGRPCClient):
                 'hit_rate': response.hit_rate,
                 'key_type_distribution': dict(response.key_type_distribution)
             }
-            
-            print(f"✅ [Redis] Statistics retrieved: {response.total_keys} keys, {response.memory_used_bytes/1024/1024:.2f}MB used")
+
             return stats
 
         except Exception as e:
@@ -1542,10 +1463,8 @@ class RedisClient(BaseGRPCClient):
                     'created_at': response.created_at,
                     'last_accessed': response.last_accessed
                 }
-                print(f"✅ [Redis] Key info: {key} ({response.type}, {response.size_bytes} bytes)")
                 return info
             else:
-                print(f"⚠️  [Redis] Key does not exist: {key}")
                 return {'exists': False}
 
         except Exception as e:
@@ -1561,12 +1480,10 @@ if __name__ == '__main__':
         # Basic operations
         client.set('user:1:name', 'John Doe')
         name = client.get('user:1:name')
-        print(f"User name: {name}")
 
         # With TTL
         client.set_with_ttl('session:abc123', 'user_data', ttl_seconds=3600)
         ttl = client.ttl('session:abc123')
-        print(f"Session TTL: {ttl} seconds")
 
         # Batch operations
         client.mset({
@@ -1576,19 +1493,15 @@ if __name__ == '__main__':
         })
 
         users = client.mget(['user:2:name', 'user:2:email', 'user:2:age'])
-        print(f"Batch get: {users}")
 
         # Counter
         counter = client.incr('page:views')
-        print(f"Page views: {counter}")
 
         # List operations
         client.lpush('logs', ['log1', 'log2', 'log3'])
         logs = client.lrange('logs', 0, -1)
-        print(f"Log list: {logs}")
 
         # Hash operations
         client.hset('user:3', 'name', 'Bob Wilson')
         client.hset('user:3', 'email', 'bob@example.com')
         user_data = client.hgetall('user:3')
-        print(f"User data: {user_data}")

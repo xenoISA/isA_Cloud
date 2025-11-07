@@ -1,0 +1,74 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: isa-cloud-local
+
+# 节点配置
+nodes:
+  # 控制平面节点
+  - role: control-plane
+    kubeadmConfigPatches:
+    - |
+      kind: InitConfiguration
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: "ingress-ready=true"
+    # 端口映射 - 将容器端口映射到主机
+    extraPortMappings:
+    # HTTP/HTTPS
+    - containerPort: 80
+      hostPort: 80
+      protocol: TCP
+    - containerPort: 443
+      hostPort: 443
+      protocol: TCP
+    # 基础设施服务
+    - containerPort: 8500      # Consul UI
+      hostPort: 8500
+      protocol: TCP
+    - containerPort: 8600      # Consul DNS
+      hostPort: 8600
+      protocol: TCP
+    - containerPort: 6379      # Redis
+      hostPort: 6379
+      protocol: TCP
+    - containerPort: 9000      # MinIO API
+      hostPort: 9000
+      protocol: TCP
+    - containerPort: 9001      # MinIO Console
+      hostPort: 9001
+      protocol: TCP
+    - containerPort: 4222      # NATS
+      hostPort: 4222
+      protocol: TCP
+    - containerPort: 8222      # NATS Monitoring
+      hostPort: 8222
+      protocol: TCP
+    - containerPort: 1883      # MQTT
+      hostPort: 1883
+      protocol: TCP
+    - containerPort: 3100      # Loki
+      hostPort: 3100
+      protocol: TCP
+    - containerPort: 3000      # Grafana
+      hostPort: 3000
+      protocol: TCP
+    # Gateway
+    - containerPort: 8080      # Infrastructure Gateway
+      hostPort: 8080
+      protocol: TCP
+
+  # 工作节点（可根据资源调整数量）
+  - role: worker
+  - role: worker
+
+# 网络配置
+networking:
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+
+# Containerd 配置 - 支持本地镜像仓库
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
+    endpoint = ["http://localhost:5001"]

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-grpc
+  namespace: isa-cloud-staging
+  labels:
+    app: neo4j-grpc
+    tier: grpc-services
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 50063
+    targetPort: 50063
+    protocol: TCP
+  selector:
+    app: neo4j-grpc

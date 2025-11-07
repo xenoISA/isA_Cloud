@@ -1,0 +1,397 @@
+// postgres_service.proto - PostgreSQL Database gRPC Service
+// Direct PostgreSQL access with connection pooling and concurrent processing
+// Pure relational database operations - vectors handled by Qdrant service
+syntax = "proto3";
+
+package isa.postgres;
+
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/postgres";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ========================================
+// PostgreSQL Database Service
+// ========================================
+// Provides centralized PostgreSQL access with:
+// - Connection pooling (Go concurrent processing)
+// - Transaction support
+// - Batch operations
+// - Direct SQL execution
+// - JSONB support
+// - Full-text search
+//
+// Note: Vector operations are handled by Qdrant service
+
+service PostgresService {
+    // ========== Basic CRUD Operations ==========
+
+    // Query - Execute SELECT query
+    rpc Query(QueryRequest) returns (QueryResponse);
+
+    // QueryRow - Execute SELECT and return single row
+    rpc QueryRow(QueryRowRequest) returns (QueryRowResponse);
+
+    // Execute - Execute INSERT/UPDATE/DELETE
+    rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+
+    // ExecuteBatch - Execute multiple operations in batch
+    rpc ExecuteBatch(ExecuteBatchRequest) returns (ExecuteBatchResponse);
+
+    // ========== Table Operations (Builder API) ==========
+
+    // SelectFrom - Query builder style SELECT
+    rpc SelectFrom(SelectFromRequest) returns (SelectFromResponse);
+
+    // InsertInto - Insert rows into table
+    rpc InsertInto(InsertIntoRequest) returns (InsertIntoResponse);
+
+    // UpdateTable - Update rows in table
+    rpc UpdateTable(UpdateTableRequest) returns (UpdateTableResponse);
+
+    // DeleteFrom - Delete rows from table
+    rpc DeleteFrom(DeleteFromRequest) returns (DeleteFromResponse);
+
+    // ========== Transaction Support ==========
+
+    // BeginTransaction - Start a new transaction
+    rpc BeginTransaction(BeginTransactionRequest) returns (BeginTransactionResponse);
+
+    // CommitTransaction - Commit transaction
+    rpc CommitTransaction(CommitTransactionRequest) returns (CommitTransactionResponse);
+
+    // RollbackTransaction - Rollback transaction
+    rpc RollbackTransaction(RollbackTransactionRequest) returns (RollbackTransactionResponse);
+
+    // ExecuteInTransaction - Execute operations within a transaction
+    rpc ExecuteInTransaction(ExecuteInTransactionRequest) returns (ExecuteInTransactionResponse);
+
+    // ========== Schema & Metadata ==========
+
+    // GetTableInfo - Get table schema information
+    rpc GetTableInfo(GetTableInfoRequest) returns (GetTableInfoResponse);
+
+    // ListTables - List all tables in schema
+    rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+
+    // TableExists - Check if table exists
+    rpc TableExists(TableExistsRequest) returns (TableExistsResponse);
+
+    // ========== Health & Stats ==========
+
+    // HealthCheck - Service health check
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+
+    // GetStats - Get connection pool and database statistics
+    rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}
+
+// ========================================
+// Basic Query Operations
+// ========================================
+
+message QueryRequest {
+    common.RequestMetadata metadata = 1;
+
+    string sql = 2;                              // SQL query
+    repeated google.protobuf.Value params = 3;   // Query parameters ($1, $2, ...)
+    string schema = 4;                           // Database schema (default: public)
+}
+
+message QueryResponse {
+    common.ResponseMetadata metadata = 1;
+
+    repeated google.protobuf.Struct rows = 2;    // Result rows
+    int32 row_count = 3;                         // Number of rows returned
+}
+
+message QueryRowRequest {
+    common.RequestMetadata metadata = 1;
+
+    string sql = 2;
+    repeated google.protobuf.Value params = 3;
+    string schema = 4;
+}
+
+message QueryRowResponse {
+    common.ResponseMetadata metadata = 1;
+
+    google.protobuf.Struct row = 2;              // Single row result (null if not found)
+    bool found = 3;                              // Whether row was found
+}
+
+message ExecuteRequest {
+    common.RequestMetadata metadata = 1;
+
+    string sql = 2;
+    repeated google.protobuf.Value params = 3;
+    string schema = 4;
+}
+
+message ExecuteResponse {
+    common.ResponseMetadata metadata = 1;
+
+    int64 rows_affected = 2;                     // Number of rows affected
+    string command_tag = 3;                      // PostgreSQL command tag (e.g., "INSERT 0 1")
+}
+
+message ExecuteBatchRequest {
+    common.RequestMetadata metadata = 1;
+
+    repeated BatchOperation operations = 2;
+    string schema = 3;
+}
+
+message BatchOperation {
+    string sql = 1;
+    repeated google.protobuf.Value params = 2;
+}
+
+message ExecuteBatchResponse {
+    common.ResponseMetadata metadata = 1;
+
+    repeated ExecuteResult results = 2;
+    int32 total_rows_affected = 3;
+}
+
+message ExecuteResult {
+    int64 rows_affected = 1;
+    string command_tag = 2;
+    string error = 3;                            // Error message if operation failed
+}
+
+// ========================================
+// Table Operations (Builder-style API)
+// ========================================
+
+message SelectFromRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;                            // Table name
+    repeated string columns = 3;                 // Columns to select (* if empty)
+    repeated WhereClause where = 4;              // WHERE conditions
+    repeated string order_by = 5;                // ORDER BY clauses
+    int32 limit = 6;                             // LIMIT
+    int32 offset = 7;                            // OFFSET
+    string schema = 8;                           // Schema name
+}
+
+message WhereClause {
+    string column = 1;
+    string operator = 2;                         // =, !=, >, <, >=, <=, LIKE, IN, IS NULL, etc.
+    google.protobuf.Value value = 3;             // Value for comparison
+}
+
+message SelectFromResponse {
+    common.ResponseMetadata metadata = 1;
+
+    repeated google.protobuf.Struct rows = 2;
+    int32 row_count = 3;
+}
+
+message InsertIntoRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;
+    repeated google.protobuf.Struct rows = 3;    // Rows to insert
+    bool returning = 4;                          // Return inserted rows
+    string schema = 5;
+}
+
+message InsertIntoResponse {
+    common.ResponseMetadata metadata = 1;
+
+    int64 rows_inserted = 2;
+    repeated google.protobuf.Struct rows = 3;    // Returned rows if returning=true
+}
+
+message UpdateTableRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;
+    google.protobuf.Struct values = 3;           // Columns to update
+    repeated WhereClause where = 4;              // WHERE conditions
+    bool returning = 5;                          // Return updated rows
+    string schema = 6;
+}
+
+message UpdateTableResponse {
+    common.ResponseMetadata metadata = 1;
+
+    int64 rows_updated = 2;
+    repeated google.protobuf.Struct rows = 3;
+}
+
+message DeleteFromRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;
+    repeated WhereClause where = 3;
+    bool returning = 4;                          // Return deleted rows
+    string schema = 5;
+}
+
+message DeleteFromResponse {
+    common.ResponseMetadata metadata = 1;
+
+    int64 rows_deleted = 2;
+    repeated google.protobuf.Struct rows = 3;
+}
+
+// ========================================
+// Transaction Support
+// ========================================
+
+message BeginTransactionRequest {
+    common.RequestMetadata metadata = 1;
+
+    string isolation_level = 2;                  // READ COMMITTED, REPEATABLE READ, SERIALIZABLE
+}
+
+message BeginTransactionResponse {
+    common.ResponseMetadata metadata = 1;
+
+    string transaction_id = 2;                   // Transaction identifier
+}
+
+message CommitTransactionRequest {
+    common.RequestMetadata metadata = 1;
+
+    string transaction_id = 2;
+}
+
+message CommitTransactionResponse {
+    common.ResponseMetadata metadata = 1;
+
+    bool success = 2;
+}
+
+message RollbackTransactionRequest {
+    common.RequestMetadata metadata = 1;
+
+    string transaction_id = 2;
+}
+
+message RollbackTransactionResponse {
+    common.ResponseMetadata metadata = 1;
+
+    bool success = 2;
+}
+
+message ExecuteInTransactionRequest {
+    common.RequestMetadata metadata = 1;
+
+    repeated BatchOperation operations = 2;      // Operations to execute
+    string schema = 3;
+}
+
+message ExecuteInTransactionResponse {
+    common.ResponseMetadata metadata = 1;
+
+    repeated ExecuteResult results = 2;
+    bool committed = 3;                          // Whether transaction was committed
+}
+
+// ========================================
+// Schema & Metadata
+// ========================================
+
+message GetTableInfoRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;
+    string schema = 3;
+}
+
+message GetTableInfoResponse {
+    common.ResponseMetadata metadata = 1;
+
+    TableInfo table_info = 2;
+}
+
+message TableInfo {
+    string table_name = 1;
+    string schema = 2;
+    repeated ColumnInfo columns = 3;
+    repeated string primary_keys = 4;
+    int64 row_count_estimate = 5;
+}
+
+message ColumnInfo {
+    string column_name = 1;
+    string data_type = 2;
+    bool is_nullable = 3;
+    string default_value = 4;
+}
+
+message ListTablesRequest {
+    common.RequestMetadata metadata = 1;
+
+    string schema = 2;                           // Schema to list (default: public)
+}
+
+message ListTablesResponse {
+    common.ResponseMetadata metadata = 1;
+
+    repeated string tables = 2;
+}
+
+message TableExistsRequest {
+    common.RequestMetadata metadata = 1;
+
+    string table = 2;
+    string schema = 3;
+}
+
+message TableExistsResponse {
+    common.ResponseMetadata metadata = 1;
+
+    bool exists = 2;
+}
+
+// ========================================
+// Health & Statistics
+// ========================================
+
+message HealthCheckRequest {
+    common.RequestMetadata metadata = 1;
+
+    bool detailed = 2;                           // Return detailed health info
+}
+
+message HealthCheckResponse {
+    common.ResponseMetadata metadata = 1;
+
+    bool healthy = 2;
+    string status = 3;
+    string version = 4;                          // PostgreSQL version
+    google.protobuf.Struct details = 5;          // Detailed health info
+}
+
+message GetStatsRequest {
+    common.RequestMetadata metadata = 1;
+}
+
+message GetStatsResponse {
+    common.ResponseMetadata metadata = 1;
+
+    ConnectionPoolStats pool_stats = 2;
+    DatabaseStats db_stats = 3;
+}
+
+message ConnectionPoolStats {
+    int32 max_connections = 1;
+    int32 open_connections = 2;
+    int32 idle_connections = 3;
+    int32 active_connections = 4;
+    int64 total_queries = 5;
+}
+
+message DatabaseStats {
+    string version = 1;
+    int64 database_size_bytes = 2;
+    int32 total_tables = 3;
+    int64 total_connections = 4;
+    google.protobuf.Timestamp uptime_since = 5;
+}

@@ -1,0 +1,27 @@
+# APISIX Dashboard Configuration for Staging
+
+conf:
+  listen:
+    host: 0.0.0.0
+    port: 9000
+
+  # etcd configuration - connect to staging-etcd
+  etcd:
+    endpoints:
+      - staging-etcd:2379
+    prefix: /apisix
+    timeout: 30
+
+authentication:
+  secret: secret
+  expire_time: 3600
+  users:
+    - username: admin
+      password: admin
+
+log:
+  error_log:
+    level: warn
+    file_path: /usr/local/apisix-dashboard/logs/error.log
+  access_log:
+    file_path: /usr/local/apisix-dashboard/logs/access.log

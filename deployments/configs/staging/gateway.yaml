@@ -41,6 +41,14 @@ services:
       max_attempts: 3
       backoff: "1s"
 
+  product_service:
+    consul_service_name: "product_service"
+    http_port: 8215
+    timeout: "30s"
+    retry:
+      max_attempts: 3
+      backoff: "1s"
+
 database:
   # Using Supabase Cloud for staging
   host: "db.ugloxikfljpuvakwiadf.supabase.co"
@@ -73,18 +81,30 @@ security:
     enabled: true
     allow_origins:
       - "*"
+      # Allow all localhost origins regardless of port for development
+      - "http://localhost"
+      - "http://localhost:*"
+      - "http://127.0.0.1"
+      - "http://127.0.0.1:*"
     allow_methods:
       - "GET"
       - "POST"
       - "PUT"
       - "DELETE"
       - "OPTIONS"
+      - "PATCH"
     allow_headers:
       - "Authorization"
       - "Content-Type"
       - "X-Request-ID"
       - "Cache-Control"
+      - "X-Requested-With"
+      - "Accept"
+      - "Origin"
     allow_credentials: true
+    expose_headers:
+      - "X-Request-ID"
+      - "X-Response-Time"
 
   rate_limit:
     enabled: true                         # ✅ ENABLED - Per-user rate limiting

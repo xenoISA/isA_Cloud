@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-grpc
+  namespace: isa-cloud-staging
+  labels:
+    app: redis-grpc
+  annotations:
+    # Consul service mesh annotations (if using Consul on K8s)
+    consul.hashicorp.com/service-name: "redis-grpc"
+    consul.hashicorp.com/service-port: "50055"
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc
+    port: 50055
+    targetPort: 50055
+    protocol: TCP
+  selector:
+    app: redis-grpc

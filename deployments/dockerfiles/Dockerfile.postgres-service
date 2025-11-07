@@ -1,0 +1,41 @@
+# PostgreSQL gRPC Service Dockerfile
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
+ENV GOTOOLCHAIN=auto
+ENV CGO_ENABLED=1
+
+WORKDIR /app
+COPY go.mod go.sum ./
+
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/postgres-service cmd/postgres-service/main.go
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/bin/postgres-service /app/postgres-service
+
+# Environment variables
+ENV POSTGRES_HOST=localhost
+ENV POSTGRES_PORT=5432
+ENV POSTGRES_DB=postgres
+ENV POSTGRES_USER=postgres
+ENV POSTGRES_PASSWORD=postgres
+ENV POSTGRES_SSL_MODE=disable
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV GRPC_PORT=50061
+
+EXPOSE 50061
+CMD ["/app/postgres-service"]
