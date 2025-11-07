@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: isa-cloud-staging
+  labels:
+    app: qdrant
+    tier: infrastructure
+spec:
+  serviceName: qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+        tier: infrastructure
+    spec:
+      containers:
+      - name: qdrant
+        image: staging-isa-qdrant:amd64
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 6333
+          protocol: TCP
+        - name: grpc
+          containerPort: 6334
+          protocol: TCP
+
+        env:
+        - name: QDRANT_HTTP_PORT
+          value: "6333"
+        - name: QDRANT_GRPC_PORT
+          value: "6334"
+        - name: CONSUL_ENABLED
+          value: "false"
+        - name: CONSUL_HOST
+          value: "consul"
+        - name: CONSUL_PORT
+          value: "8500"
+        - name: SERVICE_NAME
+          value: "qdrant-db"
+
+        volumeMounts:
+        - name: data
+          mountPath: /qdrant/storage
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 6333
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 6333
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi

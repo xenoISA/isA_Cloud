@@ -69,6 +69,18 @@ service MQTTService {
     
     // ========== 健康检查 ==========
     rpc HealthCheck(MQTTHealthCheckRequest) returns (MQTTHealthCheckResponse);
+
+    // ========== 设备消息监听（新增）==========
+    // 订阅所有设备消息流（替代 Gateway MQTT Adapter）
+    rpc SubscribeDeviceMessages(SubscribeDeviceMessagesRequest) returns (stream DeviceMessage);
+
+    // ========== Webhook 回调（新增）==========
+    // 注册 webhook 用于接收设备消息
+    rpc RegisterWebhook(RegisterWebhookRequest) returns (RegisterWebhookResponse);
+    // 注销 webhook
+    rpc UnregisterWebhook(UnregisterWebhookRequest) returns (UnregisterWebhookResponse);
+    // 列出已注册的 webhooks
+    rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse);
 }
 
 // ========================================
@@ -465,5 +477,101 @@ message MQTTHealthCheckResponse {
     string message = 5;
 }
 
+// ========================================
+// 设备消息监听（新增）
+// ========================================
+
+// 设备消息类型
+enum DeviceMessageType {
+    DEVICE_MESSAGE_UNKNOWN = 0;
+    DEVICE_MESSAGE_TELEMETRY = 1;       // 遥测数据
+    DEVICE_MESSAGE_STATUS = 2;          // 状态更新
+    DEVICE_MESSAGE_AUTH = 3;            // 认证请求
+    DEVICE_MESSAGE_REGISTRATION = 4;    // 注册请求
+    DEVICE_MESSAGE_COMMAND_RESPONSE = 5; // 命令响应
+    DEVICE_MESSAGE_NOTIFICATION_ACK = 6; // 通知确认
+}
+
+// 订阅设备消息请求
+message SubscribeDeviceMessagesRequest {
+    string user_id = 1;                             // 用户 ID
+    string organization_id = 2;                     // 组织 ID（可选，用于过滤）
+    repeated DeviceMessageType message_types = 3;   // 订阅的消息类型（空表示所有类型）
+    repeated string device_ids = 4;                 // 订阅特定设备（空表示所有设备）
+    repeated string topic_patterns = 5;             // 自定义 topic 模式（如 devices/+/telemetry）
+}
+
+// 设备消息（流式返回）
+message DeviceMessage {
+    string device_id = 1;                           // 设备 ID
+    DeviceMessageType message_type = 2;             // 消息类型
+    string topic = 3;                               // 原始 MQTT topic
+    bytes payload = 4;                              // 消息内容
+    google.protobuf.Timestamp timestamp = 5;        // 时间戳
+    map<string, string> metadata = 6;               // 额外元数据
+    QoSLevel qos = 7;                               // QoS 级别
+}
+
+// ========================================
+// Webhook 回调（新增）
+// ========================================
+
+// Webhook 信息
+message WebhookInfo {
+    string webhook_id = 1;                          // Webhook ID
+    string user_id = 2;                             // 用户 ID
+    string url = 3;                                 // 回调 URL
+    repeated DeviceMessageType message_types = 4;   // 订阅的消息类型
+    repeated string device_ids = 5;                 // 订阅的设备 ID
+    repeated string topic_patterns = 6;             // Topic 模式
+    map<string, string> headers = 7;                // 自定义 HTTP Headers
+    bool enabled = 8;                               // 是否启用
+    google.protobuf.Timestamp created_at = 9;       // 创建时间
+    google.protobuf.Timestamp updated_at = 10;      // 更新时间
+    int64 success_count = 11;                       // 成功调用次数
+    int64 failure_count = 12;                       // 失败调用次数
+}
+
+// 注册 Webhook 请求
+message RegisterWebhookRequest {
+    string user_id = 1;                             // 用户 ID
+    string organization_id = 2;                     // 组织 ID
+    string url = 3;                                 // 回调 URL（必须是 http/https）
+    repeated DeviceMessageType message_types = 4;   // 订阅的消息类型
+    repeated string device_ids = 5;                 // 订阅的设备 ID（空表示所有）
+    repeated string topic_patterns = 6;             // Topic 模式（如 devices/+/telemetry）
+    map<string, string> headers = 7;                // 自定义 HTTP Headers（如认证 token）
+    string secret = 8;                              // 签名密钥（用于验证回调）
+}
+
+message RegisterWebhookResponse {
+    bool success = 1;
+    string webhook_id = 2;                          // 生成的 Webhook ID
+    WebhookInfo webhook = 3;
+    string message = 4;
+}
+
+// 注销 Webhook 请求
+message UnregisterWebhookRequest {
+    string user_id = 1;
+    string webhook_id = 2;                          // Webhook ID
+}
+
+message UnregisterWebhookResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// 列出 Webhooks 请求
+message ListWebhooksRequest {
+    string user_id = 1;
+    string organization_id = 2;
+    bool include_disabled = 3;                      // 是否包含已禁用的
+}
+
+message ListWebhooksResponse {
+    repeated WebhookInfo webhooks = 1;
+    int32 total_count = 2;
+}
 
 

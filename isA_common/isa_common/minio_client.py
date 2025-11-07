@@ -4,28 +4,43 @@ MinIO gRPC Client
 MinIO 对象存储客户端
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 from .base_client import BaseGRPCClient
 from .proto import minio_service_pb2, minio_service_pb2_grpc
+
+if TYPE_CHECKING:
+    from .consul_client import ConsulRegistry
 
 
 class MinIOClient(BaseGRPCClient):
     """MinIO gRPC 客户端"""
 
-    def __init__(self, host: str = 'localhost', port: int = 50051, user_id: Optional[str] = None,
-                 lazy_connect: bool = True, enable_compression: bool = True, enable_retry: bool = True):
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, user_id: Optional[str] = None,
+                 lazy_connect: bool = True, enable_compression: bool = True, enable_retry: bool = True,
+                 consul_registry: Optional['ConsulRegistry'] = None, service_name_override: Optional[str] = None):
         """
         初始化 MinIO 客户端
 
         Args:
-            host: 服务地址 (默认: localhost)
-            port: 服务端口 (默认: 50051)
+            host: 服务地址 (optional, will use Consul discovery if not provided)
+            port: 服务端口 (optional, will use Consul discovery if not provided)
             user_id: 用户 ID
             lazy_connect: 延迟连接 (默认: True)
             enable_compression: 启用压缩 (默认: True)
             enable_retry: 启用重试 (默认: True)
+            consul_registry: ConsulRegistry instance for service discovery (optional)
+            service_name_override: Override service name for Consul lookup (optional, defaults to 'minio')
         """
-        super().__init__(host, port, user_id, lazy_connect, enable_compression, enable_retry)
+        super().__init__(
+            host=host,
+            port=port,
+            user_id=user_id,
+            lazy_connect=lazy_connect,
+            enable_compression=enable_compression,
+            enable_retry=enable_retry,
+            consul_registry=consul_registry,
+            service_name_override=service_name_override
+        )
     
     def _create_stub(self):
         """创建 MinIO service stub"""
@@ -33,19 +48,17 @@ class MinIOClient(BaseGRPCClient):
     
     def service_name(self) -> str:
         return "MinIO"
-    
+
+    def default_port(self) -> int:
+        return 50051
+
     def health_check(self, detailed: bool = True) -> Optional[Dict]:
         """健康检查"""
         try:
             self._ensure_connected()
             request = minio_service_pb2.MinIOHealthCheckRequest(detailed=detailed)
             response = self.stub.HealthCheck(request)
-            
-            print(f"✅ [MinIO] 服务状态: {response.status}")
-            print(f"   健康: {response.healthy}")
-            if response.details:
-                print(f"   详细信息: {dict(response.details)}")
-            
+
             return {
                 'status': response.status,
                 'healthy': response.healthy,
@@ -68,15 +81,13 @@ class MinIOClient(BaseGRPCClient):
             )
             
             response = self.stub.CreateBucket(request)
-            
+
             if response.success:
-                print(f"✅ [MinIO] 桶创建成功: {bucket_name}")
                 return {
                     'success': True,
                     'bucket': response.bucket_info.name if response.bucket_info else bucket_name
                 }
             else:
-                print(f"⚠️  [MinIO] {response.message or response.error}")
                 return None
             
         except Exception as e:
@@ -103,12 +114,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteBucket(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶删除成功: {bucket_name}")
-                if response.deleted_objects > 0:
-                    print(f"   删除了 {response.deleted_objects} 个对象")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.message or response.error}")
                 return False
 
         except Exception as e:
@@ -128,10 +135,8 @@ class MinIOClient(BaseGRPCClient):
 
             if response.success:
                 bucket_names = [bucket.name for bucket in response.buckets]
-                print(f"✅ [MinIO] 找到 {len(bucket_names)} 个桶")
                 return bucket_names
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return []
 
         except Exception as e:
@@ -167,7 +172,6 @@ class MinIOClient(BaseGRPCClient):
                 }
                 return info
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -187,10 +191,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.SetBucketPolicy(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶策略设置成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -211,7 +213,6 @@ class MinIOClient(BaseGRPCClient):
             if response.success:
                 return response.policy_json
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -236,10 +237,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.SetBucketTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶标签设置成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -258,10 +257,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.GetBucketTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶标签获取成功: {len(response.tags)} 个标签")
                 return dict(response.tags)
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -279,10 +276,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteBucketTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶标签删除成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -302,11 +297,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.SetBucketVersioning(request)
 
             if response.success:
-                status = "启用" if enabled else "禁用"
-                print(f"✅ [MinIO] 桶版本控制{status}成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -325,11 +317,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.GetBucketVersioning(request)
 
             if response.success:
-                status = "启用" if response.enabled else "禁用"
-                print(f"✅ [MinIO] 桶版本控制状态: {status}")
                 return response.enabled
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -369,10 +358,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.SetBucketLifecycle(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶生命周期策略设置成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -393,10 +380,8 @@ class MinIOClient(BaseGRPCClient):
             if response.success:
                 from google.protobuf.json_format import MessageToDict
                 rules = [MessageToDict(rule) for rule in response.rules]
-                print(f"✅ [MinIO] 桶生命周期策略获取成功: {len(rules)} 条规则")
                 return rules
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -414,10 +399,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteBucketLifecycle(request)
 
             if response.success:
-                print(f"✅ [MinIO] 桶生命周期策略删除成功: {bucket_name}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -429,6 +412,17 @@ class MinIOClient(BaseGRPCClient):
         """上传对象 (流式)"""
         try:
             self._ensure_connected()
+
+            # Ensure bucket exists before uploading
+            if not self.bucket_exists(bucket_name):
+                # Use user_id as organization_id for user-scoped buckets
+                create_result = self.create_bucket(bucket_name, organization_id=self.user_id)
+                if not create_result or not create_result.get('success'):
+                    return {
+                        'success': False,
+                        'error': f"Failed to create bucket '{bucket_name}'"
+                    }
+
             def request_generator():
                 # 第一个消息：元数据
                 meta = minio_service_pb2.PutObjectMetadata(
@@ -451,7 +445,6 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.PutObject(request_generator())
 
             if response.success:
-                print(f"✅ [MinIO] 对象上传成功: {object_key}")
                 return {
                     'success': True,
                     'object_key': response.object_key,
@@ -459,7 +452,6 @@ class MinIOClient(BaseGRPCClient):
                     'etag': response.etag
                 }
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -488,10 +480,8 @@ class MinIOClient(BaseGRPCClient):
                         'content_type': obj.content_type,
                         'etag': obj.etag
                     })
-                print(f"✅ [MinIO] 找到 {len(objects)} 个对象")
                 return objects
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return []
 
         except Exception as e:
@@ -517,7 +507,6 @@ class MinIOClient(BaseGRPCClient):
                 elif response.HasField('chunk'):
                     data.extend(response.chunk)
 
-            print(f"✅ [MinIO] 对象下载成功: {object_key} ({len(data)} bytes)")
             return bytes(data)
 
         except Exception as e:
@@ -536,10 +525,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteObject(request)
 
             if response.success:
-                print(f"✅ [MinIO] 对象删除成功: {object_key}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -560,10 +547,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteObjects(request)
 
             if response.success:
-                print(f"✅ [MinIO] 批量删除成功: {len(response.deleted_keys)} 个对象")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -585,10 +570,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.CopyObject(request)
 
             if response.success:
-                print(f"✅ [MinIO] 对象复制成功: {source_key} -> {dest_key}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -618,7 +601,6 @@ class MinIOClient(BaseGRPCClient):
                 }
                 return metadata
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -662,10 +644,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.SetObjectTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 对象标签设置成功: {object_key}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -685,10 +665,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.GetObjectTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 对象标签获取成功: {len(response.tags)} 个标签")
                 return dict(response.tags)
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -707,10 +685,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.DeleteObjectTags(request)
 
             if response.success:
-                print(f"✅ [MinIO] 对象标签删除成功: {object_key}")
                 return True
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return False
 
         except Exception as e:
@@ -719,7 +695,6 @@ class MinIOClient(BaseGRPCClient):
 
     def list_object_versions(self, bucket_name: str, object_key: str) -> Optional[List[Dict]]:
         """列出对象版本 (暂未实现)"""
-        print(f"⚠️  [MinIO] list_object_versions not implemented in proto service")
         return None
     
     def get_presigned_url(self, bucket_name: str, object_key: str,
@@ -737,10 +712,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.GetPresignedURL(request)
 
             if response.success:
-                print(f"✅ [MinIO] 预签名 URL 生成成功")
                 return response.url
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -762,10 +735,8 @@ class MinIOClient(BaseGRPCClient):
             response = self.stub.GetPresignedPutURL(request)
 
             if response.success:
-                print(f"✅ [MinIO] 预签名 PUT URL 生成成功")
                 return response.url
             else:
-                print(f"⚠️  [MinIO] {response.error}")
                 return None
 
         except Exception as e:
@@ -794,5 +765,4 @@ if __name__ == '__main__':
         
         # 列出对象
         objects = client.list_objects('test-bucket')
-        print(f"对象: {objects}")
 

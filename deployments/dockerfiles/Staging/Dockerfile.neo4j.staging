@@ -1,0 +1,85 @@
+FROM neo4j:5-community
+
+# Neo4j Dockerfile with Consul service discovery support
+# File: deployments/dockerfiles/Staging/Dockerfile.neo4j.staging
+
+# Install curl for Consul registration
+USER root
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Environment variables (for our scripts only, not Neo4j config)
+ENV HTTP_PORT=7474
+ENV BOLT_PORT=7687
+ENV NEO4J_AUTH=neo4j/password
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=neo4j-db
+ENV SERVICE_TAGS=database,graph-database,neo4j
+
+# Startup script
+COPY <<'EOF' /usr/local/bin/start-neo4j.sh
+#!/bin/bash
+set -e
+
+echo "Starting Neo4j service..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+
+# Start Neo4j (using tini and neo4j script)
+tini -s -g -- /startup/docker-entrypoint.sh neo4j &
+NEO4J_PID=$!
+
+# If Consul is enabled, register service
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for Neo4j to be ready..."
+    sleep 15
+
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+
+    # Register Neo4j HTTP service
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-http-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}-http\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${HTTP_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\", \"http\"],
+        \"Meta\": {
+            \"bolt_port\": \"${BOLT_PORT}\"
+        },
+        \"Check\": {
+            \"HTTP\": \"http://${HOSTNAME}:${HTTP_PORT}/\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register HTTP service with Consul"
+
+    # Register Neo4j Bolt service
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-bolt-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}-bolt\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${BOLT_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\", \"bolt\"],
+        \"Check\": {
+            \"TCP\": \"${HOSTNAME}:${BOLT_PORT}\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register Bolt service with Consul"
+
+    echo "Services registered: ${SERVICE_NAME}-{http,bolt}-${HOSTNAME}"
+fi
+
+# Wait for Neo4j process
+wait $NEO4J_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-neo4j.sh
+
+USER neo4j
+
+EXPOSE 7474 7687
+
+CMD ["/usr/local/bin/start-neo4j.sh"]

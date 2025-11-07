@@ -71,17 +71,17 @@ except ImportError:
 def example_01_health_check(host='localhost', port=50055):
     """
     Example 1: Health Check
-    
-    Check if the Redis gRPC service is healthy and operational.
+
+    Check Redis service health status.
     File: redis_client.py, Method: health_check()
     """
     print("\n" + "=" * 80)
     print("Example 1: Service Health Check")
     print("=" * 80)
-    
+
     with RedisClient(host=host, port=port, user_id='example-user') as client:
         health = client.health_check()
-        
+
         if health and health.get('healthy'):
             print(f"✅ Service is healthy!")
             print(f"   Redis status: {health.get('redis_status')}")
@@ -934,14 +934,51 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser.add_argument('--host', default='localhost',
-                       help='Redis gRPC service host (default: localhost)')
-    parser.add_argument('--port', type=int, default=50055,
-                       help='Redis gRPC service port (default: 50055)')
+    parser.add_argument('--host', default=None,
+                       help='Redis gRPC service host (default: auto-discover from Consul, fallback to localhost)')
+    parser.add_argument('--port', type=int, default=None,
+                       help='Redis gRPC service port (default: auto-discover from Consul, fallback to 50055)')
+    parser.add_argument('--consul-host', default='localhost',
+                       help='Consul host (default: localhost)')
+    parser.add_argument('--consul-port', type=int, default=8500,
+                       help='Consul port (default: 8500)')
+    parser.add_argument('--no-consul', action='store_true',
+                       help='Skip Consul discovery, use localhost directly')
     parser.add_argument('--example', type=int, choices=range(1, 21),
                        help='Run specific example (1-20, default: all)')
-    
+
     args = parser.parse_args()
+
+    # Default: Try Consul first, fallback to localhost
+    host = args.host
+    port = args.port
+
+    if host is None or port is None:
+        if not args.no_consul:
+            try:
+                from isa_common.consul_client import ConsulRegistry
+                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                consul = ConsulRegistry(consul_host=args.consul_host, consul_port=args.consul_port)
+                redis_url = consul.get_redis_url()
+
+                # Parse URL
+                if '://' in redis_url:
+                    redis_url = redis_url.split('://', 1)[1]
+                discovered_host, port_str = redis_url.rsplit(':', 1)
+                discovered_port = int(port_str)
+
+                host = host or discovered_host
+                port = port or discovered_port
+                print(f"✅ Discovered from Consul: {host}:{port}")
+            except Exception as e:
+                print(f"⚠️  Consul discovery failed: {e}")
+                print(f"📍 Falling back to localhost...")
+
+        # Fallback to defaults
+        host = host or 'localhost'
+        port = port or 50055
+
+    print(f"🔗 Connecting to Redis at {host}:{port}\n")
     
     if args.example:
         # Run specific example

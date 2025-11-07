@@ -15,6 +15,7 @@ import sys
 import json
 import argparse
 from isa_common.nats_client import NATSClient
+from isa_common.consul_client import ConsulRegistry
 
 
 # ============================================
@@ -594,9 +595,12 @@ Examples:
         """
     )
 
-    parser.add_argument('--host', default='localhost', help='NATS service host (default: localhost)')
-    parser.add_argument('--port', type=int, default=50056, help='NATS service port (default: 50056)')
+    parser.add_argument('--host', default=None, help='NATS service host (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--port', type=int, default=None, help='NATS service port (optional, uses Consul discovery if not provided)')
     parser.add_argument('--user-id', default='example-user', help='User ID (default: example-user)')
+    parser.add_argument('--consul-host', default='localhost', help='Consul host (default: localhost)')
+    parser.add_argument('--consul-port', type=int, default=8500, help='Consul port (default: 8500)')
+    parser.add_argument('--use-consul', action='store_true', help='Use Consul for service discovery')
     parser.add_argument('--example', type=int, help='Run specific example (1-17)')
     parser.add_argument('--list', action='store_true', help='List all available examples')
 
@@ -626,11 +630,37 @@ Examples:
 
     print(f"\n{'='*70}")
     print(f"  NATS Client Examples")
-    print(f"  Connecting to {args.host}:{args.port}")
     print(f"{'='*70}")
 
+    # Default: Try Consul first, fallback to localhost
+    consul_registry = None
+    if args.host is None or args.port is None:
+        if not args.use_consul:  # use_consul now means "skip consul"
+            try:
+                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                consul_registry = ConsulRegistry(
+                    consul_host=args.consul_host,
+                    consul_port=args.consul_port
+                )
+                print(f"✅ Consul connected, will auto-discover NATS service")
+            except Exception as e:
+                print(f"⚠️  Consul discovery failed: {e}")
+                print(f"📍 Falling back to localhost:50056...")
+
+    if args.host and args.port:
+        print(f"🔗 Connecting to {args.host}:{args.port}")
+    elif consul_registry:
+        print(f"🔗 Will auto-discover NATS via Consul...")
+    else:
+        print(f"🔗 Connecting to localhost:50056")
+
     try:
-        with NATSClient(host=args.host, port=args.port, user_id=args.user_id) as client:
+        with NATSClient(
+            host=args.host,
+            port=args.port,
+            user_id=args.user_id,
+            consul_registry=consul_registry
+        ) as client:
             # Run specific example
             if args.example:
                 examples = {

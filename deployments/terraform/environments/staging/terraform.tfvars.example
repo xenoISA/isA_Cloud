@@ -1,0 +1,54 @@
+# ============================================
+# isA Cloud - Staging Environment Variables
+# ============================================
+# Copy this file to terraform.tfvars and fill in your actual values
+# terraform.tfvars is gitignored for security
+
+# ============================================
+# AWS Configuration
+# ============================================
+aws_region   = "us-east-1"
+environment  = "staging"
+project_name = "isa-cloud"
+
+# ============================================
+# Networking
+# ============================================
+vpc_cidr = "10.0.0.0/16"
+
+# ============================================
+# Supabase Configuration
+# ============================================
+# Get these from your Supabase project settings
+supabase_url                = "https://your-project.supabase.co"
+supabase_anon_key          = "your-anon-key-here"
+supabase_service_role_key  = "your-service-role-key-here"
+database_password          = "your-database-password"
+
+# ============================================
+# Infrastructure Secrets
+# ============================================
+redis_password       = "staging_redis_2024"
+minio_root_user      = "minioadmin"
+minio_root_password  = "minioadmin"
+
+# ============================================
+# Application Secrets
+# ============================================
+jwt_secret         = "staging-secret-key-change-in-production"
+mcp_api_key        = "your-mcp-api-key"
+composio_api_key   = "your-composio-api-key"
+brave_token        = "your-brave-token"
+neo4j_password     = "your-neo4j-password"
+stripe_secret_key  = "sk_test_your-stripe-key"
+stripe_webhook_secret = "whsec_your-webhook-secret"
+
+# ============================================
+# SSL Configuration (optional)
+# ============================================
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxx"
+
+# ============================================
+# Monitoring
+# ============================================
+alarm_email_endpoints = ["your-email@example.com"]

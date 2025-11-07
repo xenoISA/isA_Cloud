@@ -166,6 +166,26 @@ class MQTTServiceStub(object):
                 request_serializer=mqtt__service__pb2.MQTTHealthCheckRequest.SerializeToString,
                 response_deserializer=mqtt__service__pb2.MQTTHealthCheckResponse.FromString,
                 _registered_method=True)
+        self.SubscribeDeviceMessages = channel.unary_stream(
+                '/isa.mqtt.MQTTService/SubscribeDeviceMessages',
+                request_serializer=mqtt__service__pb2.SubscribeDeviceMessagesRequest.SerializeToString,
+                response_deserializer=mqtt__service__pb2.DeviceMessage.FromString,
+                _registered_method=True)
+        self.RegisterWebhook = channel.unary_unary(
+                '/isa.mqtt.MQTTService/RegisterWebhook',
+                request_serializer=mqtt__service__pb2.RegisterWebhookRequest.SerializeToString,
+                response_deserializer=mqtt__service__pb2.RegisterWebhookResponse.FromString,
+                _registered_method=True)
+        self.UnregisterWebhook = channel.unary_unary(
+                '/isa.mqtt.MQTTService/UnregisterWebhook',
+                request_serializer=mqtt__service__pb2.UnregisterWebhookRequest.SerializeToString,
+                response_deserializer=mqtt__service__pb2.UnregisterWebhookResponse.FromString,
+                _registered_method=True)
+        self.ListWebhooks = channel.unary_unary(
+                '/isa.mqtt.MQTTService/ListWebhooks',
+                request_serializer=mqtt__service__pb2.ListWebhooksRequest.SerializeToString,
+                response_deserializer=mqtt__service__pb2.ListWebhooksResponse.FromString,
+                _registered_method=True)
 
 
 class MQTTServiceServicer(object):
@@ -342,6 +362,36 @@ class MQTTServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SubscribeDeviceMessages(self, request, context):
+        """========== 设备消息监听（新增）==========
+        订阅所有设备消息流（替代 Gateway MQTT Adapter）
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RegisterWebhook(self, request, context):
+        """========== Webhook 回调（新增）==========
+        注册 webhook 用于接收设备消息
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UnregisterWebhook(self, request, context):
+        """注销 webhook
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListWebhooks(self, request, context):
+        """列出已注册的 webhooks
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_MQTTServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -464,6 +514,26 @@ def add_MQTTServiceServicer_to_server(servicer, server):
                     servicer.HealthCheck,
                     request_deserializer=mqtt__service__pb2.MQTTHealthCheckRequest.FromString,
                     response_serializer=mqtt__service__pb2.MQTTHealthCheckResponse.SerializeToString,
+            ),
+            'SubscribeDeviceMessages': grpc.unary_stream_rpc_method_handler(
+                    servicer.SubscribeDeviceMessages,
+                    request_deserializer=mqtt__service__pb2.SubscribeDeviceMessagesRequest.FromString,
+                    response_serializer=mqtt__service__pb2.DeviceMessage.SerializeToString,
+            ),
+            'RegisterWebhook': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterWebhook,
+                    request_deserializer=mqtt__service__pb2.RegisterWebhookRequest.FromString,
+                    response_serializer=mqtt__service__pb2.RegisterWebhookResponse.SerializeToString,
+            ),
+            'UnregisterWebhook': grpc.unary_unary_rpc_method_handler(
+                    servicer.UnregisterWebhook,
+                    request_deserializer=mqtt__service__pb2.UnregisterWebhookRequest.FromString,
+                    response_serializer=mqtt__service__pb2.UnregisterWebhookResponse.SerializeToString,
+            ),
+            'ListWebhooks': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListWebhooks,
+                    request_deserializer=mqtt__service__pb2.ListWebhooksRequest.FromString,
+                    response_serializer=mqtt__service__pb2.ListWebhooksResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1126,6 +1196,114 @@ class MQTTService(object):
             '/isa.mqtt.MQTTService/HealthCheck',
             mqtt__service__pb2.MQTTHealthCheckRequest.SerializeToString,
             mqtt__service__pb2.MQTTHealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SubscribeDeviceMessages(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/isa.mqtt.MQTTService/SubscribeDeviceMessages',
+            mqtt__service__pb2.SubscribeDeviceMessagesRequest.SerializeToString,
+            mqtt__service__pb2.DeviceMessage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegisterWebhook(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/isa.mqtt.MQTTService/RegisterWebhook',
+            mqtt__service__pb2.RegisterWebhookRequest.SerializeToString,
+            mqtt__service__pb2.RegisterWebhookResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UnregisterWebhook(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/isa.mqtt.MQTTService/UnregisterWebhook',
+            mqtt__service__pb2.UnregisterWebhookRequest.SerializeToString,
+            mqtt__service__pb2.UnregisterWebhookResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListWebhooks(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/isa.mqtt.MQTTService/ListWebhooks',
+            mqtt__service__pb2.ListWebhooksRequest.SerializeToString,
+            mqtt__service__pb2.ListWebhooksResponse.FromString,
             options,
             channel_credentials,
             insecure,

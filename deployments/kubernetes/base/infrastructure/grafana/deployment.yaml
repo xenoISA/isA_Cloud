@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: isa-cloud-staging
+  labels:
+    app: grafana
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+        tier: infrastructure
+    spec:
+      containers:
+      - name: grafana
+        image: staging-isa-grafana:amd64
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-secret
+              key: admin-password
+        - name: GF_USERS_ALLOW_SIGN_UP
+          value: "false"
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-piechart-panel,grafana-worldmap-panel"
+        - name: GF_PATHS_DATA
+          value: "/var/lib/grafana"
+        - name: GF_PATHS_LOGS
+          value: "/var/log/grafana"
+        - name: GF_PATHS_PLUGINS
+          value: "/var/lib/grafana/plugins"
+        - name: GF_PATHS_PROVISIONING
+          value: "/etc/grafana/provisioning"
+
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/grafana
+        - name: logs
+          mountPath: /var/log/grafana
+
+        resources:
+          requests:
+            cpu: 256m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}

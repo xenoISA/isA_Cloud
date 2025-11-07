@@ -1,0 +1,76 @@
+{
+  "services": [
+    {
+      "id": "mcp_service",
+      "name": "mcp_service",
+      "port": 8081,
+      "address": "mcp-staging",
+      "tags": ["v1", "fastapi", "ai-service", "staging"],
+      "meta": {
+        "version": "1.0.0",
+        "environment": "staging",
+        "team": "ai-platform",
+        "type": "mcp"
+      },
+      "checks": [
+        {
+          "id": "mcp-http-health",
+          "name": "MCP Service HTTP Health Check",
+          "http": "http://mcp-staging:8081/health",
+          "method": "GET",
+          "interval": "10s",
+          "timeout": "5s",
+          "deregister_critical_service_after": "90s"
+        }
+      ]
+    },
+    {
+      "id": "model_service",
+      "name": "model_service",
+      "port": 8082,
+      "address": "model-staging-test",
+      "tags": ["v1", "fastapi", "ai-service", "staging"],
+      "meta": {
+        "version": "1.0.0",
+        "environment": "staging",
+        "team": "ai-platform",
+        "type": "model"
+      },
+      "checks": [
+        {
+          "id": "model-http-health",
+          "name": "Model Service HTTP Health Check",
+          "http": "http://model-staging-test:8082/health",
+          "method": "GET",
+          "interval": "10s",
+          "timeout": "5s",
+          "deregister_critical_service_after": "90s"
+        }
+      ]
+    },
+    {
+      "id": "agent_service",
+      "name": "agent_service",
+      "port": 8080,
+      "address": "agent-staging-test",
+      "tags": ["v1", "fastapi", "ai-service", "staging"],
+      "meta": {
+        "version": "1.0.0",
+        "environment": "staging",
+        "team": "ai-platform",
+        "type": "agent"
+      },
+      "checks": [
+        {
+          "id": "agent-http-health",
+          "name": "Agent Service HTTP Health Check",
+          "http": "http://agent-staging-test:8080/health",
+          "method": "GET",
+          "interval": "10s",
+          "timeout": "5s",
+          "deregister_critical_service_after": "90s"
+        }
+      ]
+    }
+  ]
+}

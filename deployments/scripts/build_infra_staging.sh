@@ -28,6 +28,9 @@ SERVICES=(
     "minio"
     "nats"
     "mosquitto"
+    "postgres"
+    "qdrant"
+    "neo4j"
     "loki"
     "grafana"
 )

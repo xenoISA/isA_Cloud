@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: isa-common
-Version: 0.1.4
+Version: 0.1.8
 Summary: Shared Python infrastructure library for isA platform
 Home-page: https://github.com/isa-platform/isA_Cloud
 Author: isA Platform
@@ -20,6 +20,8 @@ Requires-Dist: grpcio>=1.50.0
 Requires-Dist: grpcio-tools>=1.50.0
 Requires-Dist: pydantic>=2.0.0
 Requires-Dist: tenacity>=8.0.0
+Requires-Dist: python-consul2>=0.1.5
+Requires-Dist: asyncpg>=0.29.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
@@ -146,4 +148,10 @@ Copyright © 2024 isA Platform
 ## Support
 
 For issues and questions, please visit: https://github.com/isa-platform/isA_Cloud
+
+
+
+
+
+
 

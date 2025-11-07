@@ -1,12 +1,16 @@
 # NATS Staging Deployment
 # Optimized for AWS ECS Fargate with Consul integration
-FROM nats:latest
+# Using alpine variant to enable health checks with curl
+FROM nats:alpine
 
 # Metadata
 LABEL maintainer="ISA Platform"
 LABEL version="1.0.0"
 LABEL description="NATS Message Queue for AWS ECS Staging"
 LABEL environment="staging"
+
+# Install curl for health checks
+RUN apk add --no-cache curl
 
 # Copy NATS configuration (NATS image is minimal, no shell commands)
 COPY deployments/configs/staging/nats.conf /nats.conf

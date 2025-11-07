@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isa-cloud-staging
+  labels:
+    name: isa-cloud-staging
+    environment: staging
+    project: isa-cloud
+  annotations:
+    description: "isA Cloud staging environment"

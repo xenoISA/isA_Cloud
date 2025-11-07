@@ -4,22 +4,24 @@ gRPC Clients Package
 统一的 gRPC 客户端接口
 
 使用示例:
-    from core.clients import get_client, SupabaseClient, MinIOClient
-    
+    from core.clients import get_client, PostgresClient, MinIOClient
+
     # 方式 1: 使用工厂函数
-    supabase = get_client('supabase', user_id='user_123')
-    
+    postgres = get_client('postgres', user_id='user_123')
+
     # 方式 2: 直接实例化
     minio = MinIOClient(host='localhost', port=50051, user_id='user_123')
-    
+
     # 方式 3: 使用 with 语句自动管理连接
-    with SupabaseClient() as client:
-        client.query('users', select='*')
+    with PostgresClient() as client:
+        client.query('SELECT * FROM users')
 """
 
 from typing import Optional, Dict
 from .base_client import BaseGRPCClient
-from .supabase_client import SupabaseClient
+from .postgres_client import PostgresClient
+from .qdrant_client import QdrantClient
+from .neo4j_client import Neo4jClient
 from .minio_client import MinIOClient
 from .duckdb_client import DuckDBClient
 from .mqtt_client import MQTTClient
@@ -27,7 +29,6 @@ from .nats_client import NATSClient
 from .redis_client import RedisClient
 from .loki_client import LokiClient
 from .consul_client import ConsulRegistry, consul_lifespan
-from .service_discovery import ServiceDiscovery, get_service_discovery
 
 # Import events module (but don't unpack, keep as submodule)
 from . import events
@@ -35,7 +36,9 @@ from . import events
 # 导出所有客户端
 __all__ = [
     'BaseGRPCClient',
-    'SupabaseClient',
+    'PostgresClient',
+    'QdrantClient',
+    'Neo4jClient',
     'MinIOClient',
     'DuckDBClient',
     'MQTTClient',
@@ -44,8 +47,6 @@ __all__ = [
     'LokiClient',
     'ConsulRegistry',
     'consul_lifespan',
-    'ServiceDiscovery',
-    'get_service_discovery',
     'get_client',
     'ClientFactory',
     'events',  # Export events submodule
@@ -59,7 +60,9 @@ DEFAULT_PORTS: Dict[str, int] = {
     'loki': 50054,
     'redis': 50055,
     'nats': 50056,
-    'supabase': 50057,
+    'postgres': 50064,
+    'qdrant': 50062,
+    'neo4j': 50063,
 }
 
 DEFAULT_HOST = 'localhost'
@@ -70,7 +73,9 @@ class ClientFactory:
     
     # 客户端映射
     _clients = {
-        'supabase': SupabaseClient,
+        'postgres': PostgresClient,
+        'qdrant': QdrantClient,
+        'neo4j': Neo4jClient,
         'minio': MinIOClient,
         'duckdb': DuckDBClient,
         'mqtt': MQTTClient,
@@ -182,11 +187,11 @@ if __name__ == '__main__':
     print("-" * 60)
     
     # 使用工厂创建客户端
-    with get_client('supabase', user_id='test_user') as supabase:
-        supabase.health_check()
-    
+    with get_client('postgres', user_id='test_user') as postgres:
+        postgres.health_check()
+
     print()
-    
+
     with get_client('minio', user_id='test_user') as minio:
         minio.health_check()
 

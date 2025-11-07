@@ -1,0 +1,53 @@
+---
+# Headless service for StatefulSet DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: consul
+  namespace: isa-cloud-staging
+  labels:
+    app: consul
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http
+    port: 8500
+    targetPort: 8500
+  - name: dns-tcp
+    port: 8600
+    targetPort: 8600
+    protocol: TCP
+  - name: dns-udp
+    port: 8600
+    targetPort: 8600
+    protocol: UDP
+  - name: server
+    port: 8300
+    targetPort: 8300
+  - name: serf-lan
+    port: 8301
+    targetPort: 8301
+  - name: serf-wan
+    port: 8302
+    targetPort: 8302
+  selector:
+    app: consul
+
+---
+# ClusterIP service for UI access
+apiVersion: v1
+kind: Service
+metadata:
+  name: consul-ui
+  namespace: isa-cloud-staging
+  labels:
+    app: consul
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8500
+    targetPort: 8500
+  selector:
+    app: consul

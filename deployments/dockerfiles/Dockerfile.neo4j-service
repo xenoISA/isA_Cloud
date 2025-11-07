@@ -1,0 +1,39 @@
+# Neo4j gRPC Service Dockerfile
+# Note: Proto files must be generated locally before building
+# Run: ./scripts/generate-grpc.sh
+FROM golang:1.23 AS builder
+ENV GOTOOLCHAIN=auto
+ENV CGO_ENABLED=1
+
+WORKDIR /app
+COPY go.mod go.sum ./
+
+# Use BuildKit cache mounts for faster builds
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+# Use BuildKit cache for compilation
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/neo4j-service cmd/neo4j-service/main.go
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/bin/neo4j-service /app/neo4j-service
+
+# Environment variables
+ENV NEO4J_URI=bolt://localhost:7687
+ENV NEO4J_USERNAME=neo4j
+ENV NEO4J_PASSWORD=password
+ENV NEO4J_DATABASE=neo4j
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV GRPC_PORT=50063
+
+EXPOSE 50063
+CMD ["/app/neo4j-service"]

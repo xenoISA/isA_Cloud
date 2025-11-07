@@ -144,21 +144,51 @@ func (dp *DynamicProxy) Handler() gin.HandlerFunc {
 			// 所有服务都保持完整路径(preservePath = true)
 			urlToConsulService := map[string]string{
 				// Core Services
-				"auth":          "auth",
+				"auth":          "auth_service",
 				"accounts":      "account_service",
 				"users":         "account_service", // alias
 				"sessions":      "session_service",
 				"authorization": "authorization_service",
 
+				// AI/Platform Services
+				"agent":  "agent_service",
+				"agents": "agent_service", // alias
+				"model":  "model_service",
+				"models": "model_service", // alias
+				"mcp":    "mcp_service",
+
 				// Business Services
-				"notifications": "notification",
+				"notifications": "notification_service",
 				"wallets":       "wallet_service",
 				"orders":        "order_service",
-				"storage":       "storage_service",
-				"files":         "storage_service", // alias for storage
-				"shares":        "storage_service", // file sharing
-				"photos":        "storage_service", // photo version management
-				"test":          "storage_service", // test endpoints
+				"billing":       "billing_service",
+				"product":       "product_service",
+				"products":      "product_service", // alias
+				"payments":      "payment_service",
+				"compliance":    "compliance_service",
+				"vault":         "vault_service",
+				"vaults":        "vault_service", // alias
+
+				// Storage & Media Services
+				"storage":  "storage_service",
+				"files":    "storage_service", // alias for storage
+				"shares":   "storage_service", // file sharing
+				"photos":   "storage_service", // photo version management
+				"gallery":  "storage_service", // gallery features
+				"albums":   "album_service",   // album management
+				"media":    "media_service",   // media management
+				"test":     "storage_service", // test endpoints
+
+				// Personal & Social Services
+				"calendar":      "calendar_service",
+				"calendars":     "calendar_service", // alias
+				"location":      "location_service",
+				"locations":     "location_service", // alias
+				"memory":        "memory_service",
+				"memories":      "memory_service", // alias
+				"weather":       "weather_service",
+
+				// Organizational Services
 				"audit":         "audit_service",
 				"tasks":         "task_service",
 				"analytics":     "task_service", // task analytics
@@ -166,7 +196,6 @@ func (dp *DynamicProxy) Handler() gin.HandlerFunc {
 				"organizations": "organization_service",
 				"invitations":   "invitation_service",
 				"events":        "event_service",
-				"payments":      "payment_service",
 
 				// IoT Services
 				"devices":    "device_service",

@@ -30,7 +30,9 @@ READY_SERVICES=(
     "duckdb-service"
     "mqtt-service"
     "nats-service"
-    "supabase-service"
+    "postgres-service"
+    "qdrant-service"
+    "neo4j-service"
 )
 
 PENDING_SERVICES=(

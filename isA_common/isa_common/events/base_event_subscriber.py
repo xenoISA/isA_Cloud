@@ -210,6 +210,9 @@ class BaseEventSubscriber:
         # Active subscriptions
         self.subscriptions: List[str] = []
 
+        # Background tasks for message pulling
+        self._background_tasks: List = []
+
     def register_handler(self, handler: EventHandler):
         """
         Register an event handler.
@@ -228,7 +231,7 @@ class BaseEventSubscriber:
         durable: Optional[str] = None
     ):
         """
-        Subscribe to a NATS subject.
+        Subscribe to a NATS subject using JetStream pull consumer.
 
         Args:
             subject: NATS subject pattern (e.g., "usage.recorded.*")
@@ -237,19 +240,150 @@ class BaseEventSubscriber:
         """
         logger.info(f"[{self.service_name}] Subscribing to {subject}")
 
-        # For now, we'll use the gRPC NATS client's basic subscribe
-        # In production, this would use JetStream with queue and durable options
+        # Determine stream name from subject
+        # Convention: subject "usage.recorded.*" -> stream "USAGE_EVENTS"
+        stream_name = self._get_stream_name_from_subject(subject)
+        consumer_name = durable or f"{self.service_name}-{subject.replace('*', 'all').replace('.', '-')}"
 
-        # Note: The current NATSClient doesn't have a subscribe method exposed
-        # We'll need to extend it or create a wrapper
-        # For now, we'll mark this as TODO and return
+        # Ensure JetStream stream exists (create if needed)
+        try:
+            # Get stream subjects pattern from subject
+            stream_subjects = self._get_stream_subjects(subject)
 
-        logger.warning(
-            f"[{self.service_name}] NATS subscription setup - "
-            f"requires JetStream consumer implementation"
+            logger.info(f"[{self.service_name}] Creating stream {stream_name} with subjects: {stream_subjects}")
+
+            stream_result = self.nats_client.create_stream(
+                name=stream_name,
+                subjects=stream_subjects
+            )
+
+            if stream_result and stream_result.get('success'):
+                logger.info(f"[{self.service_name}] Created JetStream stream: {stream_name}")
+            else:
+                logger.warning(f"[{self.service_name}] Stream creation failed, might already exist")
+        except Exception as e:
+            # Stream might already exist, that's OK
+            logger.warning(f"[{self.service_name}] Stream creation exception: {e}")
+
+        # Create JetStream consumer
+        try:
+            result = self.nats_client.create_consumer(
+                stream_name=stream_name,
+                consumer_name=consumer_name,
+                filter_subject=subject
+            )
+
+            if result and result.get('success'):
+                logger.info(f"[{self.service_name}] Created JetStream consumer: {stream_name}/{consumer_name}")
+            else:
+                # Consumer might already exist, that's OK
+                logger.info(f"[{self.service_name}] Using existing consumer: {stream_name}/{consumer_name}")
+        except Exception as e:
+            logger.warning(f"[{self.service_name}] Consumer creation warning: {e}")
+
+        # Store subscription info
+        self.subscriptions.append({
+            'subject': subject,
+            'stream': stream_name,
+            'consumer': consumer_name,
+            'queue': queue
+        })
+
+        # Start background task to pull and process messages
+        import asyncio
+        task = asyncio.create_task(
+            self._pull_and_process_loop(stream_name, consumer_name, subject)
         )
+        self._background_tasks.append(task)
 
-        self.subscriptions.append(subject)
+        logger.info(f"[{self.service_name}] Subscription active: {subject}")
+
+    def _get_stream_name_from_subject(self, subject: str) -> str:
+        """
+        Determine JetStream stream name from subject pattern.
+
+        Convention mapping:
+        - usage.recorded.* -> USAGE_EVENTS
+        - billing.calculated -> BILLING_EVENTS
+        - wallet.* -> WALLET_EVENTS
+        """
+        if subject.startswith('usage.'):
+            return 'USAGE_EVENTS'
+        elif subject.startswith('billing.'):
+            return 'BILLING_EVENTS'
+        elif subject.startswith('wallet.'):
+            return 'WALLET_EVENTS'
+        else:
+            # Default: uppercase first part + _EVENTS
+            first_part = subject.split('.')[0].upper()
+            return f'{first_part}_EVENTS'
+
+    def _get_stream_subjects(self, subject: str) -> list:
+        """
+        Get stream subjects pattern from subscription subject.
+
+        Args:
+            subject: Subscription subject (e.g., "usage.recorded.*")
+
+        Returns:
+            List of subjects for the stream (e.g., ["usage.>"])
+        """
+        if subject.startswith('usage.'):
+            return ['usage.>']
+        elif subject.startswith('billing.'):
+            return ['billing.>']
+        elif subject.startswith('wallet.'):
+            return ['wallet.>']
+        else:
+            # Default: first part with wildcard
+            first_part = subject.split('.')[0]
+            return [f'{first_part}.>']
+
+    async def _pull_and_process_loop(self, stream_name: str, consumer_name: str, subject: str):
+        """
+        Background loop to pull messages from JetStream and process them.
+        """
+        logger.info(f"[{self.service_name}] Starting message pull loop for {stream_name}/{consumer_name}")
+
+        while True:
+            try:
+                # Pull batch of messages (non-blocking)
+                messages = self.nats_client.pull_messages(
+                    stream_name=stream_name,
+                    consumer_name=consumer_name,
+                    batch_size=10
+                )
+
+                for msg in messages:
+                    try:
+                        # Process the message
+                        success = await self.process_event(
+                            event_data=msg['data'],
+                            subject=msg['subject']
+                        )
+
+                        # Acknowledge if processed successfully
+                        if success:
+                            self.nats_client.ack_message(
+                                stream_name=stream_name,
+                                consumer_name=consumer_name,
+                                sequence=msg['sequence']
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"[{self.service_name}] Error processing message seq={msg.get('sequence')}: {e}",
+                            exc_info=True
+                        )
+                        # Don't ack failed messages - they'll be redelivered
+
+                # Sleep briefly before next pull
+                import asyncio
+                await asyncio.sleep(0.1 if messages else 1.0)  # Faster polling if messages available
+
+            except Exception as e:
+                logger.error(f"[{self.service_name}] Error in pull loop: {e}", exc_info=True)
+                import asyncio
+                await asyncio.sleep(5.0)  # Back off on errors
 
     async def process_event(self, event_data: bytes, subject: str) -> bool:
         """

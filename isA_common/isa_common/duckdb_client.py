@@ -4,31 +4,46 @@ DuckDB gRPC Client
 DuckDB OLAP 数据分析客户端
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
 from .base_client import BaseGRPCClient
 from .proto import duckdb_service_pb2, duckdb_service_pb2_grpc, common_pb2
 
+if TYPE_CHECKING:
+    from .consul_client import ConsulRegistry
+
 
 class DuckDBClient(BaseGRPCClient):
     """DuckDB gRPC 客户端"""
 
-    def __init__(self, host: str = 'localhost', port: int = 50052, user_id: Optional[str] = None,
-                 lazy_connect: bool = True, enable_compression: bool = True, enable_retry: bool = True):
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None, user_id: Optional[str] = None,
+                 lazy_connect: bool = True, enable_compression: bool = True, enable_retry: bool = True,
+                 consul_registry: Optional['ConsulRegistry'] = None, service_name_override: Optional[str] = None):
         """
         初始化 DuckDB 客户端
 
         Args:
-            host: 服务地址 (默认: localhost)
-            port: 服务端口 (默认: 50052)
+            host: 服务地址 (optional, will use Consul discovery if not provided)
+            port: 服务端口 (optional, will use Consul discovery if not provided)
             user_id: 用户 ID
             lazy_connect: 延迟连接 (默认: True)
             enable_compression: 启用压缩 (默认: True)
             enable_retry: 启用重试 (默认: True)
+            consul_registry: ConsulRegistry instance for service discovery (optional)
+            service_name_override: Override service name for Consul lookup (optional, defaults to 'duckdb')
         """
-        super().__init__(host, port, user_id, lazy_connect, enable_compression, enable_retry)
+        super().__init__(
+            host=host,
+            port=port,
+            user_id=user_id,
+            lazy_connect=lazy_connect,
+            enable_compression=enable_compression,
+            enable_retry=enable_retry,
+            consul_registry=consul_registry,
+            service_name_override=service_name_override
+        )
     
     def _create_stub(self):
         """创建 DuckDB service stub"""
@@ -36,6 +51,9 @@ class DuckDBClient(BaseGRPCClient):
     
     def service_name(self) -> str:
         return "DuckDB"
+
+    def default_port(self) -> int:
+        return 50052
     
     def _get_org_id(self) -> str:
         """获取组织ID"""
@@ -189,10 +207,8 @@ class DuckDBClient(BaseGRPCClient):
                     'size_bytes': response.database_info.size_bytes,
                     'table_count': response.database_info.table_count,
                 }
-                print(f"✅ [DuckDB] 数据库创建成功: {db_name} (ID: {db_info['database_id']})")
                 return db_info
             else:
-                print(f"❌ [DuckDB] 数据库创建失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -224,10 +240,8 @@ class DuckDBClient(BaseGRPCClient):
                         'table_count': db.table_count,
                         'created_at': str(db.created_at),
                     })
-                print(f"✅ [DuckDB] 找到 {len(databases)} 个数据库")
                 return databases
             else:
-                print(f"❌ [DuckDB] 列出数据库失败: {response.error}")
                 return []
                 
         except Exception as e:
@@ -299,10 +313,8 @@ class DuckDBClient(BaseGRPCClient):
                             row_dict[col_name] = None
                     results.append(row_dict)
 
-                print(f"✅ [DuckDB] 查询成功，返回 {len(results)} 条记录")
                 return results
             else:
-                print(f"❌ [DuckDB] 查询失败: {response.error}")
                 return []
                 
         except Exception as e:
@@ -336,10 +348,8 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.ExecuteStatement(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 语句执行成功，影响 {response.affected_rows} 行")
                 return response.affected_rows
             else:
-                print(f"❌ [DuckDB] 语句执行失败: {response.error}")
                 return 0
 
         except Exception as e:
@@ -381,10 +391,8 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.CreateTable(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 表创建成功: {table_name}")
                 return True
             else:
-                print(f"❌ [DuckDB] 表创建失败: {response.error}")
                 return False
 
         except Exception as e:
@@ -411,10 +419,8 @@ class DuckDBClient(BaseGRPCClient):
 
             if response.success:
                 tables = [table.table_name for table in response.tables]
-                print(f"✅ [DuckDB] 找到 {len(tables)} 个表")
                 return tables
             else:
-                print(f"❌ [DuckDB] 列出表失败: {response.error}")
                 return []
 
         except Exception as e:
@@ -454,10 +460,8 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.ImportFromMinIO(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 数据导入成功，导入 {response.rows_imported} 行")
                 return True
             else:
-                print(f"❌ [DuckDB] 数据导入失败: {response.error}")
                 return False
 
         except Exception as e:
@@ -524,10 +528,8 @@ class DuckDBClient(BaseGRPCClient):
                             row_dict[col_name] = None
                     results.append(row_dict)
 
-                print(f"✅ [DuckDB] MinIO文件查询成功，返回 {len(results)} 条记录")
                 return results
             else:
-                print(f"❌ [DuckDB] MinIO文件查询失败: {response.error}")
                 return []
 
         except Exception as e:
@@ -571,7 +573,6 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.ExportToMinIO(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 数据导出成功: {response.rows_exported} 行 ({response.file_size} bytes)")
                 return {
                     'success': True,
                     'rows_exported': response.rows_exported,
@@ -579,7 +580,6 @@ class DuckDBClient(BaseGRPCClient):
                     'execution_time_ms': response.execution_time_ms
                 }
             else:
-                print(f"❌ [DuckDB] 数据导出失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -623,14 +623,12 @@ class DuckDBClient(BaseGRPCClient):
                         'affected_rows': r.affected_rows,
                         'error': r.error if r.error else None
                     })
-                print(f"✅ [DuckDB] 批量执行成功: {len(statements)} 条语句")
                 return {
                     'success': True,
                     'results': results,
                     'total_execution_time_ms': response.total_execution_time_ms
                 }
             else:
-                print(f"❌ [DuckDB] 批量执行失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -676,10 +674,8 @@ class DuckDBClient(BaseGRPCClient):
                             'null_count': col_stat.null_count,
                         })
 
-                print(f"✅ [DuckDB] 表统计: {stats['row_count']} 行, {stats['size_bytes']} bytes")
                 return stats
             else:
-                print(f"❌ [DuckDB] 获取表统计失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -710,10 +706,8 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.DeleteDatabase(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 数据库删除成功: {db_name}")
                 return True
             else:
-                print(f"❌ [DuckDB] 数据库删除失败: {response.error}")
                 return False
 
         except Exception as e:
@@ -746,10 +740,8 @@ class DuckDBClient(BaseGRPCClient):
             response = self.stub.DropTable(request)
 
             if response.success:
-                print(f"✅ [DuckDB] 表删除成功: {table_name}")
                 return True
             else:
-                print(f"❌ [DuckDB] 表删除失败: {response.error}")
                 return False
 
         except Exception as e:
@@ -793,10 +785,8 @@ class DuckDBClient(BaseGRPCClient):
                     'size_bytes': response.table_info.size_bytes,
                 }
 
-                print(f"✅ [DuckDB] 表结构: {len(columns)} 列")
                 return schema
             else:
-                print(f"❌ [DuckDB] 获取表结构失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -832,10 +822,8 @@ class DuckDBClient(BaseGRPCClient):
                     'last_accessed': str(response.database_info.last_accessed),
                 }
 
-                print(f"✅ [DuckDB] 数据库信息: {info['table_count']} 表, {info['size_bytes']} bytes")
                 return info
             else:
-                print(f"❌ [DuckDB] 获取数据库信息失败: {response.error}")
                 return None
 
         except Exception as e:
@@ -854,19 +842,13 @@ class DuckDBClient(BaseGRPCClient):
             )
             
             response = self.stub.HealthCheck(request)
-            
+
             if response.healthy:
-                print(f"✅ [DuckDB] 服务健康")
-                print(f"   状态: {response.status}")
-                if response.details:
-                    print(f"   详情: {dict(response.details)}")
                 return True
             else:
-                print(f"❌ [DuckDB] 服务不健康: {response.status}")
                 return False
-                
+
         except Exception as e:
-            print(f"❌ [DuckDB] 健康检查失败: {e}")
             return False
 
 
@@ -880,9 +862,7 @@ if __name__ == '__main__':
         # 数据库操作
         client.create_database('analytics', 'Analytics database')
         databases = client.list_databases()
-        print(f"数据库列表: {databases}")
-        
+
         # 查询操作
         results = client.execute_query('analytics', 'SELECT * FROM users LIMIT 10')
-        print(f"查询结果: {results}")
 

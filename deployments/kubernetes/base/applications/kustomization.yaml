@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: isa-cloud-staging
+
+resources:
+  # Agent Service
+  - agent-deployment.yaml
+  - agent-service.yaml
+  - agent-configmap.yaml
+
+  # User Services (24 microservices in one container)
+  - user-deployment.yaml
+  - user-service.yaml
+  - user-configmap.yaml
+
+  # MCP Service
+  - mcp-deployment.yaml
+  - mcp-service.yaml
+
+  # Model Service
+  - model-deployment.yaml
+  - model-service.yaml
+  - model-configmap.yaml
+
+commonLabels:
+  project: isa-cloud
+  tier: applications
+  managed-by: kustomize
+
+commonAnnotations:
+  description: "isA Cloud Business Application Layer"
+  version: "1.0.0"

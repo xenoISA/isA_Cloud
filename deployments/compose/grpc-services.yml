@@ -266,56 +266,114 @@ services:
     # depends_on removed - infrastructure services are external
     restart: unless-stopped
 
-  # ============== Supabase gRPC Service ==============
-  # Note: Supabase 不使用 Docker 容器
-  #       - 本地开发: 使用 Supabase Local (supabase start)
-  #       - 生产环境: 使用 Supabase Cloud
-  supabase-grpc-service:
-    build:
-      context: ../..
-      dockerfile: deployments/dockerfiles/Dockerfile.supabase-service
-    image: isa-supabase-service:latest
-    container_name: isa-supabase-grpc
-    hostname: isa-supabase-grpc  # 设置容器主机名
+  # ============== PostgreSQL gRPC Service ==============
+  postgres-grpc-service:
+    image: isa-postgres-service:latest
+    container_name: isa-postgres-grpc
+    hostname: isa-postgres-grpc
     ports:
-      - "50057:50057"
+      - "50061:50061"
     environment:
       # 服务发现配置 (用于 Consul 注册)
-      - SERVICE_HOSTNAME=isa-supabase-grpc
-      
-      # Supabase 连接配置
-      # 本地开发: 连接到 host.docker.internal (Supabase Local)
-      # 生产环境: 连接到 Supabase Cloud
-      - SUPABASE_URL=${SUPABASE_URL:-http://host.docker.internal:54321}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
-      
-      # PostgreSQL 直连配置 (可选)
-      - SUPABASE_POSTGRES_HOST=${SUPABASE_POSTGRES_HOST:-host.docker.internal}
-      - SUPABASE_POSTGRES_PORT=${SUPABASE_POSTGRES_PORT:-54322}
-      - SUPABASE_POSTGRES_DB=${SUPABASE_POSTGRES_DB:-postgres}
-      - SUPABASE_POSTGRES_USER=${SUPABASE_POSTGRES_USER:-postgres}
-      - SUPABASE_POSTGRES_PASSWORD=${SUPABASE_POSTGRES_PASSWORD:-postgres}
-      - SUPABASE_POSTGRES_SSL_MODE=${SUPABASE_POSTGRES_SSL_MODE:-disable}
-      - SUPABASE_SCHEMA=${SUPABASE_SCHEMA:-dev}
-      
-      # 向量配置
-      - SUPABASE_VECTOR_ENABLED=true
-      - SUPABASE_VECTOR_TABLE=embeddings
-      - SUPABASE_VECTOR_METRIC=cosine
-      - SUPABASE_VECTOR_DIMENSIONS=1536
-      
+      - SERVICE_HOSTNAME=isa-postgres-grpc
+
+      # PostgreSQL 连接配置
+      - POSTGRES_HOST=staging-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=isa_platform
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=staging_postgres_2024
+      - POSTGRES_SSL_MODE=disable
+
       # Consul 配置
-      - ISA_CLOUD_CONSUL_ENABLED=${CONSUL_ENABLED:-true}
-      - ISA_CLOUD_CONSUL_HOST=${CONSUL_HOST:-staging-consul}
-      
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - CONSUL_PORT=${CONSUL_PORT:-8500}
+
       # gRPC 配置
-      - GRPC_PORT=50057
-      - SERVICE_NAME=supabase-grpc-service
+      - GRPC_PORT=50061
+      - SERVICE_NAME=postgres-grpc-service
     networks:
       - staging-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # 允许访问宿主机的 Supabase Local
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50061 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============== Qdrant gRPC Service ==============
+  qdrant-grpc-service:
+    image: isa-qdrant-service:latest
+    container_name: isa-qdrant-grpc
+    hostname: isa-qdrant-grpc
+    ports:
+      - "50062:50062"
+    environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-qdrant-grpc
+
+      # Qdrant 连接配置
+      - QDRANT_HOST=staging-qdrant
+      - QDRANT_HTTP_PORT=6333
+      - QDRANT_GRPC_PORT=6334
+      - QDRANT_API_KEY=
+      - QDRANT_USE_HTTPS=false
+      - QDRANT_PREFER_GRPC=true
+
+      # Consul 配置
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - CONSUL_PORT=${CONSUL_PORT:-8500}
+
+      # gRPC 配置
+      - GRPC_PORT=50062
+      - SERVICE_NAME=qdrant-grpc-service
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50062 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============== Neo4j gRPC Service ==============
+  neo4j-grpc-service:
+    image: isa-neo4j-service:latest
+    container_name: isa-neo4j-grpc
+    hostname: isa-neo4j-grpc
+    ports:
+      - "50063:50063"
+    environment:
+      # 服务发现配置 (用于 Consul 注册)
+      - SERVICE_HOSTNAME=isa-neo4j-grpc
+
+      # Neo4j 连接配置
+      - NEO4J_URI=bolt://staging-neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=staging_neo4j_2024
+      - NEO4J_DATABASE=neo4j
+      - NEO4J_MAX_CONNECTION_POOL_SIZE=50
+
+      # Consul 配置
+      - CONSUL_ENABLED=${CONSUL_ENABLED:-true}
+      - CONSUL_HOST=${CONSUL_HOST:-staging-consul}
+      - CONSUL_PORT=${CONSUL_PORT:-8500}
+
+      # gRPC 配置
+      - GRPC_PORT=50063
+      - SERVICE_NAME=neo4j-grpc-service
+    networks:
+      - staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 50063 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 # Volumes

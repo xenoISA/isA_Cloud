@@ -800,15 +800,52 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser.add_argument('--host', default='localhost',
-                       help='MQTT gRPC service host (default: localhost)')
-    parser.add_argument('--port', type=int, default=50053,
-                       help='MQTT gRPC service port (default: 50053)')
+    parser.add_argument('--host', default=None,
+                       help='MQTT gRPC service host (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--port', type=int, default=None,
+                       help='MQTT gRPC service port (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--consul-host', default='localhost',
+                       help='Consul host (default: localhost)')
+    parser.add_argument('--consul-port', type=int, default=8500,
+                       help='Consul port (default: 8500)')
+    parser.add_argument('--use-consul', action='store_true',
+                       help='Use Consul for service discovery')
     parser.add_argument('--example', type=int, choices=range(1, 16),
                        help='Run specific example (1-15, default: all)')
-    
+
     args = parser.parse_args()
-    
+
+    # Default: Try Consul first, fallback to localhost
+    host = args.host
+    port = args.port
+
+    if host is None or port is None:
+        if not args.use_consul:
+            try:
+                from isa_common.consul_client import ConsulRegistry
+                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                consul = ConsulRegistry(consul_host=args.consul_host, consul_port=args.consul_port)
+                url = consul.get_service_endpoint('mqtt-grpc-service')
+
+                if url and '://' in url:
+                    url = url.split('://', 1)[1]
+                if url and ':' in url:
+                    discovered_host, port_str = url.rsplit(':', 1)
+                    discovered_port = int(port_str)
+
+                    host = host or discovered_host
+                    port = port or discovered_port
+                    print(f"✅ Discovered from Consul: {host}:{port}")
+            except Exception as e:
+                print(f"⚠️  Consul discovery failed: {e}")
+                print(f"📍 Falling back to localhost...")
+
+        # Fallback to defaults
+        host = host or 'localhost'
+        port = port or 50053
+
+    print(f"🔗 Connecting to MQTT at {host}:{port}\n")
+
     if args.example:
         # Run specific example
         examples_map = {

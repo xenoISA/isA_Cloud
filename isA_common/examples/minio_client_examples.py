@@ -43,6 +43,11 @@ Features Demonstrated:
  Large File Upload (tested with 6MB files)
  Health Check
 
+New in v0.1.6:
+--------------
+✅ upload_object() now automatically creates buckets if they don't exist
+✅ Uses user_id as organization_id for user-scoped buckets
+
 Note: All operations include proper error handling and use context managers for resource cleanup.
 """
 
@@ -52,6 +57,7 @@ import io
 import json
 from datetime import datetime
 from pathlib import Path
+from isa_common.consul_client import ConsulRegistry
 
 # Import the MinIOClient from isa_common
 try:
@@ -687,14 +693,49 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    parser.add_argument('--host', default='localhost',
-                       help='MinIO gRPC service host (default: localhost)')
-    parser.add_argument('--port', type=int, default=50051,
-                       help='MinIO gRPC service port (default: 50051)')
+    parser.add_argument('--host', default=None,
+                       help='MinIO gRPC service host (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--port', type=int, default=None,
+                       help='MinIO gRPC service port (optional, uses Consul discovery if not provided)')
+    parser.add_argument('--consul-host', default='localhost',
+                       help='Consul host (default: localhost)')
+    parser.add_argument('--consul-port', type=int, default=8500,
+                       help='Consul port (default: 8500)')
+    parser.add_argument('--use-consul', action='store_true',
+                       help='Use Consul for service discovery')
     parser.add_argument('--example', type=int, choices=range(1, 14),
                        help='Run specific example (1-13, default: all)')
 
     args = parser.parse_args()
+
+    # Default: Try Consul first, fallback to localhost
+    host = args.host
+    port = args.port
+
+    if host is None or port is None:
+        if not args.use_consul:
+            try:
+                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                consul = ConsulRegistry(consul_host=args.consul_host, consul_port=args.consul_port)
+                url = consul.get_minio_endpoint()
+
+                if '://' in url:
+                    url = url.split('://', 1)[1]
+                discovered_host, port_str = url.rsplit(':', 1)
+                discovered_port = int(port_str)
+
+                host = host or discovered_host
+                port = port or discovered_port
+                print(f"✅ Discovered from Consul: {host}:{port}")
+            except Exception as e:
+                print(f"⚠️  Consul discovery failed: {e}")
+                print(f"📍 Falling back to localhost...")
+
+        # Fallback to defaults
+        host = host or 'localhost'
+        port = port or 50051
+
+    print(f"🔗 Connecting to MinIO at {host}:{port}\n")
 
     if args.example:
         # Run specific example

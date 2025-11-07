@@ -1,0 +1,108 @@
+# Docker Compose configuration for Apache APISIX API Gateway (Staging)
+# This replaces the previous NGINX + Go Gateway setup
+#
+# Prerequisites: Run infrastructure.staging.yml first to create the network and Consul
+# Usage: docker-compose -f apisix.staging.yml up -d
+
+networks:
+  staging-network:
+    name: staging_staging-network
+    external: true
+
+services:
+  # ==============================================
+  # etcd - Configuration Storage for APISIX
+  # ==============================================
+  staging-etcd:
+    image: bitnamilegacy/etcd:3.5.11
+    container_name: staging-etcd
+    restart: always
+    environment:
+      ETCD_ENABLE_V2: "true"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://staging-etcd:2379"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+    ports:
+      - "2379:2379/tcp"
+    networks:
+      - staging-network
+    # Healthcheck disabled for now - will add back once fully stable
+    # healthcheck:
+    #   test: ["CMD-SHELL", "etcdctl endpoint health --endpoints=http://localhost:2379 || exit 1"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==============================================
+  # Apache APISIX - API Gateway
+  # ==============================================
+  apisix:
+    image: apache/apisix:3.14.1-debian
+    container_name: isa-cloud-apisix-staging
+    restart: always
+    volumes:
+      - ../../../deployments/configs/staging/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - apisix-logs:/usr/local/apisix/logs
+    depends_on:
+      - staging-etcd
+    ports:
+      - "9180:9180/tcp"
+      - "80:9080/tcp"
+      - "9091:9091/tcp"
+      - "443:9443/tcp"
+      - "9092:9092/tcp"
+    networks:
+      - staging-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /usr/local/apisix/logs/nginx.pid && kill -0 $(cat /usr/local/apisix/logs/nginx.pid) || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==============================================
+  # APISIX Dashboard (Optional - Web UI)
+  # ==============================================
+  apisix-dashboard:
+    image: apache/apisix-dashboard:3.0.1-alpine
+    container_name: isa-cloud-apisix-dashboard-staging
+    hostname: apisix-dashboard
+    restart: unless-stopped
+    ports:
+      - "9010:9000"    # Dashboard Web UI
+    environment:
+      - TZ=UTC
+    volumes:
+      - apisix-dashboard-logs:/usr/local/apisix-dashboard/logs
+      - ../../../deployments/configs/staging/apisix/dashboard-conf.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
+    networks:
+      - staging-network
+    depends_on:
+      - apisix
+      - staging-etcd
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  staging-etcd-data:
+    driver: local
+  apisix-logs:
+    driver: local
+  apisix-dashboard-logs:
+    driver: local

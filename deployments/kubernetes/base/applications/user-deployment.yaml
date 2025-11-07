@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user
+  namespace: isa-cloud-staging
+  labels:
+    app: user
+    tier: applications
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user
+  template:
+    metadata:
+      labels:
+        app: user
+        tier: applications
+    spec:
+      containers:
+      - name: user
+        image: isa-user-staging:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        # All User microservices ports
+        - name: auth
+          containerPort: 8201
+        - name: account
+          containerPort: 8202
+        - name: session
+          containerPort: 8203
+        - name: authz
+          containerPort: 8204
+        - name: audit
+          containerPort: 8205
+        - name: notification
+          containerPort: 8206
+        - name: payment
+          containerPort: 8207
+        - name: wallet
+          containerPort: 8208
+        - name: storage
+          containerPort: 8209
+        - name: order
+          containerPort: 8210
+        - name: task
+          containerPort: 8211
+        - name: org
+          containerPort: 8212
+        - name: invitation
+          containerPort: 8213
+        - name: vault
+          containerPort: 8214
+        - name: product
+          containerPort: 8215
+        - name: billing
+          containerPort: 8216
+        - name: calendar
+          containerPort: 8217
+        - name: weather
+          containerPort: 8218
+        - name: album
+          containerPort: 8219
+        - name: device
+          containerPort: 8220
+        - name: ota
+          containerPort: 8221
+        - name: media
+          containerPort: 8222
+        - name: memory
+          containerPort: 8223
+        - name: telemetry
+          containerPort: 8225
+        - name: event
+          containerPort: 8230
+
+        envFrom:
+        - configMapRef:
+            name: user-config
+
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+
+        livenessProbe:
+          exec:
+            command:
+            - /usr/local/bin/healthcheck.sh
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          timeoutSeconds: 10
+
+        readinessProbe:
+          exec:
+            command:
+            - /usr/local/bin/healthcheck.sh
+          initialDelaySeconds: 60
+          periodSeconds: 5
+          timeoutSeconds: 10

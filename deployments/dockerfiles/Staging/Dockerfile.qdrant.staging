@@ -1,0 +1,82 @@
+FROM qdrant/qdrant:latest
+
+# Qdrant Dockerfile with Consul service discovery support
+# File: deployments/dockerfiles/Staging/Dockerfile.qdrant.staging
+
+# Install curl for Consul registration
+USER root
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Environment variables
+ENV QDRANT_HTTP_PORT=6333
+ENV QDRANT_GRPC_PORT=6334
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=qdrant-db
+ENV SERVICE_TAGS=database,vector-database,qdrant
+
+# Startup script
+COPY <<'EOF' /usr/local/bin/start-qdrant.sh
+#!/bin/bash
+set -e
+
+echo "Starting Qdrant service..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+
+# Start Qdrant
+/qdrant/qdrant &
+QDRANT_PID=$!
+
+# If Consul is enabled, register service
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for Qdrant to be ready..."
+    sleep 5
+
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+
+    # Register Qdrant HTTP service
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-http-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}-http\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${QDRANT_HTTP_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\", \"http\"],
+        \"Meta\": {
+            \"grpc_port\": \"${QDRANT_GRPC_PORT}\"
+        },
+        \"Check\": {
+            \"HTTP\": \"http://${HOSTNAME}:${QDRANT_HTTP_PORT}/\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register HTTP service with Consul"
+
+    # Register Qdrant gRPC service
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-grpc-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}-grpc\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${QDRANT_GRPC_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\", \"grpc\"],
+        \"Check\": {
+            \"TCP\": \"${HOSTNAME}:${QDRANT_GRPC_PORT}\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register gRPC service with Consul"
+
+    echo "Services registered: ${SERVICE_NAME}-{http,grpc}-${HOSTNAME}"
+fi
+
+# Wait for Qdrant process
+wait $QDRANT_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-qdrant.sh
+
+EXPOSE 6333 6334
+
+CMD ["/usr/local/bin/start-qdrant.sh"]

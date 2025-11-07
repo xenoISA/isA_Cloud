@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: isa-cloud-staging
+  labels:
+    app: nats
+    tier: infrastructure
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+        tier: infrastructure
+    spec:
+      containers:
+      - name: nats
+        image: staging-isa-nats:amd64
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: client
+          containerPort: 4222
+          protocol: TCP
+        - name: monitoring
+          containerPort: 8222
+          protocol: TCP
+        - name: cluster
+          containerPort: 6222
+          protocol: TCP
+
+        env:
+        - name: NATS_PORT
+          value: "4222"
+        - name: NATS_HTTP_PORT
+          value: "8222"
+        - name: CONSUL_ENABLED
+          value: "false"
+        - name: CONSUL_HOST
+          value: "consul"
+        - name: SERVICE_NAME
+          value: "nats-service"
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+
+        resources:
+          requests:
+            cpu: 256m
+            memory: 512Mi
+          limits:
+            cpu: 512m
+            memory: 1Gi
+
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8222
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8222
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

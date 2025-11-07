@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isa-common"
-version = "0.1.4"
+version = "0.1.8"
 description = "Shared Python infrastructure library for isA platform"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -25,6 +25,8 @@ dependencies = [
     "grpcio-tools>=1.50.0",
     "pydantic>=2.0.0",
     "tenacity>=8.0.0",
+    "python-consul2>=0.1.5",
+    "asyncpg>=0.29.0",
 ]
 
 [project.optional-dependencies]
