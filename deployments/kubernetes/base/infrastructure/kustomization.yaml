@@ -4,7 +4,8 @@ kind: Kustomization
 namespace: isa-cloud-staging
 
 resources:
-  # Consul - Service Discovery
+  # Consul - Service Discovery (Single Node for Dev/Test)
+  - consul/configmap.yaml
   - consul/statefulset.yaml
   - consul/service.yaml
 
@@ -48,6 +49,9 @@ resources:
   - grafana/deployment.yaml
   - grafana/service.yaml
   - grafana/secret.yaml
+
+  # APISIX - API Gateway
+  - apisix
 
 commonLabels:
   project: isa-cloud

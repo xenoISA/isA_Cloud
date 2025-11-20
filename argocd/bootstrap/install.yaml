@@ -1,0 +1,118 @@
+# ArgoCD 安装配置
+# 使用这个文件在 EKS 集群中安装 ArgoCD
+#
+# 安装命令:
+# kubectl create namespace argocd
+# kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# kubectl apply -f argocd/bootstrap/install.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+
+---
+# ArgoCD 配置 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  # 启用 Git webhook
+  webhooks.github.secret: ""
+
+  # Git 仓库配置
+  repositories: |
+    - url: https://github.com/your-org/isA_Cloud.git
+      name: isa-cloud-gitops
+      type: git
+
+  # 自动同步配置
+  application.instanceLabelKey: argocd.argoproj.io/instance
+
+  # 资源排除
+  resource.exclusions: |
+    - apiGroups:
+      - cilium.io
+      kinds:
+      - CiliumIdentity
+      clusters:
+      - "*"
+
+---
+# ArgoCD 命令行参数配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-cmd-params-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  # 服务器配置
+  server.insecure: "true"  # 使用 ALB/NLB 处理 TLS
+
+  # 应用控制器配置
+  application.controller.status.processors: "20"
+  application.controller.operation.processors: "10"
+
+---
+# ArgoCD RBAC 配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-rbac-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  # 默认策略
+  policy.default: role:readonly
+
+  # 自定义角色
+  policy.csv: |
+    # 管理员拥有所有权限
+    p, role:admin, applications, *, */*, allow
+    p, role:admin, clusters, *, *, allow
+    p, role:admin, repositories, *, *, allow
+    p, role:admin, projects, *, *, allow
+
+    # 开发者可以同步应用
+    p, role:developer, applications, sync, */*, allow
+    p, role:developer, applications, get, */*, allow
+    p, role:developer, applications, override, */*, allow
+
+    # 只读用户只能查看
+    p, role:readonly, applications, get, */*, allow
+    p, role:readonly, projects, get, *, allow
+
+---
+# ArgoCD Server Service (LoadBalancer)
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server
+  namespace: argocd
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: argocd-server

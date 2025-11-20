@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -149,6 +150,52 @@ func convertValueForProtobuf(value interface{}) interface{} {
 			result[k] = convertValueForProtobuf(item)
 		}
 		return result
+	// Handle pgtype.Numeric (PostgreSQL NUMERIC/DECIMAL/REAL types)
+	case pgtype.Numeric:
+		if v.Valid {
+			// Convert to float64 for protobuf
+			f64, err := v.Float64Value()
+			if err == nil {
+				return f64.Float64
+			}
+		}
+		return nil
+	// Handle pgtype.Int4 (PostgreSQL INTEGER)
+	case pgtype.Int4:
+		if v.Valid {
+			return int64(v.Int32)
+		}
+		return nil
+	// Handle pgtype.Int8 (PostgreSQL BIGINT)
+	case pgtype.Int8:
+		if v.Valid {
+			return v.Int64
+		}
+		return nil
+	// Handle pgtype.Float4 (PostgreSQL REAL)
+	case pgtype.Float4:
+		if v.Valid {
+			return float64(v.Float32)
+		}
+		return nil
+	// Handle pgtype.Float8 (PostgreSQL DOUBLE PRECISION)
+	case pgtype.Float8:
+		if v.Valid {
+			return v.Float64
+		}
+		return nil
+	// Handle pgtype.Text (PostgreSQL TEXT/VARCHAR)
+	case pgtype.Text:
+		if v.Valid {
+			return v.String
+		}
+		return nil
+	// Handle pgtype.Bool (PostgreSQL BOOLEAN)
+	case pgtype.Bool:
+		if v.Valid {
+			return v.Bool
+		}
+		return nil
 	default:
 		return value
 	}

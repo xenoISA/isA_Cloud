@@ -1,0 +1,113 @@
+name: CD - Update Service Images
+
+on:
+  repository_dispatch:
+    types:
+      - update-agent-image
+      - update-mcp-image
+      - update-model-image
+      - update-user-image
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup yq
+        uses: mikefarah/yq@v4
+
+      - name: Update image in manifest
+        run: |
+          SERVICE="${{ github.event.client_payload.service }}"
+          NEW_IMAGE="${{ github.event.client_payload.image }}"
+          SHA="${{ github.event.client_payload.sha }}"
+          REF="${{ github.event.client_payload.ref }}"
+          ACTOR="${{ github.event.client_payload.actor }}"
+
+          echo "🔄 Updating $SERVICE to image: $NEW_IMAGE"
+
+          # 确定环境 (dev, staging, production)
+          ENVIRONMENT="dev"
+          if [[ "$REF" == "main" ]]; then
+            ENVIRONMENT="staging"
+          elif [[ "$REF" == "production" || "$REF" == refs/tags/* ]]; then
+            ENVIRONMENT="production"
+          fi
+
+          # 更新 base deployment
+          BASE_MANIFEST="deployments/kubernetes/base/applications/${SERVICE}-deployment.yaml"
+
+          if [ -f "$BASE_MANIFEST" ]; then
+            echo "📝 Updating $BASE_MANIFEST"
+            yq eval ".spec.template.spec.containers[0].image = \"${NEW_IMAGE}\"" -i "$BASE_MANIFEST"
+            echo "✅ Updated base manifest"
+          else
+            echo "⚠️ Warning: $BASE_MANIFEST not found"
+          fi
+
+          # 更新 overlay kustomization (如果存在)
+          OVERLAY_KUSTOMIZATION="deployments/kubernetes/overlays/${ENVIRONMENT}/kustomization.yaml"
+
+          if [ -f "$OVERLAY_KUSTOMIZATION" ]; then
+            echo "📝 Updating $OVERLAY_KUSTOMIZATION"
+
+            # 检查是否已经存在该服务的镜像配置
+            if yq eval ".images[] | select(.name == \"${SERVICE}\")" "$OVERLAY_KUSTOMIZATION" | grep -q .; then
+              # 更新现有镜像
+              yq eval "(.images[] | select(.name == \"${SERVICE}\") | .newName) = \"${NEW_IMAGE%:*}\"" -i "$OVERLAY_KUSTOMIZATION"
+              yq eval "(.images[] | select(.name == \"${SERVICE}\") | .newTag) = \"${NEW_IMAGE##*:}\"" -i "$OVERLAY_KUSTOMIZATION"
+            else
+              # 添加新镜像配置
+              yq eval ".images += [{\"name\": \"${SERVICE}\", \"newName\": \"${NEW_IMAGE%:*}\", \"newTag\": \"${NEW_IMAGE##*:}\"}]" -i "$OVERLAY_KUSTOMIZATION"
+            fi
+
+            echo "✅ Updated overlay kustomization"
+          fi
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+
+          SERVICE="${{ github.event.client_payload.service }}"
+          SHA="${{ github.event.client_payload.sha }}"
+          ACTOR="${{ github.event.client_payload.actor }}"
+
+          git add deployments/kubernetes/
+
+          # 检查是否有变化
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore(gitops): update ${SERVICE} image to ${SHA}
+
+Triggered by: ${ACTOR}
+Source commit: ${SHA}
+Service: ${SERVICE}
+
+          git push
+
+          echo "✅ Changes pushed to repository"
+
+      - name: Create deployment summary
+        run: |
+          SERVICE="${{ github.event.client_payload.service }}"
+          IMAGE="${{ github.event.client_payload.image }}"
+          SHA="${{ github.event.client_payload.sha }}"
+
+          echo "### 🚀 Service Image Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | \`${SERVICE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${IMAGE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA | \`${SHA}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ArgoCD will automatically sync this change to EKS" >> $GITHUB_STEP_SUMMARY

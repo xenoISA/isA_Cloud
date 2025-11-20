@@ -1,0 +1,278 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-apisix-sync-script
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-apisix-sync
+    tier: infrastructure
+data:
+  sync_routes.sh: |
+    #!/bin/bash
+    # Dynamic Route Synchronization from Consul to APISIX (K8s Version)
+    set -e
+
+    # Install required tools
+    apk add --no-cache curl jq bash > /dev/null 2>&1
+
+    # Configuration
+    CONSUL_URL="${CONSUL_URL:-http://consul-agent.isa-cloud-staging.svc.cluster.local:8500}"
+    APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-gateway.isa-cloud-staging.svc.cluster.local:9180}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+
+    echo "🔄 Starting Consul → APISIX route synchronization (K8s)..."
+
+    # Get service metadata from Consul
+    get_service_meta() {
+        local service_name=$1
+        local meta=$(curl -s "${CONSUL_URL}/v1/catalog/service/${service_name}" | jq '.[0].ServiceMeta // {}')
+        echo "$meta"
+    }
+
+    # Create or update route in APISIX
+    create_or_update_route() {
+        local service_name=$1
+        local api_path=$2
+        local auth_required=${3:-false}
+        local rate_limit=${4:-100}
+
+        local route_name="${service_name}_route"
+        local uri_root="${api_path}"
+        local uri_pattern="${api_path}/*"
+
+        echo "ℹ Syncing route: $route_name ($uri_root + $uri_pattern -> $service_name)"
+
+        # Check if service needs proxy-rewrite
+        local needs_rewrite=false
+        if [[ "$service_name" == "mcp_service" ]]; then
+            needs_rewrite=true
+        fi
+
+        # Build plugins
+        local plugins='{"cors":{"allow_origins":"*","allow_methods":"GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD","allow_headers":"DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID","expose_headers":"X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset","max_age":86400,"allow_credentials":true},"limit-count":{"count":'${rate_limit}',"time_window":60,"rejected_code":429,"rejected_msg":"Rate limit exceeded","policy":"local"},"request-id":{"algorithm":"uuid","include_in_response":true},"prometheus":{}}'
+
+        # Add proxy-rewrite if needed
+        if [ "$needs_rewrite" = "true" ]; then
+            local rewrite_pattern="^${api_path}(/.*)\$"
+            plugins=$(echo "$plugins" | jq --arg pattern "$rewrite_pattern" --arg replacement "\$1" '. + {"proxy-rewrite": {"regex_uri": [$pattern, $replacement]}}')
+            echo "  Added proxy-rewrite: $api_path/* -> /*"
+        fi
+
+        # Add JWT auth if required
+        if [ "$auth_required" = "true" ]; then
+            plugins=$(echo "$plugins" | jq '. + {"jwt-auth": {}}')
+        fi
+
+        # Get service instances from Consul using catalog API
+        local instances=$(curl -s "${CONSUL_URL}/v1/catalog/service/${service_name}")
+
+        # Build nodes from service instances (K8s DNS names)
+        local nodes="{}"
+        while IFS= read -r line; do
+            if [ -z "$line" ]; then continue; fi
+
+            local host=$(echo "$line" | jq -r '.ServiceAddress')
+            local port=$(echo "$line" | jq -r '.ServicePort')
+
+            if [ -n "$host" ] && [ "$host" != "null" ]; then
+                nodes=$(echo "$nodes" | jq ". + {\"$host:$port\": 1}")
+                echo "  Added upstream: $host:$port"
+            fi
+        done < <(echo "$instances" | jq -c '.[]')
+
+        # Create/Update route with uris array (supports both root and wildcard)
+        local response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"name\": \"${route_name}\",
+                \"desc\": \"Auto-synced from Consul service: ${service_name}\",
+                \"uris\": [\"${uri_root}\", \"${uri_pattern}\"],
+                \"upstream\": {
+                    \"type\": \"roundrobin\",
+                    \"nodes\": ${nodes},
+                    \"timeout\": {
+                        \"connect\": 6,
+                        \"send\": 6,
+                        \"read\": 10
+                    },
+                    \"keepalive_pool\": {
+                        \"size\": 320,
+                        \"idle_timeout\": 60,
+                        \"requests\": 1000
+                    },
+                    \"pass_host\": \"pass\"
+                },
+                \"plugins\": ${plugins},
+                \"enable_websocket\": true,
+                \"status\": 1,
+                \"labels\": {
+                    \"managed_by\": \"consul-sync-k8s\",
+                    \"service_name\": \"${service_name}\",
+                    \"sync_timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+                }
+            }")
+
+        local http_code=$(echo "$response" | tail -n1)
+
+        if [[ "$http_code" =~ ^20[0-9]$ ]]; then
+            echo "✓ Route synced: $route_name"
+            return 0
+        else
+            local body=$(echo "$response" | head -n-1)
+            echo "✗ Failed to sync route: $route_name (HTTP $http_code)"
+            echo "$body" | jq '.' 2>/dev/null || echo "$body"
+            return 1
+        fi
+    }
+
+    # Delete route from APISIX
+    delete_route() {
+        local route_name=$1
+        curl -s -X DELETE \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" > /dev/null
+        echo "✓ Deleted route: $route_name"
+    }
+
+    # Main sync logic
+    main() {
+        # Get all services from Consul using catalog API
+        local services=$(curl -s "${CONSUL_URL}/v1/catalog/services")
+
+        if [ $? -ne 0 ]; then
+            echo "✗ Failed to connect to Consul at ${CONSUL_URL}"
+            exit 1
+        fi
+
+        local synced=0
+        local skipped=0
+        local failed=0
+        local processed_services=()
+
+        # Process each service
+        for service_name in $(echo "$services" | jq -r 'keys[]'); do
+            # Skip Consul itself
+            if [ "$service_name" = "consul" ]; then
+                continue
+            fi
+
+            # Get service metadata
+            local meta=$(get_service_meta "$service_name")
+            local api_path=$(echo "$meta" | jq -r '.api_path // .base_path // empty')
+
+            # Skip if no api_path
+            if [ -z "$api_path" ] || [ "$api_path" = "null" ]; then
+                echo "ℹ Skipping $service_name (no api_path/base_path in metadata)"
+                skipped=$((skipped + 1))
+                continue
+            fi
+
+            # Get optional metadata
+            local auth_required=$(echo "$meta" | jq -r '.auth_required // "false"')
+            local rate_limit=$(echo "$meta" | jq -r '.rate_limit // "100"')
+
+            # Create/Update route
+            if create_or_update_route "$service_name" "$api_path" "$auth_required" "$rate_limit"; then
+                synced=$((synced + 1))
+                processed_services+=("${service_name}_route")
+            else
+                failed=$((failed + 1))
+            fi
+        done
+
+        echo ""
+        echo "🧹 Cleaning up stale routes..."
+
+        # Get all managed routes from APISIX
+        local apisix_routes=$(curl -s "${APISIX_ADMIN_URL}/apisix/admin/routes" \
+            -H "X-API-KEY: ${ADMIN_KEY}" | \
+            jq -r '.list[]? | select(.value.labels.managed_by == "consul-sync-k8s") | .value.name' 2>/dev/null)
+
+        # Delete routes that no longer exist in Consul
+        local deleted=0
+        for route_name in $apisix_routes; do
+            local found=false
+            for processed in "${processed_services[@]}"; do
+                if [ "$processed" = "$route_name" ]; then
+                    found=true
+                    break
+                fi
+            done
+
+            if [ "$found" = false ]; then
+                delete_route "$route_name"
+                deleted=$((deleted + 1))
+            fi
+        done
+
+        echo ""
+        echo "📊 Synchronization Summary"
+        echo "   Synced:  ${synced}"
+        echo "   Skipped: ${skipped}"
+        echo "   Failed:  ${failed}"
+        echo "   Deleted: ${deleted}"
+
+        local total_routes=$(curl -s "${APISIX_ADMIN_URL}/apisix/admin/routes" \
+            -H "X-API-KEY: ${ADMIN_KEY}" | jq '.total // 0')
+
+        echo "✨ Sync complete! Total active routes: ${total_routes}"
+    }
+
+    # Run
+    main
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: consul-apisix-sync
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-apisix-sync
+    tier: infrastructure
+spec:
+  schedule: "*/5 * * * *" # Every 5 minutes
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: consul-apisix-sync
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sync
+              image: alpine:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  apk add --no-cache bash curl jq > /dev/null 2>&1
+                  bash /scripts/sync_routes.sh
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              env:
+                - name: CONSUL_URL
+                  value: "http://consul-agent.isa-cloud-staging.svc.cluster.local:8500"
+                - name: APISIX_ADMIN_URL
+                  value: "http://apisix-gateway.isa-cloud-staging.svc.cluster.local:9180"
+                - name: APISIX_ADMIN_KEY
+                  value: "edd1c9f034335f136f87ad84b625c8f1"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: script
+              configMap:
+                name: consul-apisix-sync-script
+                defaultMode: 0755

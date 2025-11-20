@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: isa-cloud-production
+  namespace: argocd
+  labels:
+    environment: production
+    project: isa-cloud
+  annotations:
+    notifications.argoproj.io/subscribe.on-deployed.slack: "isa-cloud-production"
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: "isa-cloud-alerts"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production  # Production 环境跟踪 production 分支或 tag
+    path: deployments/kubernetes/overlays/production
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+
+  syncPolicy:
+    # ⚠️ 生产环境不自动同步，需要手动审批
+    automated:
+      prune: false       # 不自动删除
+      selfHeal: false    # 不自动修复
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas
+        - /spec/maxReplicas
+
+  info:
+    - name: 'Environment'
+      value: 'Production'
+    - name: 'Auto-Sync'
+      value: 'Disabled - Manual Approval Required'
+    - name: 'Critical'
+      value: 'true'

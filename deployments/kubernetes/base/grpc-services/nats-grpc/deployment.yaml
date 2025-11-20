@@ -18,85 +18,102 @@ spec:
         tier: grpc-services
     spec:
       containers:
-      - name: nats-grpc
-        image: isa-nats-service:latest
-        imagePullPolicy: IfNotPresent
+        - name: nats-grpc
+          image: isa-nats-service:latest
+          imagePullPolicy: IfNotPresent
 
-        ports:
-        - name: grpc
-          containerPort: 50056
-          protocol: TCP
+          ports:
+            - name: grpc
+              containerPort: 50056
+              protocol: TCP
 
-        env:
-        - name: SERVICE_HOSTNAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        # NATS Connection
-        - name: ISA_CLOUD_NATS_URLS
-          value: "nats://nats.isa-cloud-staging.svc.cluster.local:4222"
-        - name: ISA_CLOUD_NATS_CLUSTER_ID
-          value: "isa-cloud-cluster"
-        - name: ISA_CLOUD_NATS_USERNAME
-          value: ""
-        - name: ISA_CLOUD_NATS_PASSWORD
-          value: ""
-        - name: ISA_CLOUD_NATS_JETSTREAM_ENABLED
-          value: "true"
-        # Redis for KV Store
-        - name: REDIS_HOST
-          value: "redis.isa-cloud-staging.svc.cluster.local"
-        - name: REDIS_PORT
-          value: "6379"
-        - name: REDIS_PASSWORD
-          value: ""
-        # MinIO for Object Store
-        - name: MINIO_ENDPOINT
-          value: "minio.isa-cloud-staging.svc.cluster.local:9000"
-        - name: MINIO_ACCESS_KEY
-          value: "minioadmin"
-        - name: MINIO_SECRET_KEY
-          value: "minioadmin"
-        - name: MINIO_USE_SSL
-          value: "false"
-        # Loki Audit Logs
-        - name: LOKI_URL
-          value: "http://loki.isa-cloud-staging.svc.cluster.local:3100"
-        # Consul
-        - name: ISA_CLOUD_CONSUL_ENABLED
-          value: "true"
-        - name: ISA_CLOUD_CONSUL_HOST
-          value: "consul.isa-cloud-staging.svc.cluster.local"
-        - name: ISA_CLOUD_CONSUL_PORT
-          value: "8500"
-        # gRPC Configuration
-        - name: ISA_CLOUD_NATS_GRPC_PORT
-          value: "50056"
-        - name: SERVICE_NAME
-          value: "nats-grpc-service"
+          env:
+            - name: SERVICE_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # NATS Connection
+            - name: ISA_CLOUD_NATS_URLS
+              value: "nats://nats.isa-cloud-staging.svc.cluster.local:4222"
+            - name: ISA_CLOUD_NATS_CLUSTER_ID
+              value: "isa-cloud-cluster"
+            - name: ISA_CLOUD_NATS_USERNAME
+              value: ""
+            - name: ISA_CLOUD_NATS_PASSWORD
+              value: ""
+            - name: ISA_CLOUD_NATS_JETSTREAM_ENABLED
+              value: "true"
+            # Redis for KV Store
+            - name: REDIS_HOST
+              value: "redis.isa-cloud-staging.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            # Redis gRPC Fallback (K8s Service DNS)
+            - name: REDIS_GRPC_HOST
+              value: "redis-grpc.isa-cloud-staging.svc.cluster.local"
+            - name: REDIS_GRPC_PORT
+              value: "50055"
+            # MinIO for Object Store (使用与Docker一致的环境变量名)
+            - name: ISA_CLOUD_STORAGE_MINIO_ENDPOINT
+              value: "minio.isa-cloud-staging.svc.cluster.local:9000"
+            - name: ISA_CLOUD_STORAGE_MINIO_ACCESS_KEY
+              value: "minioadmin"
+            - name: ISA_CLOUD_STORAGE_MINIO_SECRET_KEY
+              value: "minioadmin"
+            - name: ISA_CLOUD_STORAGE_MINIO_USE_SSL
+              value: "false"
+            - name: ISA_CLOUD_STORAGE_MINIO_REGION
+              value: "us-east-1"
+            - name: ISA_CLOUD_STORAGE_MINIO_GRPC_PORT
+              value: "50051"
+            # MinIO gRPC Fallback (K8s Service DNS)
+            - name: MINIO_GRPC_HOST
+              value: "minio-grpc.isa-cloud-staging.svc.cluster.local"
+            - name: MINIO_GRPC_PORT
+              value: "50051"
+            # Loki Audit Logs
+            - name: LOKI_URL
+              value: "http://loki.isa-cloud-staging.svc.cluster.local:3100"
+            # Consul
+            - name: ISA_CLOUD_CONSUL_ENABLED
+              value: "true"
+            - name: ISA_CLOUD_CONSUL_HOST
+              value: "consul.isa-cloud-staging.svc.cluster.local"
+            - name: ISA_CLOUD_CONSUL_PORT
+              value: "8500"
+            # gRPC Configuration
+            - name: ISA_CLOUD_NATS_GRPC_PORT
+              value: "50056"
+            - name: SERVICE_NAME
+              value: "nats-grpc-service"
 
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 256m
-            memory: 512Mi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 256m
+              memory: 512Mi
 
-        livenessProbe:
-          tcpSocket:
-            port: 50056
-          initialDelaySeconds: 30
-          periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 50056
+            initialDelaySeconds: 30
+            periodSeconds: 10
 
-        readinessProbe:
-          tcpSocket:
-            port: 50056
-          initialDelaySeconds: 10
-          periodSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 50056
+            initialDelaySeconds: 10
+            periodSeconds: 5
 
       initContainers:
-      - name: wait-for-nats
-        image: busybox:1.36
-        imagePullPolicy: IfNotPresent
-        command: ['sh', '-c', 'until nc -z nats.isa-cloud-staging.svc.cluster.local 4222; do echo waiting for nats; sleep 2; done']
+        - name: wait-for-nats
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z nats.isa-cloud-staging.svc.cluster.local 4222; do echo waiting for nats; sleep 2; done",
+            ]

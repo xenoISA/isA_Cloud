@@ -1,0 +1,231 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-agent-config
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-agent
+    tier: infrastructure
+data:
+  agent-config.json: |
+    {
+      "datacenter": "staging",
+      "node_name": "k8s-shared-agent",
+      "data_dir": "/consul/data",
+      "client_addr": "0.0.0.0",
+      "bind_addr": "0.0.0.0",
+      "retry_join": ["consul-0.consul.isa-cloud-staging.svc.cluster.local"],
+      "enable_script_checks": true,
+      "enable_local_script_checks": true,
+      "log_level": "INFO",
+      "performance": {
+        "raft_multiplier": 1
+      },
+      "telemetry": {
+        "prometheus_retention_time": "60s",
+        "disable_hostname": false
+      },
+      "ports": {
+        "http": 8500,
+        "grpc": 8502,
+        "dns": 8600,
+        "serf_lan": 8301,
+        "serf_wan": 8302
+      }
+    }
+
+  grpc-services.json: |
+    {
+      "services": [
+        {
+          "id": "postgres_grpc_service",
+          "name": "postgres_grpc_service",
+          "port": 50061,
+          "address": "postgres-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "database"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/postgres"
+          },
+          "checks": [
+            {
+              "id": "postgres-grpc-tcp",
+              "name": "PostgreSQL gRPC TCP Check",
+              "tcp": "postgres-grpc.isa-cloud-staging.svc.cluster.local:50061",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "redis_grpc_service",
+          "name": "redis_grpc_service",
+          "port": 50055,
+          "address": "redis-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "cache"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/redis"
+          },
+          "checks": [
+            {
+              "id": "redis-grpc-tcp",
+              "name": "Redis gRPC TCP Check",
+              "tcp": "redis-grpc.isa-cloud-staging.svc.cluster.local:50055",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "neo4j_grpc_service",
+          "name": "neo4j_grpc_service",
+          "port": 50063,
+          "address": "neo4j-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "graph-db"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/neo4j"
+          },
+          "checks": [
+            {
+              "id": "neo4j-grpc-tcp",
+              "name": "Neo4j gRPC TCP Check",
+              "tcp": "neo4j-grpc.isa-cloud-staging.svc.cluster.local:50063",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "nats_grpc_service",
+          "name": "nats_grpc_service",
+          "port": 50056,
+          "address": "nats-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "messaging"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/nats"
+          },
+          "checks": [
+            {
+              "id": "nats-grpc-tcp",
+              "name": "NATS gRPC TCP Check",
+              "tcp": "nats-grpc.isa-cloud-staging.svc.cluster.local:50056",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "duckdb_grpc_service",
+          "name": "duckdb_grpc_service",
+          "port": 50052,
+          "address": "duckdb-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "database"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/duckdb"
+          },
+          "checks": [
+            {
+              "id": "duckdb-grpc-tcp",
+              "name": "DuckDB gRPC TCP Check",
+              "tcp": "duckdb-grpc.isa-cloud-staging.svc.cluster.local:50052",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "mqtt_grpc_service",
+          "name": "mqtt_grpc_service",
+          "port": 50053,
+          "address": "mqtt-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "messaging"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/mqtt"
+          },
+          "checks": [
+            {
+              "id": "mqtt-grpc-tcp",
+              "name": "MQTT gRPC TCP Check",
+              "tcp": "mqtt-grpc.isa-cloud-staging.svc.cluster.local:50053",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "loki_grpc_service",
+          "name": "loki_grpc_service",
+          "port": 50054,
+          "address": "loki-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "logging"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/loki"
+          },
+          "checks": [
+            {
+              "id": "loki-grpc-tcp",
+              "name": "Loki gRPC TCP Check",
+              "tcp": "loki-grpc.isa-cloud-staging.svc.cluster.local:50054",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "minio_grpc_service",
+          "name": "minio_grpc_service",
+          "port": 50051,
+          "address": "minio-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "storage"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/minio"
+          },
+          "checks": [
+            {
+              "id": "minio-grpc-tcp",
+              "name": "MinIO gRPC TCP Check",
+              "tcp": "minio-grpc.isa-cloud-staging.svc.cluster.local:50051",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        },
+        {
+          "id": "qdrant_grpc_service",
+          "name": "qdrant_grpc_service",
+          "port": 50062,
+          "address": "qdrant-grpc.isa-cloud-staging.svc.cluster.local",
+          "tags": ["v1", "grpc", "infrastructure", "vector-db"],
+          "meta": {
+            "version": "1.0.0",
+            "protocol": "grpc",
+            "base_path": "/grpc/qdrant"
+          },
+          "checks": [
+            {
+              "id": "qdrant-grpc-tcp",
+              "name": "Qdrant gRPC TCP Check",
+              "tcp": "qdrant-grpc.isa-cloud-staging.svc.cluster.local:50062",
+              "interval": "10s",
+              "timeout": "3s"
+            }
+          ]
+        }
+      ]
+    }

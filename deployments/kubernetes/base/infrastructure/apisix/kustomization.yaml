@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - etcd-deployment.yaml
+  - apisix-configmap.yaml
+  - apisix-deployment.yaml
+  - apisix-dashboard-deployment.yaml
+
+commonLabels:
+  tier: infrastructure
+  component: api-gateway

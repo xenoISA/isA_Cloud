@@ -27,7 +27,6 @@ proto: ## Generate gRPC code from proto files
 build: proto ## Build the application
 	@echo "Building $(PROJECT_NAME)..."
 	@go mod download
-	@go build -o bin/gateway cmd/gateway/main.go
 	@echo "✅ Build completed"
 
 # Clean
@@ -47,19 +46,16 @@ test: ## Run tests
 # Docker
 docker-build: ## Build Docker images
 	@echo "Building Docker images..."
-	@docker build -t $(DOCKER_REGISTRY)/gateway:latest -f deployments/docker/Dockerfile.gateway .
 	@echo "✅ Docker images built"
 
 docker-push: docker-build ## Push Docker images
 	@echo "Pushing Docker images..."
-	@docker push $(DOCKER_REGISTRY)/gateway:latest
 	@echo "✅ Docker images pushed"
 
 # Development
 dev: build ## Start development environment
 	@echo "Starting development environment..."
 	@docker-compose -f deployments/compose/docker-compose.dev.yml up -d
-	@./bin/gateway --config configs/dev.yaml
 	@echo "✅ Development environment started"
 
 # Dependencies
@@ -113,34 +109,35 @@ health: ## Health check for all services
 	@$(SERVICE_MANAGER) health
 
 # View service logs
-logs: ## View logs (usage: make logs service=gateway)
+logs: ## View logs (usage: make logs service=<service_name>)
 ifdef service
 	@chmod +x $(SERVICE_MANAGER)
 	@$(SERVICE_MANAGER) logs $(service)
 else
-	@echo "Please specify a service: make logs service=gateway"
+	@echo "Please specify a service: make logs service=<service_name>"
 endif
 
 # Start specific service
-start-%: ## Start specific service (e.g., make start-gateway)
+start-%: ## Start specific service (e.g., make start-auth)
 	@chmod +x $(SERVICE_MANAGER)
 	@$(SERVICE_MANAGER) start $*
 
 # Stop specific service
-stop-%: ## Stop specific service (e.g., make stop-gateway)
+stop-%: ## Stop specific service (e.g., make stop-auth)
 	@chmod +x $(SERVICE_MANAGER)
 	@$(SERVICE_MANAGER) stop $*
 
 # Restart specific service
-restart-%: ## Restart specific service (e.g., make restart-gateway)
+restart-%: ## Restart specific service (e.g., make restart-auth)
 	@chmod +x $(SERVICE_MANAGER)
 	@$(SERVICE_MANAGER) restart $*
 
 # Show service ports
 ports: ## Display all service ports
 	@echo "Service Endpoints:"
+	@echo "  APISIX Gateway:   http://localhost:9080"
+	@echo "  APISIX Admin:     http://localhost:9180"
 	@echo "  Consul UI:        http://localhost:8500"
-	@echo "  Gateway API:      http://localhost:8000"
 	@echo "  Account Service:  http://localhost:8201"
 	@echo "  Auth Service:     http://localhost:8202"
 	@echo "  Authorization:    http://localhost:8203"

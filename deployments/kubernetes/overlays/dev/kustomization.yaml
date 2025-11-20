@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: isa-cloud-staging
+namespace: isa-cloud-dev
 
 # 引用基础配置
 resources:
@@ -11,7 +11,7 @@ resources:
 
 # 通用标签
 commonLabels:
-  environment: staging
+  environment: dev
   managed-by: kustomize
 
 # 镜像替换（CI 会自动更新这里）
@@ -30,17 +30,17 @@ images:
     newName: 123456789.dkr.ecr.us-east-1.amazonaws.com/isa-user
     newTag: latest
 
-# 资源配置补丁（staging 环境使用中等资源）
+# 资源配置补丁（开发环境使用最小资源）
 patchesStrategicMerge:
-  - patches/resources-staging.yaml
-  - patches/replicas-staging.yaml
+  - patches/resources-dev.yaml
+  - patches/replicas-dev.yaml
 
 # ConfigMap
 configMapGenerator:
   - name: global-config
     literals:
-      - ENVIRONMENT=staging
-      - LOG_LEVEL=info
-      - CONSUL_ADDR=consul.isa-cloud-staging.svc.cluster.local:8500
-      - REDIS_ADDR=redis.isa-cloud-staging.svc.cluster.local:6379
-      - POSTGRES_HOST=postgres.isa-cloud-staging.svc.cluster.local
+      - ENVIRONMENT=dev
+      - LOG_LEVEL=debug
+      - CONSUL_ADDR=consul.isa-cloud-dev.svc.cluster.local:8500
+      - REDIS_ADDR=redis.isa-cloud-dev.svc.cluster.local:6379
+      - POSTGRES_HOST=postgres.isa-cloud-dev.svc.cluster.local

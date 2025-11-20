@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: isa-cloud-staging
+  namespace: argocd
+  labels:
+    environment: staging
+    project: isa-cloud
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # 项目
+  project: default
+
+  # 源配置（GitOps 仓库）
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: main
+    path: deployments/kubernetes/overlays/staging
+
+  # 目标集群
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-staging
+
+  # 同步策略
+  syncPolicy:
+    # 自动同步
+    automated:
+      prune: true        # 自动删除不在 Git 中的资源
+      selfHeal: true     # 自动修复漂移
+      allowEmpty: false  # 不允许空应用
+
+    # 同步选项
+    syncOptions:
+      - CreateNamespace=true      # 自动创建命名空间
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true            # 最后执行删除操作
+
+    # 重试策略
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # 忽略差异
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas  # 如果使用 HPA，忽略副本数差异
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/clusterIP  # 忽略自动分配的 ClusterIP
+        - /metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+
+  # 资源健康检查
+  info:
+    - name: 'Environment'
+      value: 'Staging'
+    - name: 'Managed By'
+      value: 'ArgoCD'

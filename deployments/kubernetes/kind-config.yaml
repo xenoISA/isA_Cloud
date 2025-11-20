@@ -52,9 +52,21 @@ nodes:
     - containerPort: 3000      # Grafana
       hostPort: 3000
       protocol: TCP
-    # Gateway
-    - containerPort: 8080      # Infrastructure Gateway
-      hostPort: 8080
+    # APISIX API Gateway
+    - containerPort: 9080      # APISIX HTTP
+      hostPort: 9080
+      protocol: TCP
+    - containerPort: 9180      # APISIX Admin API
+      hostPort: 9180
+      protocol: TCP
+    - containerPort: 9443      # APISIX HTTPS
+      hostPort: 9443
+      protocol: TCP
+    - containerPort: 9010      # APISIX Dashboard
+      hostPort: 9010
+      protocol: TCP
+    - containerPort: 2379      # etcd (APISIX storage)
+      hostPort: 2379
       protocol: TCP
 
   # 工作节点（可根据资源调整数量）
