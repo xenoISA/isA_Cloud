@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-config
+  labels:
+    app: apisix
+    component: api-gateway
+data:
+  config.yaml: |
+    # APISIX Configuration for Kubernetes
+
+    apisix:
+      node_listen: 80
+      enable_ipv6: false
+
+      enable_control: true
+      control:
+        ip: "0.0.0.0"
+        port: 9092
+
+      # DNS resolver for Kubernetes service discovery
+      dns_resolver:
+        - "10.96.0.10"  # Kubernetes DNS (kube-dns/coredns)
+      dns_resolver_valid: 30
+
+    deployment:
+      role: traditional
+      role_traditional:
+        config_provider: etcd
+
+      admin:
+        admin_key_required: false
+        admin_key:
+          - name: "admin"
+            key: edd1c9f034335f136f87ad84b625c8f1  # Default admin key
+            role: admin
+        enable_admin_cors: true
+        allow_admin:
+          - 0.0.0.0/0
+        admin_listen:
+          ip: 0.0.0.0
+          port: 9180
+
+      etcd:
+        host:
+          - "http://etcd.isa-cloud-staging.svc.cluster.local:2379"
+        prefix: "/apisix"
+        timeout: 30
+
+    # Consul service discovery
+    discovery:
+      consul:
+        servers:
+          - "http://consul.isa-cloud-staging.svc.cluster.local:8500"
+        fetch_interval: 3
+        timeout:
+          connect: 2000
+          read: 2000
+          wait: 60
+        keepalive: true
+        default_weight: 1
+
+    nginx_config:
+      error_log: "/usr/local/apisix/logs/error.log"
+      error_log_level: "warn"
+      worker_processes: auto
+      worker_rlimit_nofile: 20480
+
+      event:
+        worker_connections: 10620
+
+      http:
+        access_log: "/usr/local/apisix/logs/access.log"
+        keepalive_timeout: 60s
+        client_header_timeout: 60s
+        client_body_timeout: 60s
+        send_timeout: 10s
+
+        underscores_in_headers: "on"
+        real_ip_header: "X-Real-IP"
+
+        real_ip_from:
+          - 127.0.0.1
+          - 'unix:'
+
+    plugins:
+      - prometheus
+      - request-id
+      - zipkin
+      - cors
+      - jwt-auth
+      - key-auth
+      - limit-count
+      - limit-req
+      - limit-conn
+      - proxy-rewrite
+      - response-rewrite
+      - openid-connect
+
+    plugin_attr:
+      prometheus:
+        export_addr:
+          ip: "0.0.0.0"
+          port: 9091

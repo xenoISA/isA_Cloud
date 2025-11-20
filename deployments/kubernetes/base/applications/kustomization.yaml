@@ -3,25 +3,23 @@ kind: Kustomization
 
 namespace: isa-cloud-staging
 
+# 引用各业务服务项目的 k8s 配置
+# 每个服务可以在各自项目中独立部署，也可以通过此文件统一部署
 resources:
-  # Agent Service
-  - agent-deployment.yaml
-  - agent-service.yaml
-  - agent-configmap.yaml
+  # Agent Service (from isA_Agent project)
+  - ../../../../../isA_Agent/deployment/k8s/
 
-  # User Services (24 microservices in one container)
-  - user-deployment.yaml
-  - user-service.yaml
-  - user-configmap.yaml
+  # Model Service (from isA_Model project)
+  - ../../../../../isA_Model/deployment/k8s/
 
-  # MCP Service
-  - mcp-deployment.yaml
-  - mcp-service.yaml
+  # MCP Service (from isA_MCP project)
+  - ../../../../../isA_MCP/deployment/k8s/
 
-  # Model Service
-  - model-deployment.yaml
-  - model-service.yaml
-  - model-configmap.yaml
+  # Web Service (from isA_OS project)
+  - ../../../../../isA_OS/deployment/k8s/
+
+  # Data Service (from isA_Data project)
+  - ../../../../../isA_Data/deployment/k8s/
 
 commonLabels:
   project: isa-cloud
@@ -29,5 +27,6 @@ commonLabels:
   managed-by: kustomize
 
 commonAnnotations:
-  description: "isA Cloud Business Application Layer"
+  description: "isA Cloud Business Application Layer - Unified Deployment"
   version: "1.0.0"
+  architecture: "Microservices - Each service managed independently"

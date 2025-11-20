@@ -292,8 +292,8 @@ class PostgresClient(BaseGRPCClient):
             proto_rows = []
             for row in rows:
                 struct = Struct()
-                for k, v in row.items():
-                    struct[k] = v
+                # Use update() to properly handle all Python types
+                struct.update(row)
                 proto_rows.append(struct)
 
             request = postgres_service_pb2.InsertIntoRequest(

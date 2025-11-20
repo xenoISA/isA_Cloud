@@ -88,4 +88,5 @@ supabase/.temp/
 
 # AWS deployment files with secrets
 deployments/aws/tasks/
-deployments/aws/services/
+deployments/aws/services/*.env
+.env.local
