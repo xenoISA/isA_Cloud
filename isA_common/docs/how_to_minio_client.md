@@ -1,4 +1,4 @@
-# =€ MinIO Client - S3-Compatible Object Storage Made Simple
+# =ï¿½ MinIO Client - S3-Compatible Object Storage Made Simple
 
 ## Installation
 
@@ -342,6 +342,113 @@ with MinIOClient() as client:
 
 ---
 
+## Async Client Usage (High-Performance)
+
+For high-concurrency applications, use `AsyncMinIOClient` with `async/await`:
+
+```python
+import asyncio
+from isa_common import AsyncMinIOClient
+
+async def main():
+    async with AsyncMinIOClient(
+        host='localhost',
+        port=50051,
+        user_id='your-service'
+    ) as client:
+        # Health check
+        health = await client.health_check()
+
+        # Bucket operations
+        await client.create_bucket('my-bucket')
+        exists = await client.bucket_exists('my-bucket')
+        buckets = await client.list_buckets()
+        info = await client.get_bucket_info('my-bucket')
+
+        # Upload object
+        result = await client.upload_object(
+            'my-bucket',
+            'documents/report.pdf',
+            pdf_bytes,
+            content_type='application/pdf',
+            metadata={'author': 'team', 'version': '1.0'}
+        )
+
+        # Download object
+        data = await client.get_object('my-bucket', 'documents/report.pdf')
+
+        # Get object metadata
+        metadata = await client.get_object_metadata('my-bucket', 'documents/report.pdf')
+
+        # List objects
+        objects = await client.list_objects('my-bucket', prefix='documents/')
+
+        # Copy object
+        await client.copy_object(
+            dest_bucket='backup-bucket',
+            dest_key='backup/report.pdf',
+            source_bucket='my-bucket',
+            source_key='documents/report.pdf'
+        )
+
+        # Presigned URLs
+        download_url = await client.get_presigned_url('my-bucket', 'documents/report.pdf', expiry_seconds=3600)
+        upload_url = await client.get_presigned_put_url('my-bucket', 'uploads/new-file.pdf', expiry_seconds=300)
+
+        # Object tags
+        await client.set_object_tags('my-bucket', 'documents/report.pdf', {'status': 'final'})
+        tags = await client.get_object_tags('my-bucket', 'documents/report.pdf')
+
+        # Bucket tags
+        await client.set_bucket_tags('my-bucket', {'environment': 'production'})
+        bucket_tags = await client.get_bucket_tags('my-bucket')
+
+        # Delete operations
+        await client.delete_object('my-bucket', 'temp/old-file.txt')
+        await client.delete_objects('my-bucket', ['temp/file1.txt', 'temp/file2.txt'])
+
+asyncio.run(main())
+```
+
+### Concurrent Operations with asyncio.gather
+
+```python
+async def concurrent_uploads(client):
+    # Upload 5 objects concurrently
+    results = await asyncio.gather(*[
+        client.upload_object(
+            'my-bucket',
+            f'data/file_{i}.txt',
+            f'Content for file {i}'.encode(),
+            content_type='text/plain'
+        )
+        for i in range(5)
+    ])
+    return results
+```
+
+### upload_many_concurrent / download_many_concurrent Helpers
+
+```python
+async def bulk_operations(client):
+    # Upload multiple files concurrently with helper
+    uploads = [
+        {'bucket': 'my-bucket', 'key': f'batch/file_{i}.txt', 'data': f'Batch {i}'.encode()}
+        for i in range(10)
+    ]
+    upload_results = await client.upload_many_concurrent(uploads)
+
+    # Download multiple files concurrently with helper
+    downloads = [
+        {'bucket': 'my-bucket', 'key': f'batch/file_{i}.txt'}
+        for i in range(10)
+    ]
+    download_results = await client.download_many_concurrent(downloads)
+    return upload_results, download_results
+```
+
+---
+
 ## Complete Feature List
 
  **Bucket Management**: create, delete, exists, info, list
@@ -365,20 +472,23 @@ with MinIOClient() as client:
 
 ## Test Results
 
-**13/13 tests passing (100% success rate)**
+**Sync Client: 13/13 tests passing (100% success rate)**
+**Async Client: 19/19 tests passing (100% success rate)**
 
 Comprehensive functional tests cover:
-- Bucket lifecycle operations
-- Bucket policies and tags
+- Health checks
+- Bucket operations (create, exists, list, info)
 - Object upload/download (streaming)
 - Large file upload (6MB tested)
 - Object copy operations
+- Object and bucket tags
+- Presigned URLs (GET and PUT)
 - Batch delete operations
-- Presigned URL generation
-- Object metadata and tags
+- Concurrent uploads (asyncio.gather)
+- upload_many_concurrent helper
+- download_many_concurrent helper
 - Bucket versioning
 - Lifecycle policies
-- Health checks
 
 All tests demonstrate production-ready reliability.
 
@@ -388,7 +498,7 @@ All tests demonstrate production-ready reliability.
 
 Instead of wrestling with boto3, S3 APIs, gRPC serialization, and connection management...
 
-**You write 3 lines and ship features.** <¯
+**You write 3 lines and ship features.** <ï¿½
 
 The MinIO client gives you:
 - **Production-ready** S3-compatible storage out of the box

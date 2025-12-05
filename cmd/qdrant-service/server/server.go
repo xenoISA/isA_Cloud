@@ -226,11 +226,12 @@ func (s *QdrantServer) GetPoints(ctx context.Context, req *pb.GetPointsRequest) 
 	for i, rp := range retrievedPoints {
 		pbPoint := &pb.Point{}
 
-		// 设置 ID
-		if rp.Id.GetNum() > 0 {
-			pbPoint.Id = &pb.Point_NumId{NumId: rp.Id.GetNum()}
-		} else {
-			pbPoint.Id = &pb.Point_StrId{StrId: rp.Id.GetUuid()}
+		// 设置 ID - use type switch to handle ID 0 correctly
+		switch idType := rp.Id.PointIdOptions.(type) {
+		case *qdrant_go.PointId_Num:
+			pbPoint.Id = &pb.Point_NumId{NumId: idType.Num}
+		case *qdrant_go.PointId_Uuid:
+			pbPoint.Id = &pb.Point_StrId{StrId: idType.Uuid}
 		}
 
 		// 设置向量 (如果请求)
@@ -298,10 +299,11 @@ func (s *QdrantServer) UpdatePayload(ctx context.Context, req *pb.UpdatePayloadR
 	case *pb.UpdatePayloadRequest_Ids:
 		ids = make([]interface{}, len(selector.Ids.Ids))
 		for i, id := range selector.Ids.Ids {
-			if id.GetNum() > 0 {
-				ids[i] = id.GetNum()
-			} else {
-				ids[i] = id.GetStr()
+			switch idType := id.Id.(type) {
+			case *pb.PointId_Num:
+				ids[i] = idType.Num
+			case *pb.PointId_Str:
+				ids[i] = idType.Str
 			}
 		}
 	default:
@@ -335,10 +337,11 @@ func (s *QdrantServer) DeletePayload(ctx context.Context, req *pb.DeletePayloadR
 	case *pb.DeletePayloadRequest_Ids:
 		ids = make([]interface{}, len(selector.Ids.Ids))
 		for i, id := range selector.Ids.Ids {
-			if id.GetNum() > 0 {
-				ids[i] = id.GetNum()
-			} else {
-				ids[i] = id.GetStr()
+			switch idType := id.Id.(type) {
+			case *pb.PointId_Num:
+				ids[i] = idType.Num
+			case *pb.PointId_Str:
+				ids[i] = idType.Str
 			}
 		}
 	default:
@@ -369,10 +372,11 @@ func (s *QdrantServer) ClearPayload(ctx context.Context, req *pb.ClearPayloadReq
 	case *pb.ClearPayloadRequest_Ids:
 		ids = make([]interface{}, len(selector.Ids.Ids))
 		for i, id := range selector.Ids.Ids {
-			if id.GetNum() > 0 {
-				ids[i] = id.GetNum()
-			} else {
-				ids[i] = id.GetStr()
+			switch idType := id.Id.(type) {
+			case *pb.PointId_Num:
+				ids[i] = idType.Num
+			case *pb.PointId_Str:
+				ids[i] = idType.Str
 			}
 		}
 	default:
@@ -543,10 +547,11 @@ func (s *QdrantServer) Scroll(ctx context.Context, req *pb.ScrollRequest) (*pb.S
 	var offset *qdrant_go.PointId
 	if req.Offset != nil {
 		offset = &qdrant_go.PointId{}
-		if req.Offset.GetNum() > 0 {
-			offset.PointIdOptions = &qdrant_go.PointId_Num{Num: req.Offset.GetNum()}
-		} else {
-			offset.PointIdOptions = &qdrant_go.PointId_Uuid{Uuid: req.Offset.GetStr()}
+		switch idType := req.Offset.Id.(type) {
+		case *pb.PointId_Num:
+			offset.PointIdOptions = &qdrant_go.PointId_Num{Num: idType.Num}
+		case *pb.PointId_Str:
+			offset.PointIdOptions = &qdrant_go.PointId_Uuid{Uuid: idType.Str}
 		}
 	}
 
@@ -573,11 +578,12 @@ func (s *QdrantServer) Scroll(ctx context.Context, req *pb.ScrollRequest) (*pb.S
 	for i, rp := range points {
 		pbPoint := &pb.Point{}
 
-		// Set ID
-		if rp.Id.GetNum() > 0 {
-			pbPoint.Id = &pb.Point_NumId{NumId: rp.Id.GetNum()}
-		} else {
-			pbPoint.Id = &pb.Point_StrId{StrId: rp.Id.GetUuid()}
+		// Set ID - use type switch to correctly handle ID 0
+		switch idType := rp.Id.PointIdOptions.(type) {
+		case *qdrant_go.PointId_Num:
+			pbPoint.Id = &pb.Point_NumId{NumId: idType.Num}
+		case *qdrant_go.PointId_Uuid:
+			pbPoint.Id = &pb.Point_StrId{StrId: idType.Uuid}
 		}
 
 		// Set vectors if requested
@@ -602,14 +608,15 @@ func (s *QdrantServer) Scroll(ctx context.Context, req *pb.ScrollRequest) (*pb.S
 		pbPoints[i] = pbPoint
 	}
 
-	// Convert next offset
+	// Convert next offset - use type switch to handle ID 0 correctly
 	var pbNextOffset *pb.PointId
 	if nextOffset != nil {
 		pbNextOffset = &pb.PointId{}
-		if nextOffset.GetNum() > 0 {
-			pbNextOffset.Id = &pb.PointId_Num{Num: nextOffset.GetNum()}
-		} else {
-			pbNextOffset.Id = &pb.PointId_Str{Str: nextOffset.GetUuid()}
+		switch idType := nextOffset.PointIdOptions.(type) {
+		case *qdrant_go.PointId_Num:
+			pbNextOffset.Id = &pb.PointId_Num{Num: idType.Num}
+		case *qdrant_go.PointId_Uuid:
+			pbNextOffset.Id = &pb.PointId_Str{Str: idType.Uuid}
 		}
 	}
 
@@ -971,11 +978,12 @@ func convertScoredPointsToProto(scoredPoints []*qdrant_go.ScoredPoint, withPaylo
 	for i, sp := range scoredPoints {
 		pbPoint := &pb.Point{}
 
-		// Set ID
-		if sp.Id.GetNum() > 0 {
-			pbPoint.Id = &pb.Point_NumId{NumId: sp.Id.GetNum()}
-		} else {
-			pbPoint.Id = &pb.Point_StrId{StrId: sp.Id.GetUuid()}
+		// Set ID - use type switch to handle ID 0 correctly
+		switch idType := sp.Id.PointIdOptions.(type) {
+		case *qdrant_go.PointId_Num:
+			pbPoint.Id = &pb.Point_NumId{NumId: idType.Num}
+		case *qdrant_go.PointId_Uuid:
+			pbPoint.Id = &pb.Point_StrId{StrId: idType.Uuid}
 		}
 
 		// Set vectors if requested

@@ -193,27 +193,50 @@ class RedisClient(BaseGRPCClient):
         except Exception as e:
             return self.handle_error(e, "Append to key")
 
-    def mset(self, key_values: Dict[str, str]) -> Optional[bool]:
-        """Batch set key-values"""
+    def mset(self, key_values: Dict[str, str], ttl_seconds: int = 0) -> Optional[bool]:
+        """Batch set key-values using ExecuteBatch for optimal performance
+
+        Args:
+            key_values: Dictionary of key-value pairs to set
+            ttl_seconds: Optional TTL for all keys (0 = no expiration)
+
+        Returns:
+            True if all keys were set successfully, False otherwise
+        """
         try:
             self._ensure_connected()
-            
-            # Set each key-value pair individually since proto doesn't have MSet
-            success_count = 0
+
+            # Build batch commands for all key-value pairs
+            batch_commands = []
             for key, value in key_values.items():
-                request = redis_service_pb2.SetRequest(
-                    user_id=self.user_id,
-                    organization_id=self.organization_id,
+                cmd = redis_service_pb2.BatchCommand(
+                    operation='SET',
                     key=key,
                     value=value
                 )
-                response = self.stub.Set(request)
-                if response.success:
-                    success_count += 1
+                # Add expiration if specified
+                if ttl_seconds > 0:
+                    from google.protobuf.duration_pb2 import Duration
+                    expiration = Duration()
+                    expiration.seconds = ttl_seconds
+                    cmd.expiration.CopyFrom(expiration)
+                batch_commands.append(cmd)
 
-            if success_count == len(key_values):
+            # Execute all SET operations in a single RPC call
+            request = redis_service_pb2.RedisBatchRequest(
+                user_id=self.user_id,
+                organization_id=self.organization_id,
+                commands=batch_commands
+            )
+
+            response = self.stub.ExecuteBatch(request)
+
+            if response.success and response.executed_count == len(key_values):
                 return True
             else:
+                if response.errors:
+                    for error in response.errors:
+                        self.handle_error(Exception(error), "Batch set")
                 return False
 
         except Exception as e:
@@ -1338,7 +1361,7 @@ class RedisClient(BaseGRPCClient):
             response = self.stub.GetSession(request)
 
             if response.found:
-                return dict(response.session.data)
+                return self._proto_map_to_dict(response.session.data)
             else:
                 return None
 
@@ -1434,7 +1457,7 @@ class RedisClient(BaseGRPCClient):
                 'commands_processed': response.commands_processed,
                 'connections_received': response.connections_received,
                 'hit_rate': response.hit_rate,
-                'key_type_distribution': dict(response.key_type_distribution)
+                'key_type_distribution': self._proto_map_to_dict(response.key_type_distribution)
             }
 
             return stats

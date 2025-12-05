@@ -53,6 +53,13 @@ if command -v protoc &> /dev/null; then
             --go-grpc_out=. --go-grpc_opt=module=github.com/isa-cloud/isa_cloud \
             api/proto/${service}_service.proto
     done
+
+    # Generate container.proto (standalone, not following _service.proto convention)
+    echo "→ Generating container.proto..."
+    protoc --proto_path=api/proto \
+        --go_out=. --go_opt=module=github.com/isa-cloud/isa_cloud \
+        --go-grpc_out=. --go-grpc_opt=module=github.com/isa-cloud/isa_cloud \
+        api/proto/container.proto
 else
     echo "⚠️  protoc not found - skipping Go code generation"
     echo "   Please install protoc to generate Go code locally"
@@ -88,6 +95,14 @@ for service in "${SERVICES[@]}"; do
         api/proto/${service}_service.proto
 done
 
+# Generate container.proto (Python)
+echo "→ Generating container.proto (Python)..."
+python3 -m grpc_tools.protoc \
+    --proto_path=api/proto \
+    --python_out=isA_common/isa_common/proto \
+    --grpc_python_out=isA_common/isa_common/proto \
+    api/proto/container.proto
+
 # Fix imports in generated Python files (convert to relative imports)
 echo "→ Fixing Python imports..."
 for file in isA_common/isa_common/proto/*_pb2.py isA_common/isa_common/proto/*_pb2_grpc.py; do
@@ -119,6 +134,7 @@ from . import nats_service_pb2, nats_service_pb2_grpc
 from . import postgres_service_pb2, postgres_service_pb2_grpc
 from . import qdrant_service_pb2, qdrant_service_pb2_grpc
 from . import neo4j_service_pb2, neo4j_service_pb2_grpc
+from . import container_pb2, container_pb2_grpc
 
 __all__ = [
     'common_pb2',
@@ -131,6 +147,7 @@ __all__ = [
     'postgres_service_pb2', 'postgres_service_pb2_grpc',
     'qdrant_service_pb2', 'qdrant_service_pb2_grpc',
     'neo4j_service_pb2', 'neo4j_service_pb2_grpc',
+    'container_pb2', 'container_pb2_grpc',
 ]
 EOF
 

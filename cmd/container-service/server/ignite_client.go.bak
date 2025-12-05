@@ -1,0 +1,355 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// IgniteClient wraps Ignite CLI operations
+// Implements ContainerBackend interface
+type IgniteClient struct {
+	igniteBinary string
+}
+
+// FileInfo represents file information (Ignite-specific)
+type FileInfo struct {
+	Content      []byte
+	Size         int64
+	ModifiedTime int64
+	Permissions  int
+}
+
+// FileWrite represents file write operation (Ignite-specific)
+type FileWrite struct {
+	Path          string
+	Content       []byte
+	Permissions   int
+	CreateParents bool
+}
+
+// NewIgniteClient creates a new Ignite client
+func NewIgniteClient() (*IgniteClient, error) {
+	// Check if ignite is installed
+	ignitePath, err := exec.LookPath("ignite")
+	if err != nil {
+		return nil, fmt.Errorf("ignite not found in PATH: %w", err)
+	}
+
+	return &IgniteClient{
+		igniteBinary: ignitePath,
+	}, nil
+}
+
+// CreateVM creates a new VM using Ignite
+func (c *IgniteClient) CreateVM(ctx context.Context, config *VMConfig) (string, string, error) {
+	// Build ignite run command
+	args := []string{
+		"run",
+		config.Image,
+		"--name", config.Name,
+		"--cpus", fmt.Sprintf("%d", config.CPUs),
+		"--memory", fmt.Sprintf("%dMB", config.MemoryMB),
+		"--size", fmt.Sprintf("%dGB", config.DiskSizeGB),
+	}
+
+	// Add SSH keys
+	for _, key := range config.SSHKeys {
+		args = append(args, "--ssh", key)
+	}
+
+	// Add ports
+	for _, port := range config.Ports {
+		args = append(args, "-p", port)
+	}
+
+	// Add labels
+	for key, value := range config.Labels {
+		args = append(args, "--label", fmt.Sprintf("%s=%s", key, value))
+	}
+
+	// Execute command
+	cmd := exec.CommandContext(ctx, c.igniteBinary, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create VM: %w, output: %s", err, string(output))
+	}
+
+	// Parse VM ID from output (Ignite returns the VM UID)
+	vmID := strings.TrimSpace(string(output))
+
+	// Get VM IP address
+	ipAddress, err := c.getVMIP(ctx, config.Name)
+	if err != nil {
+		// IP might not be available immediately, that's ok
+		ipAddress = ""
+	}
+
+	return vmID, ipAddress, nil
+}
+
+// StartVM starts a stopped VM
+func (c *IgniteClient) StartVM(ctx context.Context, vmID string) error {
+	cmd := exec.CommandContext(ctx, c.igniteBinary, "start", vmID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to start VM: %w, output: %s", err, string(output))
+	}
+	return nil
+}
+
+// StopVM stops a running VM
+func (c *IgniteClient) StopVM(ctx context.Context, vmID string, timeout int) error {
+	cmd := exec.CommandContext(ctx, c.igniteBinary, "stop", vmID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to stop VM: %w, output: %s", err, string(output))
+	}
+	return nil
+}
+
+// DeleteVM deletes a VM
+func (c *IgniteClient) DeleteVM(ctx context.Context, vmID string, force bool) error {
+	args := []string{"rm", vmID}
+	if force {
+		args = append(args, "-f")
+	}
+
+	cmd := exec.CommandContext(ctx, c.igniteBinary, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete VM: %w, output: %s", err, string(output))
+	}
+	return nil
+}
+
+// GetVMStatus gets VM status
+func (c *IgniteClient) GetVMStatus(ctx context.Context, vmID string) (*VMStatus, error) {
+	// Get VM info using ignite inspect
+	cmd := exec.CommandContext(ctx, c.igniteBinary, "inspect", "vm", vmID, "-o", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VM status: %w, output: %s", err, string(output))
+	}
+
+	// Parse JSON output
+	var vmData map[string]interface{}
+	if err := json.Unmarshal(output, &vmData); err != nil {
+		return nil, fmt.Errorf("failed to parse VM status: %w", err)
+	}
+
+	// Extract status information
+	status := &VMStatus{
+		ID:     vmID,
+		Name:   getStringField(vmData, "metadata", "name"),
+		State:  getStringField(vmData, "status", "running"),
+		Image:  getStringField(vmData, "spec", "image", "oci"),
+	}
+
+	// Get IP address
+	ipAddress, _ := c.getVMIP(ctx, status.Name)
+	status.IPAddress = ipAddress
+
+	return status, nil
+}
+
+// ListVMs lists all VMs
+func (c *IgniteClient) ListVMs(ctx context.Context, userID, statusFilter string) ([]*VMInfo, error) {
+	// Execute ignite ps command
+	cmd := exec.CommandContext(ctx, c.igniteBinary, "ps", "-a", "-o", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list VMs: %w, output: %s", err, string(output))
+	}
+
+	// Parse JSON output
+	var vmsData []map[string]interface{}
+	if err := json.Unmarshal(output, &vmsData); err != nil {
+		return nil, fmt.Errorf("failed to parse VMs list: %w", err)
+	}
+
+	vms := make([]*VMInfo, 0, len(vmsData))
+	for _, vmData := range vmsData {
+		vm := &VMInfo{
+			ID:     getStringField(vmData, "metadata", "uid"),
+			Name:   getStringField(vmData, "metadata", "name"),
+			Status: getStringField(vmData, "status", "running"),
+			Image:  getStringField(vmData, "spec", "image", "oci"),
+		}
+
+		// Get IP address
+		ipAddress, _ := c.getVMIP(ctx, vm.Name)
+		vm.IPAddress = ipAddress
+
+		// Apply filters
+		if userID != "" && !strings.HasPrefix(vm.Name, userID) {
+			continue
+		}
+		if statusFilter != "" && vm.Status != statusFilter {
+			continue
+		}
+
+		vms = append(vms, vm)
+	}
+
+	return vms, nil
+}
+
+// ExecCommand executes a command in a VM
+func (c *IgniteClient) ExecCommand(ctx context.Context, vmID string, config *ExecConfig) (*ExecResult, error) {
+	// Build ignite exec command
+	args := []string{"exec", vmID, "--"}
+	args = append(args, config.Command...)
+
+	// Set timeout if specified
+	if config.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(config.Timeout)*time.Second)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, c.igniteBinary, args...)
+
+	// Capture output
+	output, err := cmd.CombinedOutput()
+
+	result := &ExecResult{
+		ExitCode: 0,
+		Stdout:   string(output),
+		Stderr:   "",
+	}
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+			result.Stderr = string(exitErr.Stderr)
+		} else {
+			return nil, fmt.Errorf("failed to execute command: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// ReadFile reads a file from a VM
+func (c *IgniteClient) ReadFile(ctx context.Context, vmID, filePath string) (*FileInfo, error) {
+	// Use ignite exec to cat the file
+	result, err := c.ExecCommand(ctx, vmID, &ExecConfig{
+		Command: []string{"cat", filePath},
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("failed to read file: %s", result.Stderr)
+	}
+
+	return &FileInfo{
+		Content: []byte(result.Stdout),
+		Size:    int64(len(result.Stdout)),
+	}, nil
+}
+
+// WriteFile writes a file to a VM
+func (c *IgniteClient) WriteFile(ctx context.Context, vmID string, file *FileWrite) error {
+	// Create parent directories if needed
+	if file.CreateParents {
+		parentDir := file.Path[:strings.LastIndex(file.Path, "/")]
+		if parentDir != "" {
+			_, err := c.ExecCommand(ctx, vmID, &ExecConfig{
+				Command: []string{"mkdir", "-p", parentDir},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create parent directories: %w", err)
+			}
+		}
+	}
+
+	// Write file using echo (for simple implementation)
+	// In production, might want to use a more robust method
+	content := string(file.Content)
+	result, err := c.ExecCommand(ctx, vmID, &ExecConfig{
+		Command: []string{"sh", "-c", fmt.Sprintf("echo '%s' > %s", content, file.Path)},
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to write file: %s", result.Stderr)
+	}
+
+	// Set permissions if specified
+	if file.Permissions > 0 {
+		_, err := c.ExecCommand(ctx, vmID, &ExecConfig{
+			Command: []string{"chmod", fmt.Sprintf("%o", file.Permissions), file.Path},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set permissions: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// GetResourceUsage gets resource usage of a VM
+func (c *IgniteClient) GetResourceUsage(ctx context.Context, vmID string) (*ResourceUsageInfo, error) {
+	// Get memory usage
+	_, err := c.ExecCommand(ctx, vmID, &ExecConfig{
+		Command: []string{"free", "-m"},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse memory usage (simplified)
+	usage := &ResourceUsageInfo{
+		CPUPercent:    50.0, // TODO: Implement actual CPU usage
+		MemoryUsedMB:  1024, // TODO: Parse from free output
+		MemoryTotalMB: 4096,
+		DiskUsedGB:    5,
+		DiskTotalGB:   20,
+	}
+
+	return usage, nil
+}
+
+// getVMIP gets the IP address of a VM
+func (c *IgniteClient) getVMIP(ctx context.Context, vmName string) (string, error) {
+	cmd := exec.CommandContext(ctx, c.igniteBinary, "inspect", "vm", vmName, "-t", "{{.status.network.ipAddresses}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+
+	// Parse IP from output
+	ip := strings.TrimSpace(string(output))
+	ip = strings.Trim(ip, "[]")
+
+	return ip, nil
+}
+
+// Helper function to safely get nested map values
+func getStringField(data map[string]interface{}, keys ...string) string {
+	current := data
+	for i, key := range keys {
+		if i == len(keys)-1 {
+			if val, ok := current[key].(string); ok {
+				return val
+			}
+			return ""
+		}
+		if next, ok := current[key].(map[string]interface{}); ok {
+			current = next
+		} else {
+			return ""
+		}
+	}
+	return ""
+}

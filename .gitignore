@@ -79,6 +79,8 @@ __pycache__/
 env/
 venv/
 .venv/
+isA_common/.env
+isA_common/dist/
 
 # Supabase
 .branches/

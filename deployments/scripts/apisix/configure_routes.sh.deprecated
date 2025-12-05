@@ -47,6 +47,7 @@ create_route() {
     local service_name=$3
     local enable_auth=${4:-false}
     local rate_limit=${5:-100}
+    local read_timeout=${6:-30}  # Default 30s, use higher for LLM services
 
     print_info "Creating route: $route_name -> $service_name"
 
@@ -109,9 +110,9 @@ create_route() {
                 \"type\": \"roundrobin\",
                 \"discovery_type\": \"consul\",
                 \"timeout\": {
-                    \"connect\": 6,
-                    \"send\": 6,
-                    \"read\": 10
+                    \"connect\": 10,
+                    \"send\": 60,
+                    \"read\": ${read_timeout}
                 },
                 \"keepalive_pool\": {
                     \"size\": 320,
@@ -171,13 +172,13 @@ main() {
     create_route "sessions_route" "/api/v1/sessions/*" "session_service" true 100
     create_route "authorization_route" "/api/v1/authorization/*" "authorization_service" true 100
 
-    # AI/Platform Services
+    # AI/Platform Services (higher timeouts for LLM inference)
     print_info "Configuring AI/Platform Services..."
-    create_route "agent_route" "/api/v1/agent/*" "agent_service" true 50
-    create_route "agents_route" "/api/v1/agents/*" "agent_service" true 50
-    create_route "model_route" "/api/v1/model/*" "model_service" true 50
-    create_route "models_route" "/api/v1/models/*" "model_service" true 50
-    create_route "mcp_route" "/api/v1/mcp/*" "mcp_service" true 50
+    create_route "agent_route" "/api/v1/agent/*" "agent_service" true 50 300    # 5 min for LLM
+    create_route "agents_route" "/api/v1/agents/*" "agent_service" true 50 300  # 5 min for LLM
+    create_route "model_route" "/api/v1/model/*" "model_service" true 50 300    # 5 min for inference
+    create_route "models_route" "/api/v1/models/*" "model_service" true 50 300  # 5 min for inference
+    create_route "mcp_route" "/api/v1/mcp/*" "mcp_service" true 50 120          # 2 min for tool calls
 
     # Business Services
     print_info "Configuring Business Services..."

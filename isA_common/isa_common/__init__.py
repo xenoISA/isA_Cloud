@@ -18,7 +18,7 @@ gRPC Clients Package
 """
 
 from typing import Optional, Dict
-from .base_client import BaseGRPCClient
+from .base_client import BaseGRPCClient, GlobalChannelPool
 from .postgres_client import PostgresClient
 from .qdrant_client import QdrantClient
 from .neo4j_client import Neo4jClient
@@ -30,12 +30,31 @@ from .redis_client import RedisClient
 from .loki_client import LokiClient
 from .consul_client import ConsulRegistry, consul_lifespan
 
+# Async clients for high-performance concurrent operations
+from .async_base_client import (
+    AsyncBaseGRPCClient,
+    AsyncGlobalChannelPool,
+    AutoBatcher,
+    BatchedRedisGet,
+    BatchedRedisSet,
+)
+from .async_redis_client import AsyncRedisClient
+from .async_postgres_client import AsyncPostgresClient
+from .async_nats_client import AsyncNATSClient
+from .async_neo4j_client import AsyncNeo4jClient
+from .async_minio_client import AsyncMinIOClient
+from .async_duckdb_client import AsyncDuckDBClient
+from .async_mqtt_client import AsyncMQTTClient
+from .async_qdrant_client import AsyncQdrantClient
+
 # Import events module (but don't unpack, keep as submodule)
 from . import events
 
 # 导出所有客户端
 __all__ = [
+    # Sync clients
     'BaseGRPCClient',
+    'GlobalChannelPool',
     'PostgresClient',
     'QdrantClient',
     'Neo4jClient',
@@ -50,6 +69,21 @@ __all__ = [
     'get_client',
     'ClientFactory',
     'events',  # Export events submodule
+    # Async clients
+    'AsyncBaseGRPCClient',
+    'AsyncGlobalChannelPool',
+    'AsyncRedisClient',
+    'AsyncPostgresClient',
+    'AsyncNATSClient',
+    'AsyncNeo4jClient',
+    'AsyncMinIOClient',
+    'AsyncDuckDBClient',
+    'AsyncMQTTClient',
+    'AsyncQdrantClient',
+    # Auto batching utilities
+    'AutoBatcher',
+    'BatchedRedisGet',
+    'BatchedRedisSet',
 ]
 
 # 默认配置
