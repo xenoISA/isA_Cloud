@@ -504,6 +504,138 @@ with MQTTClient(user_id='my-service') as client:
 
 ---
 
+## Async Client Usage (High-Performance)
+
+For high-concurrency applications, use `AsyncMQTTClient` with `async/await`:
+
+```python
+import asyncio
+import time
+from isa_common import AsyncMQTTClient
+
+async def main():
+    async with AsyncMQTTClient(
+        host='localhost',
+        port=50053,
+        user_id='your-service',
+        organization_id='your-org'
+    ) as client:
+        # Health check
+        health = await client.health_check()
+
+        # Connect to MQTT broker
+        result = await client.mqtt_connect('my-device-001')
+        session_id = result['session_id']
+
+        # Check connection status
+        status = await client.get_connection_status(session_id)
+
+        # Publish message
+        await client.publish(session_id, 'sensors/temperature', b'22.5', qos=1)
+
+        # Publish batch
+        messages = [
+            {'topic': 'sensors/temp', 'payload': b'22.5', 'qos': 1},
+            {'topic': 'sensors/humidity', 'payload': b'65', 'qos': 1},
+            {'topic': 'sensors/pressure', 'payload': b'1013', 'qos': 1},
+        ]
+        result = await client.publish_batch(session_id, messages)
+
+        # Publish JSON
+        data = {'temperature': 25.5, 'humidity': 60, 'timestamp': time.time()}
+        await client.publish_json(session_id, 'sensors/json', data)
+
+        # Disconnect
+        await client.disconnect(session_id)
+
+asyncio.run(main())
+```
+
+### Device Management (Async)
+
+```python
+async def device_management(client):
+    device_id = 'temp-sensor-001'
+
+    # Register device
+    await client.register_device(
+        device_id=device_id,
+        device_name='Temperature Sensor',
+        device_type='sensor',
+        metadata={'location': 'living-room', 'version': '1.0'}
+    )
+
+    # List devices
+    result = await client.list_devices()
+    devices = result.get('devices', [])
+
+    # Get device info
+    info = await client.get_device_info(device_id)
+
+    # Update device status
+    await client.update_device_status(device_id, status=1, metadata={'updated': 'true'})
+
+    # Unregister device
+    await client.unregister_device(device_id)
+```
+
+### Topic Management (Async)
+
+```python
+async def topic_management(client):
+    # Validate topic
+    result = await client.validate_topic('sensors/temperature')
+    if result.get('valid'):
+        print("Topic is valid")
+
+    # List topics
+    result = await client.list_topics()
+    topics = result.get('topics', [])
+```
+
+### Retained Messages (Async)
+
+```python
+async def retained_messages(client):
+    # Set retained message
+    await client.set_retained_message('devices/status', b'online', qos=1)
+
+    # Get retained message
+    result = await client.get_retained_message('devices/status')
+    if result.get('found'):
+        payload = result.get('payload')
+
+    # Delete retained message
+    await client.delete_retained_message('devices/status')
+```
+
+### Concurrent Publish (Async)
+
+```python
+async def concurrent_publish(client, session_id):
+    # Publish 10 messages concurrently
+    messages = [
+        {'topic': f'sensors/concurrent/{i}', 'payload': f'Message {i}'.encode(), 'qos': 1}
+        for i in range(10)
+    ]
+
+    results = await client.publish_many_concurrent(session_id, messages)
+    success_count = sum(1 for r in results if r and r.get('success'))
+    print(f"Published {success_count}/{len(messages)} messages")
+```
+
+### Statistics (Async)
+
+```python
+async def get_stats(client):
+    stats = await client.get_statistics()
+    print(f"Total devices: {stats.get('total_devices', 0)}")
+    print(f"Online devices: {stats.get('online_devices', 0)}")
+    print(f"Total topics: {stats.get('total_topics', 0)}")
+```
+
+---
+
 ## Complete Feature List
 
 | **Connection Management**: connect, disconnect, get_connection_status (3 operations)
@@ -526,7 +658,8 @@ with MQTTClient(user_id='my-service') as client:
 
 ## Test Results
 
-**11/11 tests passing (100% success rate)**
+**Sync Client: 11/11 tests passing (100% success rate)**
+**Async Client: 19/19 tests passing (100% success rate)**
 
 Comprehensive functional tests cover:
 - Connection lifecycle (connect, status, disconnect)

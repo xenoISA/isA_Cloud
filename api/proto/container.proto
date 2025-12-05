@@ -1,0 +1,298 @@
+syntax = "proto3";
+
+package container;
+
+option go_package = "github.com/isa-cloud/isa_cloud/api/proto/container";
+
+// ContainerService provides VM-based container management using Firecracker + Ignite
+// This service creates isolated microVMs for each user, providing true multi-tenant isolation
+service ContainerService {
+  // VM Lifecycle Management
+  rpc CreateVM(CreateVMRequest) returns (VMResponse);
+  rpc StartVM(StartVMRequest) returns (VMResponse);
+  rpc StopVM(StopVMRequest) returns (VMResponse);
+  rpc DeleteVM(DeleteVMRequest) returns (VMResponse);
+  rpc GetVMStatus(GetVMStatusRequest) returns (VMStatusResponse);
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
+
+  // Command Execution in VM
+  rpc ExecuteCommand(ExecuteCommandRequest) returns (ExecuteCommandResponse);
+  rpc ExecuteCommandStream(ExecuteCommandRequest) returns (stream ExecuteCommandStreamResponse);
+
+  // File System Operations
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
+
+  // Resource Management
+  rpc GetResourceUsage(GetResourceUsageRequest) returns (ResourceUsageResponse);
+  rpc UpdateResourceLimits(UpdateResourceLimitsRequest) returns (VMResponse);
+
+  // VM Logs
+  rpc GetLogs(GetLogsRequest) returns (stream LogEntry);
+
+  // VM Snapshot (future)
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (SnapshotResponse);
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns (VMResponse);
+}
+
+// ============================================================================
+// Request Messages
+// ============================================================================
+
+message CreateVMRequest {
+  string user_id = 1;                  // User identifier
+  string vm_name = 2;                  // VM name (optional, defaults to user_id-env)
+  string image = 3;                    // Docker/OCI image (e.g., "ubuntu:22.04")
+  ResourceLimits limits = 4;           // CPU, memory, storage limits
+  map<string, string> env_vars = 5;    // Environment variables
+  repeated string ports = 6;           // Exposed ports (e.g., "8080:8080")
+  repeated string ssh_keys = 7;        // SSH public keys for access
+  map<string, string> labels = 8;      // Custom labels
+}
+
+message StartVMRequest {
+  string vm_id = 1;                    // VM identifier
+}
+
+message StopVMRequest {
+  string vm_id = 1;                    // VM identifier
+  int32 timeout_seconds = 2;           // Grace period before force stop
+}
+
+message DeleteVMRequest {
+  string vm_id = 1;                    // VM identifier
+  bool force = 2;                      // Force delete even if running
+}
+
+message GetVMStatusRequest {
+  string vm_id = 1;                    // VM identifier
+}
+
+message ListVMsRequest {
+  string user_id = 1;                  // Filter by user (optional)
+  string status = 2;                   // Filter by status (optional)
+  int32 limit = 3;                     // Max results
+  int32 offset = 4;                    // Pagination offset
+}
+
+// ============================================================================
+// Response Messages
+// ============================================================================
+
+message VMResponse {
+  string vm_id = 1;                    // VM unique identifier
+  string user_id = 2;                  // Owner user ID
+  string vm_name = 3;                  // VM name
+  string status = 4;                   // created, running, stopped, error
+  string message = 5;                  // Status message
+  int64 created_at = 6;                // Unix timestamp
+  string ip_address = 7;               // VM IP address
+  repeated string ports = 8;           // Exposed ports
+}
+
+message VMStatusResponse {
+  string vm_id = 1;
+  string user_id = 2;
+  string vm_name = 3;
+  string status = 4;                   // running, stopped, created, error
+  string image = 5;                    // OCI image used
+  int64 created_at = 6;                // Unix timestamp
+  int64 started_at = 7;                // Unix timestamp
+  int64 uptime_seconds = 8;            // Uptime in seconds
+  ResourceUsage resource_usage = 9;    // Current resource usage
+  string ip_address = 10;              // VM IP address
+  map<string, string> labels = 11;     // Custom labels
+}
+
+message ListVMsResponse {
+  repeated VMInfo vms = 1;
+  int32 total = 2;
+}
+
+message VMInfo {
+  string vm_id = 1;
+  string user_id = 2;
+  string vm_name = 3;
+  string status = 4;
+  string image = 5;
+  int64 created_at = 6;
+  string ip_address = 7;
+}
+
+// ============================================================================
+// Command Execution
+// ============================================================================
+
+message ExecuteCommandRequest {
+  string vm_id = 1;                    // VM identifier
+  repeated string command = 2;         // Command and arguments (e.g., ["python", "script.py"])
+  string working_dir = 3;              // Working directory (default: /root)
+  map<string, string> env = 4;         // Additional environment variables
+  int32 timeout_seconds = 5;           // Execution timeout
+  bool tty = 6;                        // Allocate pseudo-TTY
+}
+
+message ExecuteCommandResponse {
+  int32 exit_code = 1;                 // Command exit code
+  string stdout = 2;                   // Standard output
+  string stderr = 3;                   // Standard error
+  int64 execution_time_ms = 4;         // Execution time in milliseconds
+}
+
+message ExecuteCommandStreamResponse {
+  string stream_type = 1;              // "stdout" or "stderr"
+  bytes data = 2;                      // Output data chunk
+}
+
+// ============================================================================
+// File System Operations
+// ============================================================================
+
+message ReadFileRequest {
+  string vm_id = 1;                    // VM identifier
+  string file_path = 2;                // Path to file in VM
+  int64 offset = 3;                    // Read from offset (optional)
+  int64 length = 4;                    // Read length (0 = all)
+}
+
+message ReadFileResponse {
+  bytes content = 1;                   // File content
+  int64 size = 2;                      // File size
+  int64 modified_time = 3;             // Last modified timestamp
+  int32 permissions = 4;               // Unix permissions
+}
+
+message WriteFileRequest {
+  string vm_id = 1;                    // VM identifier
+  string file_path = 2;                // Path to file in VM
+  bytes content = 3;                   // File content
+  int32 permissions = 4;               // Unix permissions (e.g., 0644)
+  bool create_parents = 5;             // Create parent directories
+}
+
+message WriteFileResponse {
+  bool success = 1;
+  string message = 2;
+  int64 bytes_written = 3;
+}
+
+message DeleteFileRequest {
+  string vm_id = 1;                    // VM identifier
+  string file_path = 2;                // Path to file/directory in VM
+  bool recursive = 3;                  // For directories
+}
+
+message DeleteFileResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListFilesRequest {
+  string vm_id = 1;                    // VM identifier
+  string directory_path = 2;           // Path to directory in VM
+  bool recursive = 3;                  // List recursively
+}
+
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+message FileInfo {
+  string name = 1;                     // File/directory name
+  string path = 2;                     // Full path
+  bool is_directory = 3;               // Is directory
+  int64 size = 4;                      // File size in bytes
+  int64 modified_time = 5;             // Last modified timestamp
+  int32 permissions = 6;               // Unix permissions
+}
+
+message CreateDirectoryRequest {
+  string vm_id = 1;                    // VM identifier
+  string directory_path = 2;           // Path to create
+  int32 permissions = 3;               // Unix permissions (e.g., 0755)
+  bool create_parents = 4;             // Create parent directories
+}
+
+message CreateDirectoryResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Resource Management
+// ============================================================================
+
+message ResourceLimits {
+  int64 cpu_count = 1;                 // Number of vCPUs (1-8)
+  int64 memory_mb = 2;                 // Memory in MB (512-16384)
+  int64 disk_size_gb = 3;              // Disk size in GB (5-100)
+}
+
+message ResourceUsage {
+  double cpu_percent = 1;              // CPU usage percentage (0-100)
+  int64 memory_used_mb = 2;            // Memory used in MB
+  int64 memory_total_mb = 3;           // Total memory in MB
+  int64 disk_used_gb = 4;              // Disk used in GB
+  int64 disk_total_gb = 5;             // Total disk in GB
+  double network_rx_mbps = 6;          // Network receive Mbps
+  double network_tx_mbps = 7;          // Network transmit Mbps
+}
+
+message GetResourceUsageRequest {
+  string vm_id = 1;                    // VM identifier
+}
+
+message ResourceUsageResponse {
+  string vm_id = 1;
+  ResourceUsage usage = 2;
+  int64 timestamp = 3;                 // Unix timestamp
+}
+
+message UpdateResourceLimitsRequest {
+  string vm_id = 1;                    // VM identifier
+  ResourceLimits limits = 2;           // New resource limits
+}
+
+// ============================================================================
+// Logging
+// ============================================================================
+
+message GetLogsRequest {
+  string vm_id = 1;                    // VM identifier
+  int64 since_timestamp = 2;           // Unix timestamp (optional)
+  int32 tail_lines = 3;                // Last N lines (0 = all)
+  bool follow = 4;                     // Stream logs
+}
+
+message LogEntry {
+  int64 timestamp = 1;                 // Unix timestamp
+  string level = 2;                    // info, warn, error, debug
+  string message = 3;                  // Log message
+  string source = 4;                   // Log source (kernel, ignite, vm)
+}
+
+// ============================================================================
+// Snapshot (Future Enhancement)
+// ============================================================================
+
+message CreateSnapshotRequest {
+  string vm_id = 1;                    // VM identifier
+  string snapshot_name = 2;            // Snapshot name
+  string description = 3;              // Snapshot description
+}
+
+message SnapshotResponse {
+  string snapshot_id = 1;              // Snapshot identifier
+  string vm_id = 2;                    // Source VM ID
+  string snapshot_name = 3;            // Snapshot name
+  int64 created_at = 4;                // Unix timestamp
+  int64 size_mb = 5;                   // Snapshot size in MB
+}
+
+message RestoreSnapshotRequest {
+  string vm_id = 1;                    // VM identifier
+  string snapshot_id = 2;              // Snapshot to restore
+}

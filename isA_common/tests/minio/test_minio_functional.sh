@@ -23,7 +23,9 @@ NC='\033[0m'
 HOST="${HOST:-localhost}"
 PORT="${PORT:-50051}"
 USER_ID="${USER_ID:-test-user}"  # DNS-compliant: no underscores
-TEST_BUCKET="${USER_ID}-test-bucket"
+# Note: Server adds user prefix automatically, so use simple bucket name
+# Example: 'test-bucket' becomes 'user-test-user-test-bucket' on server
+TEST_BUCKET="test-bucket"
 TEST_PREFIX="functional-test"
 
 # Counters

@@ -2,8 +2,35 @@
 # -*- coding: utf-8 -*-
 """
 NATS gRPC Client
+
+NATS JetStream Naming Best Practices:
+=====================================
+
+Streams (UPPERCASE_UNDERSCORE):
+    - Treat like database tables, long-lived infrastructure
+    - Examples: ORDERS, USER_EVENTS, PAYMENT_TRANSACTIONS
+
+Subjects (lowercase.dots):
+    - Hierarchical with dots as delimiters
+    - Enables wildcard subscriptions: orders.*, orders.>
+    - Examples: orders.created, orders.us.east.created
+    - Multi-tenant: tenant.{tenant_id}.orders.created
+
+Consumers (lowercase-hyphens):
+    - Describes consumer's purpose, often includes service name
+    - Examples: order-processor, payment-service-orders
+    - Ephemeral with instance ID: order-processor-pod-abc123
+
+KV Buckets (lowercase-hyphens):
+    - Short, descriptive names
+    - Examples: app-config, session-store, cache-data
+
+Object Store Buckets (lowercase-hyphens):
+    - Examples: file-uploads, media-assets, backups
 """
 
+import re
+import logging
 from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 from .base_client import BaseGRPCClient
 from .proto import nats_service_pb2, nats_service_pb2_grpc
@@ -11,6 +38,99 @@ from google.protobuf.duration_pb2 import Duration
 
 if TYPE_CHECKING:
     from .consul_client import ConsulRegistry
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Naming Convention Helpers
+# =============================================================================
+
+def validate_stream_name(name: str) -> bool:
+    """
+    Validate stream name follows UPPERCASE_UNDERSCORE convention.
+
+    Valid: ORDERS, USER_EVENTS, PAYMENT_TRANSACTIONS
+    Invalid: orders, user-events, UserEvents
+    """
+    pattern = r'^[A-Z][A-Z0-9_]*$'
+    return bool(re.match(pattern, name))
+
+
+def validate_subject(subject: str) -> bool:
+    """
+    Validate subject follows lowercase.dots convention.
+    Allows wildcards: * (single token) and > (multi-token)
+
+    Valid: orders.created, orders.us.east.*, telemetry.>
+    Invalid: Orders.Created, orders-created
+    """
+    # Allow lowercase, dots, wildcards, and {placeholder} for templates
+    pattern = r'^[a-z0-9_*>]+(\.[a-z0-9_*>]+)*$|^[a-z0-9_]+(\.[a-z0-9_]+)*(\.\{[a-z_]+\})?(\.[a-z0-9_*>]+)*$'
+    return bool(re.match(pattern, subject))
+
+
+def validate_consumer_name(name: str) -> bool:
+    """
+    Validate consumer name follows lowercase-hyphens convention.
+
+    Valid: order-processor, payment-service-orders
+    Invalid: OrderProcessor, order_processor
+    """
+    pattern = r'^[a-z][a-z0-9-]*$'
+    return bool(re.match(pattern, name))
+
+
+def validate_bucket_name(name: str) -> bool:
+    """
+    Validate KV/Object bucket name follows lowercase-hyphens convention.
+
+    Valid: app-config, session-store
+    Invalid: AppConfig, app_config
+    """
+    pattern = r'^[a-z][a-z0-9-]*$'
+    return bool(re.match(pattern, name))
+
+
+def to_stream_name(name: str) -> str:
+    """
+    Convert any string to valid stream name (UPPERCASE_UNDERSCORE).
+
+    Examples:
+        'orders' -> 'ORDERS'
+        'user-events' -> 'USER_EVENTS'
+        'PaymentTransactions' -> 'PAYMENT_TRANSACTIONS'
+    """
+    # Replace hyphens and spaces with underscores
+    name = re.sub(r'[-\s]+', '_', name)
+    # Insert underscore before uppercase letters (for camelCase)
+    name = re.sub(r'([a-z])([A-Z])', r'\1_\2', name)
+    return name.upper()
+
+
+def to_subject(parts: List[str]) -> str:
+    """
+    Build a subject from parts using lowercase.dots convention.
+
+    Examples:
+        ['orders', 'created'] -> 'orders.created'
+        ['telemetry', 'device', '{device_id}', 'metrics'] -> 'telemetry.device.{device_id}.metrics'
+    """
+    return '.'.join(p.lower() for p in parts)
+
+
+def to_consumer_name(service: str, purpose: str, instance_id: Optional[str] = None) -> str:
+    """
+    Build a consumer name using lowercase-hyphens convention.
+
+    Examples:
+        ('payment', 'orders') -> 'payment-orders'
+        ('order', 'processor', 'pod-abc123') -> 'order-processor-pod-abc123'
+    """
+    parts = [service.lower(), purpose.lower()]
+    if instance_id:
+        parts.append(instance_id.lower())
+    return '-'.join(parts)
 
 
 class NATSClient(BaseGRPCClient):
@@ -81,10 +201,36 @@ class NATSClient(BaseGRPCClient):
             return self.handle_error(e, "health check")
 
     def publish(self, subject: str, data: bytes, headers: Optional[Dict[str, str]] = None,
-                reply_to: str = '') -> Optional[Dict]:
-        """Publish message to subject"""
+                reply_to: str = '', validate_naming: bool = True) -> Optional[Dict]:
+        """
+        Publish message to subject (fire-and-forget, ephemeral).
+
+        Note: For persistent messaging, use publish_to_stream() with JetStream.
+
+        Subject Naming Best Practices:
+            - Use lowercase.dots hierarchy
+            - Enable wildcard subscriptions: orders.*, orders.>
+            - Multi-tenant: tenant.{tenant_id}.orders.created
+
+        Args:
+            subject: Subject to publish to (lowercase.dots)
+            data: Message payload
+            headers: Optional headers
+            reply_to: Optional reply-to subject
+            validate_naming: If True, warn about naming convention violations
+
+        Examples:
+            client.publish('orders.created', json.dumps(order).encode())
+            client.publish('telemetry.device.123.metrics', data)
+        """
         try:
             self._ensure_connected()
+
+            if validate_naming and not validate_subject(subject):
+                logger.warning(
+                    f"[NATS] Subject '{subject}' doesn't follow lowercase.dots convention"
+                )
+
             request = nats_service_pb2.PublishRequest(
                 user_id=self.user_id,
                 organization_id=self.organization_id,
@@ -312,10 +458,31 @@ class NATSClient(BaseGRPCClient):
         except Exception as e:
             return self.handle_error(e, "list streams") or []
 
-    def kv_put(self, bucket: str, key: str, value: bytes) -> Optional[Dict]:
-        """Put value in KV store"""
+    def kv_put(self, bucket: str, key: str, value: bytes, validate_naming: bool = True) -> Optional[Dict]:
+        """
+        Put value in KV store.
+
+        Bucket Naming Best Practices:
+            - Use lowercase-hyphens (e.g., app-config, session-store)
+
+        Args:
+            bucket: Bucket name (lowercase-hyphens)
+            key: Key name
+            value: Value as bytes
+            validate_naming: If True, warn about naming convention violations
+
+        Examples:
+            client.kv_put('app-config', 'database.url', b'postgres://...')
+            client.kv_put('session-store', 'user-123', session_data)
+        """
         try:
             self._ensure_connected()
+
+            if validate_naming and not validate_bucket_name(bucket):
+                logger.warning(
+                    f"[NATS] Bucket name '{bucket}' doesn't follow lowercase-hyphens convention"
+                )
+
             request = nats_service_pb2.KVPutRequest(
                 user_id=self.user_id,
                 organization_id=self.organization_id,
@@ -409,10 +576,45 @@ class NATSClient(BaseGRPCClient):
 
     # JetStream Stream Management
     def create_stream(self, name: str, subjects: List[str],
-                     max_msgs: int = -1, max_bytes: int = -1) -> Optional[Dict]:
-        """Create JetStream stream"""
+                     max_msgs: int = -1, max_bytes: int = -1,
+                     validate_naming: bool = True) -> Optional[Dict]:
+        """
+        Create JetStream stream.
+
+        Naming Best Practices:
+            - Stream names: UPPERCASE_UNDERSCORE (e.g., ORDERS, USER_EVENTS)
+            - Subjects: lowercase.dots (e.g., orders.created, orders.*)
+
+        Args:
+            name: Stream name (should be UPPERCASE_UNDERSCORE)
+            subjects: List of subjects to capture (lowercase.dots)
+            max_msgs: Maximum number of messages (-1 for unlimited)
+            max_bytes: Maximum bytes (-1 for unlimited)
+            validate_naming: If True, warn about naming convention violations
+
+        Examples:
+            # Good naming
+            client.create_stream('ORDERS', ['orders.created', 'orders.updated'])
+            client.create_stream('USER_EVENTS', ['users.*'])
+
+            # Multi-tenant
+            client.create_stream('TENANT_ORDERS', ['tenant.*.orders.>'])
+        """
         try:
             self._ensure_connected()
+
+            # Validate naming conventions
+            if validate_naming:
+                if not validate_stream_name(name):
+                    logger.warning(
+                        f"[NATS] Stream name '{name}' doesn't follow UPPERCASE_UNDERSCORE convention. "
+                        f"Suggested: '{to_stream_name(name)}'"
+                    )
+                for subject in subjects:
+                    if not validate_subject(subject):
+                        logger.warning(
+                            f"[NATS] Subject '{subject}' doesn't follow lowercase.dots convention"
+                        )
 
             config = nats_service_pb2.StreamConfig(
                 name=name,
@@ -497,10 +699,46 @@ class NATSClient(BaseGRPCClient):
             return self.handle_error(e, "publish to stream")
 
     def create_consumer(self, stream_name: str, consumer_name: str,
-                       filter_subject: str = '') -> Optional[Dict]:
-        """Create JetStream consumer"""
+                       filter_subject: str = '', validate_naming: bool = True) -> Optional[Dict]:
+        """
+        Create JetStream consumer (pull-based, durable).
+
+        Naming Best Practices:
+            - Consumer names: lowercase-hyphens (e.g., order-processor, payment-service-orders)
+            - Include service name for clarity
+            - For ephemeral, append instance ID: order-processor-pod-abc123
+
+        Args:
+            stream_name: Name of the stream to consume from
+            consumer_name: Consumer name (should be lowercase-hyphens)
+            filter_subject: Optional subject filter (lowercase.dots)
+            validate_naming: If True, warn about naming convention violations
+
+        Examples:
+            # Durable consumer for order processing
+            client.create_consumer('ORDERS', 'order-processor', 'orders.created')
+
+            # Consumer for payment service
+            client.create_consumer('ORDERS', 'payment-service-orders', 'orders.*')
+
+            # Ephemeral with instance ID
+            client.create_consumer('ORDERS', 'order-processor-pod-abc123')
+        """
         try:
             self._ensure_connected()
+
+            # Validate naming conventions
+            if validate_naming:
+                if not validate_consumer_name(consumer_name):
+                    suggested = consumer_name.lower().replace('_', '-')
+                    logger.warning(
+                        f"[NATS] Consumer name '{consumer_name}' doesn't follow lowercase-hyphens convention. "
+                        f"Suggested: '{suggested}'"
+                    )
+                if filter_subject and not validate_subject(filter_subject):
+                    logger.warning(
+                        f"[NATS] Filter subject '{filter_subject}' doesn't follow lowercase.dots convention"
+                    )
 
             config = nats_service_pb2.ConsumerConfig(
                 name=consumer_name,

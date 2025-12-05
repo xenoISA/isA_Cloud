@@ -1,4 +1,4 @@
-# =€ NATS Client - Event Streaming, Task Queues & Messaging Made Simple
+# =ï¿½ NATS Client - Event Streaming, Task Queues & Messaging Made Simple
 
 ## Installation
 
@@ -564,6 +564,164 @@ with NATSClient() as client:
 
 ---
 
+## Async Client Usage (High-Performance)
+
+For high-concurrency applications, use `AsyncNATSClient` with `async/await`:
+
+```python
+import asyncio
+import json
+import time
+from isa_common import AsyncNATSClient
+
+async def main():
+    async with AsyncNATSClient(
+        host='localhost',
+        port=50056,
+        user_id='your-service',
+        organization_id='your-org'
+    ) as client:
+        # Health check
+        health = await client.health_check()
+
+        # Basic publish
+        await client.publish('events.user.login', b'User logged in')
+
+        # Publish with headers
+        await client.publish(
+            'events.order.created',
+            b'Order data',
+            headers={'X-Priority': 'high', 'X-Source': 'api'}
+        )
+
+        # Batch publish
+        messages = [
+            {'subject': 'events.batch.1', 'data': b'message 1'},
+            {'subject': 'events.batch.2', 'data': b'message 2'},
+            {'subject': 'events.batch.3', 'data': b'message 3'},
+        ]
+        result = await client.publish_batch(messages)
+
+        # Request-reply (RPC)
+        response = await client.request('api.users.get', b'user_id=123', timeout_seconds=5)
+
+asyncio.run(main())
+```
+
+### JetStream Operations (Async)
+
+```python
+async def jetstream_example(client):
+    # Create stream
+    await client.create_stream(
+        'EVENTS',
+        ['events.>'],
+        max_msgs=100000
+    )
+
+    # List streams
+    streams = await client.list_streams()
+
+    # Publish to stream (persistent)
+    result = await client.publish_to_stream(
+        'EVENTS',
+        'events.user.signup',
+        json.dumps({'user_id': 123, 'timestamp': time.time()}).encode()
+    )
+    print(f"Sequence: {result.get('sequence')}")
+
+    # Create consumer
+    await client.create_consumer(
+        'EVENTS',
+        'event-processor',
+        filter_subject='events.user.*'
+    )
+
+    # Pull messages
+    messages = await client.pull_messages('EVENTS', 'event-processor', batch_size=10)
+    for msg in messages:
+        print(f"Processing: {msg['data'].decode()}")
+
+    # Delete stream
+    await client.delete_stream('EVENTS')
+```
+
+### Key-Value Store (Async)
+
+```python
+async def kv_example(client):
+    bucket = 'app-config'
+
+    # Put values
+    await client.kv_put(bucket, 'database.host', b'localhost')
+    await client.kv_put(bucket, 'database.port', b'5432')
+
+    # Get value
+    result = await client.kv_get(bucket, 'database.host')
+    if result and result.get('found'):
+        print(f"Value: {result['value'].decode()}")
+
+    # List keys
+    keys = await client.kv_keys(bucket)
+
+    # Delete key
+    await client.kv_delete(bucket, 'database.host')
+```
+
+### Object Store (Async)
+
+```python
+async def object_store_example(client):
+    bucket = 'documents'
+
+    # Put object
+    await client.object_put(bucket, 'reports/q4.pdf', pdf_bytes)
+
+    # Get object
+    result = await client.object_get(bucket, 'reports/q4.pdf')
+    if result and result.get('found'):
+        data = result['data']
+
+    # List objects
+    objects = await client.object_list(bucket)
+
+    # Delete object
+    await client.object_delete(bucket, 'reports/q4.pdf')
+```
+
+### Concurrent Operations
+
+```python
+async def concurrent_publish(client):
+    # Publish 10 messages concurrently using asyncio.gather
+    results = await asyncio.gather(*[
+        client.publish(f'events.concurrent.{i}', f'message {i}'.encode())
+        for i in range(10)
+    ])
+    return results
+
+async def bulk_publish(client):
+    # Use helper for concurrent publishing
+    messages = [
+        {'subject': f'events.bulk.{i}', 'data': f'msg {i}'.encode()}
+        for i in range(20)
+    ]
+    results = await client.publish_many_concurrent(messages)
+    return results
+```
+
+### Statistics
+
+```python
+async def get_stats(client):
+    stats = await client.get_statistics()
+    print(f"Total Streams: {stats.get('total_streams')}")
+    print(f"Total Consumers: {stats.get('total_consumers')}")
+    print(f"Total Messages: {stats.get('total_messages')}")
+```
+
+---
+
 ## Complete Feature List
 
  **Basic Pub/Sub**: publish, subscribe with callbacks, wildcards
@@ -604,7 +762,8 @@ with NATSClient() as client:
 
 ## Test Results
 
-**19/19 tests passing (100% success rate)**
+**Sync Client: 19/19 tests passing (100% success rate)**
+**Async Client: 15/15 tests passing (100% success rate)**
 
 Comprehensive functional tests cover:
 - Service health checks
@@ -668,7 +827,7 @@ Stream data processing with persistent JetStream storage.
 
 Instead of wrestling with raw NATS protocol, JetStream APIs, gRPC serialization, and connection management...
 
-**You write 3 lines and ship features.** =€
+**You write 3 lines and ship features.** =ï¿½
 
 The NATS client gives you:
 - **Production-ready** messaging out of the box (19/19 tests passing)

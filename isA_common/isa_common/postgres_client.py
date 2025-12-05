@@ -99,7 +99,7 @@ class PostgresClient(BaseGRPCClient):
             response = self.stub.Query(request)
 
             if response.metadata.success:
-                rows = [dict(row) for row in response.rows]
+                rows = [self._proto_struct_to_dict(row) for row in response.rows]
                 return rows
             else:
                 return None
@@ -135,7 +135,7 @@ class PostgresClient(BaseGRPCClient):
             response = self.stub.QueryRow(request)
 
             if response.metadata.success and response.found:
-                row = dict(response.row)
+                row = self._proto_struct_to_dict(response.row)
                 return row
             elif not response.found:
                 return None
@@ -265,7 +265,7 @@ class PostgresClient(BaseGRPCClient):
             response = self.stub.SelectFrom(request)
 
             if response.metadata.success:
-                rows = [dict(row) for row in response.rows]
+                rows = [self._proto_struct_to_dict(row) for row in response.rows]
                 return rows
             else:
                 return None

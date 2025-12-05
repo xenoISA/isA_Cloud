@@ -466,22 +466,143 @@ with RedisClient(user_id='my-service') as client:
 
 ---
 
+## Async Client Usage (High-Performance)
+
+For high-concurrency applications, use `AsyncRedisClient` with `async/await`:
+
+```python
+import asyncio
+from isa_common import AsyncRedisClient, BatchedRedisGet, BatchedRedisSet
+
+async def main():
+    async with AsyncRedisClient(
+        host='localhost',
+        port=50055,
+        user_id='your-service'
+    ) as client:
+        # Basic operations (same API as sync)
+        await client.set('key', 'value')
+        value = await client.get('key')
+
+        # TTL operations
+        await client.set_with_ttl('temp:key', 'expires', 300)
+        ttl = await client.ttl('temp:key')
+
+        # Batch operations (optimized single RPC)
+        await client.mset({'key1': 'val1', 'key2': 'val2', 'key3': 'val3'})
+        values = await client.mget(['key1', 'key2', 'key3'])
+
+        # Hash operations
+        await client.hset('user:123', 'name', 'Alice')
+        name = await client.hget('user:123', 'name')
+        all_fields = await client.hgetall('user:123')
+
+        # List operations
+        await client.lpush('queue', ['a', 'b'])
+        await client.rpush('queue', ['c', 'd'])
+        items = await client.lrange('queue', 0, -1)
+
+        # Set operations
+        await client.sadd('tags', ['python', 'redis', 'docker'])
+        members = await client.smembers('tags')
+
+        # Sorted set operations
+        await client.zadd('leaderboard', {'player1': 100, 'player2': 200})
+        top = await client.zrange('leaderboard', 0, -1)
+
+        # Distributed locks
+        lock_id = await client.acquire_lock('resource', ttl_seconds=10)
+        if lock_id:
+            try:
+                # Critical section
+                await client.renew_lock('resource', lock_id, ttl_seconds=10)
+            finally:
+                await client.release_lock('resource', lock_id)
+
+        # Pub/Sub
+        await client.publish('channel', 'message')
+
+        # Session management
+        session_id = await client.create_session({'user': 'john'}, ttl_seconds=3600)
+        await client.delete_session(session_id)
+
+asyncio.run(main())
+```
+
+### Concurrent Operations with asyncio.gather
+
+```python
+async def concurrent_example(client):
+    # Execute 5 GET operations concurrently
+    results = await asyncio.gather(
+        client.get('key1'),
+        client.get('key2'),
+        client.get('key3'),
+        client.get('key4'),
+        client.get('key5'),
+    )
+    return results
+```
+
+### get_many_concurrent Helper
+
+```python
+async def bulk_get(client):
+    # Optimized bulk GET
+    results = await client.get_many_concurrent(['key1', 'key2', 'key3'])
+    # Returns: {'key1': 'val1', 'key2': 'val2', 'key3': 'val3'}
+    return results
+```
+
+### Auto-Batching with BatchedRedisGet/BatchedRedisSet
+
+Automatically coalesce concurrent requests into single batch RPCs:
+
+```python
+async def auto_batching_example(client):
+    # Create batched getter (auto-coalesces within 10ms window)
+    batched_get = BatchedRedisGet(client, max_size=100, max_wait_ms=10)
+
+    # These concurrent gets are automatically batched into one MGET
+    results = await asyncio.gather(
+        batched_get.get('key1'),
+        batched_get.get('key2'),
+        batched_get.get('key3'),
+    )
+
+    # Create batched setter
+    batched_set = BatchedRedisSet(client, max_size=100, max_wait_ms=10)
+
+    # These concurrent sets are automatically batched into one MSET
+    await asyncio.gather(
+        batched_set.set('key1', 'val1'),
+        batched_set.set('key2', 'val2'),
+        batched_set.set('key3', 'val3'),
+    )
+```
+
+---
+
 ## Test Results
 
-**18/18 tests passing (100% success rate)**
+**Sync Client: 18/18 tests passing (100% success rate)**
+**Async Client: 18/18 tests passing (100% success rate)**
 
 Comprehensive functional tests cover:
 - String operations (SET, GET, APPEND, DELETE)
+- TTL and expiration
 - Counter operations (INCR, DECR)
-- Hash operations (HSET, HGET, HGETALL, etc.)
-- List operations (LPUSH, RPUSH, LPOP, RPOP, etc.)
-- Set operations (SADD, SMEMBERS, SUNION, SINTER, SDIFF)
-- Sorted set operations (ZADD, ZRANGE, ZRANK, etc.)
-- Distributed locks (acquire, release, renew)
+- Batch operations (MSET, MGET via ExecuteBatch)
+- Hash operations (HSET, HGET, HGETALL, HEXISTS, HDELETE)
+- List operations (LPUSH, RPUSH, LPOP, RPOP, LRANGE, LLEN)
+- Set operations (SADD, SMEMBERS, SISMEMBER, SCARD)
+- Sorted set operations (ZADD, ZCARD, ZSCORE, ZRANK, ZRANGE)
+- Distributed locks (acquire, renew, release)
 - Pub/Sub messaging
-- Batch operations (MSET, MGET)
-- Session management
-- Monitoring and statistics
+- Session management (create, delete)
+- Concurrent operations (asyncio.gather)
+- Auto-batching (BatchedRedisGet, BatchedRedisSet)
+- Statistics and monitoring
 
 All tests demonstrate production-ready reliability.
 

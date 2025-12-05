@@ -208,7 +208,7 @@ class Neo4jClient(BaseGRPCClient):
                 node = {
                     'id': int(response.node.id),
                     'labels': list(response.node.labels),
-                    'properties': dict(response.node.properties)
+                    'properties': self._proto_struct_to_dict(response.node.properties)
                 }
                 return node
             elif not response.found:
@@ -353,7 +353,7 @@ class Neo4jClient(BaseGRPCClient):
                     'start_node_id': int(response.relationship.start_node_id),
                     'end_node_id': int(response.relationship.end_node_id),
                     'type': response.relationship.type,
-                    'properties': dict(response.relationship.properties)
+                    'properties': self._proto_struct_to_dict(response.relationship.properties)
                 }
                 return rel
             elif not response.found:
