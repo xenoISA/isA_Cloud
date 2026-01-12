@@ -1,0 +1,173 @@
+# EMQX Cluster - Official Chart Values
+# Chart: emqx/emqx
+# Docs: https://github.com/emqx/emqx/tree/master/deploy/charts/emqx
+
+# Replica count
+replicaCount: 3
+
+# Image configuration
+image:
+  repository: emqx/emqx
+  tag: "5.8.0"
+  pullPolicy: IfNotPresent
+
+# Resources
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Persistence
+persistence:
+  enabled: true
+  storageClassName: infotrend-block
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# Service configuration
+service:
+  type: ClusterIP
+  # External access (LoadBalancer) - enable if external MQTT access needed
+  # type: LoadBalancer
+  # loadBalancerIP: ""
+  # annotations: {}
+
+  # Ports
+  mqtt: 1883
+  mqttssl: 8883
+  ws: 8083
+  wss: 8084
+  dashboard: 18083
+  api: 8081
+
+# EMQX configuration
+emqxConfig:
+  # Cluster configuration
+  EMQX_CLUSTER__DISCOVERY_STRATEGY: "dns"
+  EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"
+  EMQX_CLUSTER__DNS__NAME: "emqx-headless.isa-cloud-production.svc.cluster.local"
+
+  # Node configuration
+  EMQX_NODE__COOKIE: ""           # Set via --set emqxConfig.EMQX_NODE__COOKIE=xxx
+
+  # Authentication - configure based on your needs
+  # EMQX_AUTHENTICATION__1__MECHANISM: "password_based"
+  # EMQX_AUTHENTICATION__1__BACKEND: "built_in_database"
+
+  # Performance tuning
+  EMQX_LISTENERS__TCP__DEFAULT__MAX_CONNECTIONS: "1024000"
+  EMQX_LISTENERS__TCP__DEFAULT__MAX_CONN_RATE: "1000"
+
+  # Logging
+  EMQX_LOG__CONSOLE_HANDLER__LEVEL: "warning"
+  EMQX_LOG__FILE_HANDLERS__DEFAULT__LEVEL: "warning"
+
+  # Dashboard admin (set via secrets in production)
+  EMQX_DASHBOARD__DEFAULT_USERNAME: "admin"
+  EMQX_DASHBOARD__DEFAULT_PASSWORD: ""  # Set via --set
+
+# Pod anti-affinity
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: emqx
+        topologyKey: kubernetes.io/hostname
+
+# Topology spread
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: emqx
+
+# Security context
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true
+
+containerSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+
+# Probes
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+  # maxUnavailable: 1
+
+# Metrics (Prometheus)
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: isa-cloud-production
+    labels:
+      release: prometheus
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Network Policy
+networkPolicy:
+  enabled: true
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+
+# Ingress for dashboard (optional)
+ingress:
+  enabled: false
+  # className: nginx
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt
+  # hosts:
+  #   - host: emqx.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  # tls:
+  #   - secretName: emqx-tls
+  #     hosts:
+  #       - emqx.example.com
+
+# TLS configuration (enable in production)
+ssl:
+  enabled: false
+  # useExistingSecret: emqx-tls
+  # certFile: tls.crt
+  # keyFile: tls.key
+  # caFile: ca.crt
+
+# Extra volumes (for custom configs/certs)
+extraVolumes: []
+extraVolumeMounts: []
+
+# Extra environment variables
+extraEnvVars: []

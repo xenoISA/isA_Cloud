@@ -1,76 +1,124 @@
 #!/usr/bin/env python3
 """
-Async Qdrant gRPC Client
-High-performance async Qdrant vector database client using grpc.aio
+Async Qdrant Native Client
+High-performance async Qdrant vector database client using qdrant-client.
+
+This client connects directly to Qdrant using the official qdrant-client library,
+providing full support for all Qdrant operations including:
+- Collection management
+- Point CRUD operations
+- Vector similarity search
+- Payload filtering
+- Recommendation search
 
 Performance Benefits:
-- True async I/O for vector similarity searches
-- Concurrent embedding operations
-- Non-blocking batch upserts
-- High-throughput AI/ML workloads
+- True async I/O without GIL blocking
+- Direct Qdrant protocol (no gRPC gateway overhead)
+- Efficient batch operations
+- Native vector search optimization
 """
 
-import asyncio
+import os
 import logging
-from typing import List, Dict, Optional, Any, TYPE_CHECKING
-from google.protobuf.struct_pb2 import Struct
-from google.protobuf.json_format import MessageToDict
-from .async_base_client import AsyncBaseGRPCClient
-from .proto import qdrant_service_pb2, qdrant_service_pb2_grpc
+import asyncio
+from typing import List, Dict, Optional, Any, Union
 
-if TYPE_CHECKING:
-    from .consul_client import ConsulRegistry
+from qdrant_client import AsyncQdrantClient as QdrantAsyncClient
+from qdrant_client.models import (
+    Distance, VectorParams, PointStruct, PointIdsList,
+    Filter, FieldCondition, MatchValue, Range,
+    CollectionInfo, ScoredPoint, Record,
+    PayloadSchemaType, TextIndexParams, TokenizerType,
+    GeoBoundingBox, GeoPoint, GeoRadius,
+    RecommendQuery, RecommendInput
+)
 
 logger = logging.getLogger(__name__)
 
 
-class AsyncQdrantClient(AsyncBaseGRPCClient):
-    """Async Qdrant gRPC client for high-performance vector search."""
+class AsyncQdrantClient:
+    """
+    Async Qdrant client using native qdrant-client driver.
+
+    Provides direct connection to Qdrant with full feature support including
+    collection management, vector search, and recommendation.
+    """
 
     def __init__(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
         user_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+        https: bool = False,
         lazy_connect: bool = True,
-        enable_compression: bool = True,
-        enable_retry: bool = True,
-        consul_registry: Optional['ConsulRegistry'] = None,
-        service_name_override: Optional[str] = None
+        **kwargs  # Accept additional kwargs for compatibility
     ):
         """
-        Initialize async Qdrant client.
+        Initialize async Qdrant client with native driver.
 
         Args:
-            host: Service address (optional)
-            port: Service port (optional)
-            user_id: User ID
-            lazy_connect: Lazy connection (default: True)
-            enable_compression: Enable compression (default: True)
-            enable_retry: Enable retry (default: True)
-            consul_registry: ConsulRegistry instance for service discovery
-            service_name_override: Override service name for Consul lookup
+            host: Qdrant host (default: from QDRANT_HOST env or 'localhost')
+            port: Qdrant port (default: from QDRANT_PORT env or 6333)
+            user_id: User ID (optional)
+            api_key: Qdrant API key (default: from QDRANT_API_KEY env)
+            https: Use HTTPS connection (default: False)
+            lazy_connect: Delay connection until first use (default: True)
         """
-        super().__init__(
-            host=host,
-            port=port,
-            user_id=user_id,
-            lazy_connect=lazy_connect,
-            enable_compression=enable_compression,
-            enable_retry=enable_retry,
-            consul_registry=consul_registry,
-            service_name_override=service_name_override
-        )
+        self._host = host or os.getenv('QDRANT_HOST', 'localhost')
+        self._port = port or int(os.getenv('QDRANT_PORT', '6333'))
+        self._api_key = api_key or os.getenv('QDRANT_API_KEY')
+        self._https = https
 
-    def _create_stub(self):
-        """Create Qdrant service stub."""
-        return qdrant_service_pb2_grpc.QdrantServiceStub(self.channel)
+        self.user_id = user_id or 'default'
 
-    def service_name(self) -> str:
-        return "Qdrant"
+        self._client: Optional[QdrantAsyncClient] = None
 
-    def default_port(self) -> int:
-        return 50062
+        logger.info(f"AsyncQdrantClient initialized: {self._host}:{self._port}")
+
+    async def _ensure_connected(self):
+        """Ensure Qdrant connection is established."""
+        if self._client is None:
+            url = f"{'https' if self._https else 'http'}://{self._host}:{self._port}"
+            self._client = QdrantAsyncClient(
+                url=url,
+                api_key=self._api_key,
+                timeout=60
+            )
+            logger.info(f"Connected to Qdrant at {self._host}:{self._port}")
+
+    async def close(self):
+        """Close Qdrant connection."""
+        if self._client:
+            await self._client.close()
+            self._client = None
+        logger.info("Qdrant connection closed")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._ensure_connected()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - keeps connection alive for reuse."""
+        pass
+
+    async def shutdown(self):
+        """Explicitly shutdown the connection. Call at application exit."""
+        await self.close()
+
+    async def reconnect(self):
+        """Reconnect to Qdrant (for compatibility with sync_service).
+
+        With persistent connections, this just ensures the connection is ready.
+        """
+        await self._ensure_connected()
+        logger.debug("Qdrant connection verified/reconnected")
+
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle and log errors."""
+        logger.error(f"Qdrant {operation} failed: {error}")
+        return None
 
     # ============================================
     # Health Check
@@ -80,12 +128,13 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Health check."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.QdrantHealthCheckRequest()
-            response = await self.stub.HealthCheck(request)
+
+            # Check if Qdrant is reachable by getting collections
+            collections = await self._client.get_collections()
 
             return {
-                'healthy': response.healthy,
-                'version': response.version
+                'healthy': True,
+                'version': 'native-client'
             }
 
         except Exception as e:
@@ -112,27 +161,21 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
             await self._ensure_connected()
 
             distance_map = {
-                'Cosine': qdrant_service_pb2.DISTANCE_COSINE,
-                'Euclid': qdrant_service_pb2.DISTANCE_EUCLID,
-                'Dot': qdrant_service_pb2.DISTANCE_DOT,
-                'Manhattan': qdrant_service_pb2.DISTANCE_MANHATTAN
+                'Cosine': Distance.COSINE,
+                'Euclid': Distance.EUCLID,
+                'Dot': Distance.DOT,
+                'Manhattan': Distance.MANHATTAN
             }
 
-            vector_params = qdrant_service_pb2.VectorParams(
-                size=vector_size,
-                distance=distance_map.get(distance, qdrant_service_pb2.DISTANCE_COSINE)
+            await self._client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=vector_size,
+                    distance=distance_map.get(distance, Distance.COSINE)
+                )
             )
 
-            request = qdrant_service_pb2.CreateCollectionRequest(
-                collection_name=collection_name
-            )
-            request.vector_params.CopyFrom(vector_params)
-
-            response = await self.stub.CreateCollection(request)
-
-            if response.metadata.success:
-                return True
-            return None
+            return True
 
         except Exception as e:
             return self.handle_error(e, "create collection")
@@ -141,12 +184,8 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """List all collections."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.ListCollectionsRequest()
-            response = await self.stub.ListCollections(request)
-
-            if response.metadata.success:
-                return [c.name for c in response.collections]
-            return []
+            result = await self._client.get_collections()
+            return [c.name for c in result.collections]
 
         except Exception as e:
             self.handle_error(e, "list collections")
@@ -156,15 +195,8 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Delete collection."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.DeleteCollectionRequest(
-                collection_name=collection_name
-            )
-
-            response = await self.stub.DeleteCollection(request)
-
-            if response.metadata.success:
-                return True
-            return None
+            await self._client.delete_collection(collection_name)
+            return True
 
         except Exception as e:
             return self.handle_error(e, "delete collection")
@@ -173,19 +205,13 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Get collection information."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.GetCollectionInfoRequest(
-                collection_name=collection_name
-            )
+            info = await self._client.get_collection(collection_name)
 
-            response = await self.stub.GetCollectionInfo(request)
-
-            if response.metadata.success:
-                return {
-                    'status': response.info.status,
-                    'points_count': response.info.points_count,
-                    'segments_count': response.info.segments_count
-                }
-            return None
+            return {
+                'status': str(info.status),
+                'points_count': info.points_count,
+                'segments_count': info.segments_count
+            }
 
         except Exception as e:
             return self.handle_error(e, "get collection info")
@@ -209,35 +235,21 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_points = []
+            point_structs = []
             for p in points:
-                point_id = p.get('id')
-                if isinstance(point_id, int):
-                    point = qdrant_service_pb2.Point(num_id=point_id)
-                else:
-                    point = qdrant_service_pb2.Point(str_id=str(point_id))
+                point_structs.append(PointStruct(
+                    id=p.get('id'),
+                    vector=p.get('vector', []),
+                    payload=p.get('payload', {})
+                ))
 
-                vector = qdrant_service_pb2.Vector(data=p.get('vector', []))
-                point.vector.CopyFrom(vector)
-
-                if 'payload' in p and p['payload']:
-                    payload_struct = Struct()
-                    payload_struct.update(p['payload'])
-                    point.payload.CopyFrom(payload_struct)
-
-                proto_points.append(point)
-
-            request = qdrant_service_pb2.UpsertPointsRequest(
+            result = await self._client.upsert(
                 collection_name=collection_name,
-                points=proto_points,
+                points=point_structs,
                 wait=True
             )
 
-            response = await self.stub.UpsertPoints(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "upsert points")
@@ -248,26 +260,13 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_ids = []
-            for point_id in ids:
-                if isinstance(point_id, int):
-                    proto_ids.append(qdrant_service_pb2.PointId(num=point_id))
-                else:
-                    proto_ids.append(qdrant_service_pb2.PointId(str=str(point_id)))
-
-            point_id_list = qdrant_service_pb2.PointIdList(ids=proto_ids)
-
-            request = qdrant_service_pb2.DeletePointsRequest(
+            result = await self._client.delete(
                 collection_name=collection_name,
-                ids=point_id_list,
+                points_selector=PointIdsList(points=ids),
                 wait=True
             )
 
-            response = await self.stub.DeletePoints(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "delete points")
@@ -276,16 +275,11 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Count points in collection."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.CountRequest(
+            result = await self._client.count(
                 collection_name=collection_name,
                 exact=True
             )
-
-            response = await self.stub.Count(request)
-
-            if response.metadata.success:
-                return response.count
-            return None
+            return result.count
 
         except Exception as e:
             return self.handle_error(e, "count points")
@@ -315,24 +309,17 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_vector = qdrant_service_pb2.Vector(data=vector)
-
-            request = qdrant_service_pb2.SearchRequest(
+            # New qdrant-client API uses query_points instead of search
+            response = await self._client.query_points(
                 collection_name=collection_name,
-                vector=proto_vector,
+                query=vector,
                 limit=limit,
+                score_threshold=score_threshold,
                 with_payload=with_payload,
                 with_vectors=with_vectors
             )
 
-            if score_threshold is not None:
-                request.score_threshold = score_threshold
-
-            response = await self.stub.Search(request)
-
-            if response.metadata.success:
-                return self._parse_scored_points(response.result, with_payload, with_vectors)
-            return None
+            return self._parse_query_response(response, with_payload, with_vectors)
 
         except Exception as e:
             return self.handle_error(e, "search")
@@ -369,36 +356,23 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_vector = qdrant_service_pb2.Vector(data=vector)
+            qdrant_filter = None
+            if filter_conditions:
+                qdrant_filter = self._build_filter(filter_conditions)
 
-            request = qdrant_service_pb2.SearchRequest(
+            # New qdrant-client API uses query_points instead of search
+            response = await self._client.query_points(
                 collection_name=collection_name,
-                vector=proto_vector,
+                query=vector,
+                query_filter=qdrant_filter,
                 limit=limit,
+                score_threshold=score_threshold,
+                offset=offset or 0,
                 with_payload=with_payload,
                 with_vectors=with_vectors
             )
 
-            if filter_conditions:
-                proto_filter = self._build_filter(filter_conditions)
-                request.filter.CopyFrom(proto_filter)
-
-            if score_threshold is not None:
-                request.score_threshold = score_threshold
-
-            if offset is not None:
-                request.offset = offset
-
-            if params:
-                params_struct = Struct()
-                params_struct.update(params)
-                request.params.CopyFrom(params_struct)
-
-            response = await self.stub.Search(request)
-
-            if response.metadata.success:
-                return self._parse_scored_points(response.result, with_payload, with_vectors)
-            return None
+            return self._parse_query_response(response, with_payload, with_vectors)
 
         except Exception as e:
             return self.handle_error(e, "search with filter")
@@ -421,52 +395,29 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            request = qdrant_service_pb2.ScrollRequest(
+            qdrant_filter = None
+            if filter_conditions:
+                qdrant_filter = self._build_filter(filter_conditions)
+
+            records, next_offset = await self._client.scroll(
                 collection_name=collection_name,
+                scroll_filter=qdrant_filter,
                 limit=limit,
+                offset=offset_id,
                 with_payload=with_payload,
                 with_vectors=with_vectors
             )
 
-            if filter_conditions:
-                proto_filter = self._build_filter(filter_conditions)
-                request.filter.CopyFrom(proto_filter)
+            points = []
+            for record in records:
+                point_data = {
+                    'id': record.id,
+                    'payload': record.payload if with_payload else None,
+                    'vector': record.vector if with_vectors else None
+                }
+                points.append(point_data)
 
-            if offset_id is not None:
-                if isinstance(offset_id, int):
-                    request.offset.num = offset_id
-                else:
-                    request.offset.str = str(offset_id)
-
-            response = await self.stub.Scroll(request)
-
-            if response.metadata.success:
-                points = []
-                for point in response.points:
-                    point_data = {'id': None, 'payload': None, 'vector': None}
-
-                    if point.HasField('num_id'):
-                        point_data['id'] = point.num_id
-                    elif point.HasField('str_id'):
-                        point_data['id'] = point.str_id
-
-                    if with_payload and point.payload:
-                        point_data['payload'] = MessageToDict(point.payload)
-
-                    if with_vectors and point.HasField('vector'):
-                        point_data['vector'] = list(point.vector.data)
-
-                    points.append(point_data)
-
-                next_offset = None
-                if response.HasField('next_page_offset'):
-                    if response.next_page_offset.HasField('num'):
-                        next_offset = response.next_page_offset.num
-                    elif response.next_page_offset.HasField('str'):
-                        next_offset = response.next_page_offset.str
-
-                return {'points': points, 'next_offset': next_offset}
-            return None
+            return {'points': points, 'next_offset': next_offset}
 
         except Exception as e:
             return self.handle_error(e, "scroll")
@@ -499,39 +450,28 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            positive_ids = []
-            for pid in positive:
-                if isinstance(pid, int):
-                    positive_ids.append(qdrant_service_pb2.PointId(num=pid))
-                else:
-                    positive_ids.append(qdrant_service_pb2.PointId(str=str(pid)))
+            qdrant_filter = None
+            if filter_conditions:
+                qdrant_filter = self._build_filter(filter_conditions)
 
-            negative_ids = []
-            if negative:
-                for nid in negative:
-                    if isinstance(nid, int):
-                        negative_ids.append(qdrant_service_pb2.PointId(num=nid))
-                    else:
-                        negative_ids.append(qdrant_service_pb2.PointId(str=str(nid)))
+            # New qdrant-client API uses query_points with RecommendQuery
+            recommend_query = RecommendQuery(
+                recommend=RecommendInput(
+                    positive=positive,
+                    negative=negative or []
+                )
+            )
 
-            request = qdrant_service_pb2.RecommendRequest(
+            response = await self._client.query_points(
                 collection_name=collection_name,
-                positive=positive_ids,
-                negative=negative_ids,
+                query=recommend_query,
+                query_filter=qdrant_filter,
                 limit=limit,
                 with_payload=with_payload,
                 with_vectors=with_vectors
             )
 
-            if filter_conditions:
-                proto_filter = self._build_filter(filter_conditions)
-                request.filter.CopyFrom(proto_filter)
-
-            response = await self.stub.Recommend(request)
-
-            if response.metadata.success:
-                return self._parse_scored_points(response.result, with_payload, with_vectors)
-            return None
+            return self._parse_query_response(response, with_payload, with_vectors)
 
         except Exception as e:
             return self.handle_error(e, "recommend")
@@ -546,30 +486,14 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_ids = []
-            for point_id in ids:
-                if isinstance(point_id, int):
-                    proto_ids.append(qdrant_service_pb2.PointId(num=point_id))
-                else:
-                    proto_ids.append(qdrant_service_pb2.PointId(str=str(point_id)))
-
-            point_id_list = qdrant_service_pb2.PointIdList(ids=proto_ids)
-
-            payload_struct = Struct()
-            payload_struct.update(payload)
-
-            request = qdrant_service_pb2.UpdatePayloadRequest(
+            result = await self._client.set_payload(
                 collection_name=collection_name,
-                ids=point_id_list,
-                payload=payload_struct,
+                payload=payload,
+                points=ids,
                 wait=True
             )
 
-            response = await self.stub.UpdatePayload(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "update payload")
@@ -580,27 +504,14 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_ids = []
-            for point_id in ids:
-                if isinstance(point_id, int):
-                    proto_ids.append(qdrant_service_pb2.PointId(num=point_id))
-                else:
-                    proto_ids.append(qdrant_service_pb2.PointId(str=str(point_id)))
-
-            point_id_list = qdrant_service_pb2.PointIdList(ids=proto_ids)
-
-            request = qdrant_service_pb2.DeletePayloadRequest(
+            result = await self._client.delete_payload(
                 collection_name=collection_name,
-                ids=point_id_list,
                 keys=keys,
+                points=ids,
                 wait=True
             )
 
-            response = await self.stub.DeletePayload(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "delete payload fields")
@@ -611,26 +522,13 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_ids = []
-            for point_id in ids:
-                if isinstance(point_id, int):
-                    proto_ids.append(qdrant_service_pb2.PointId(num=point_id))
-                else:
-                    proto_ids.append(qdrant_service_pb2.PointId(str=str(point_id)))
-
-            point_id_list = qdrant_service_pb2.PointIdList(ids=proto_ids)
-
-            request = qdrant_service_pb2.ClearPayloadRequest(
+            result = await self._client.clear_payload(
                 collection_name=collection_name,
-                ids=point_id_list,
+                points_selector=PointIdsList(points=ids),
                 wait=True
             )
 
-            response = await self.stub.ClearPayload(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "clear payload")
@@ -644,18 +542,26 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Create index on payload field."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.CreateFieldIndexRequest(
+
+            # Map field type to PayloadSchemaType
+            type_map = {
+                'keyword': PayloadSchemaType.KEYWORD,
+                'integer': PayloadSchemaType.INTEGER,
+                'float': PayloadSchemaType.FLOAT,
+                'geo': PayloadSchemaType.GEO,
+                'text': PayloadSchemaType.TEXT,
+            }
+
+            schema_type = type_map.get(field_type.lower(), PayloadSchemaType.KEYWORD)
+
+            result = await self._client.create_payload_index(
                 collection_name=collection_name,
                 field_name=field_name,
-                field_type=field_type,
+                field_schema=schema_type,
                 wait=True
             )
 
-            response = await self.stub.CreateFieldIndex(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "create field index")
@@ -665,17 +571,14 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Delete payload field index."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.DeleteFieldIndexRequest(
+
+            result = await self._client.delete_payload_index(
                 collection_name=collection_name,
                 field_name=field_name,
                 wait=True
             )
 
-            response = await self.stub.DeleteFieldIndex(request)
-
-            if response.metadata.success:
-                return response.operation_id
-            return None
+            return str(result.operation_id) if hasattr(result, 'operation_id') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "delete field index")
@@ -688,15 +591,10 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Create collection snapshot."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.CreateSnapshotRequest(
-                collection_name=collection_name
-            )
 
-            response = await self.stub.CreateSnapshot(request)
+            result = await self._client.create_snapshot(collection_name)
 
-            if response.metadata.success:
-                return response.snapshot_name
-            return None
+            return result.name if hasattr(result, 'name') else 'success'
 
         except Exception as e:
             return self.handle_error(e, "create snapshot")
@@ -705,22 +603,17 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """List all snapshots for collection."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.ListSnapshotsRequest(
-                collection_name=collection_name
-            )
 
-            response = await self.stub.ListSnapshots(request)
+            snapshots = await self._client.list_snapshots(collection_name)
 
-            if response.metadata.success:
-                snapshots = []
-                for snap in response.snapshots:
-                    snapshots.append({
-                        'name': snap.name,
-                        'created_at': snap.created_at.ToDatetime(),
-                        'size_bytes': snap.size_bytes
-                    })
-                return snapshots
-            return None
+            result = []
+            for snap in snapshots:
+                result.append({
+                    'name': snap.name,
+                    'created_at': snap.creation_time,
+                    'size_bytes': snap.size
+                })
+            return result
 
         except Exception as e:
             return self.handle_error(e, "list snapshots")
@@ -730,16 +623,12 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
         """Delete snapshot."""
         try:
             await self._ensure_connected()
-            request = qdrant_service_pb2.DeleteSnapshotRequest(
+
+            await self._client.delete_snapshot(
                 collection_name=collection_name,
                 snapshot_name=snapshot_name
             )
-
-            response = await self.stub.DeleteSnapshot(request)
-
-            if response.metadata.success:
-                return True
-            return None
+            return True
 
         except Exception as e:
             return self.handle_error(e, "delete snapshot")
@@ -778,91 +667,137 @@ class AsyncQdrantClient(AsyncBaseGRPCClient):
     # Helper Methods
     # ============================================
 
-    def _build_filter(self, filter_conditions: Dict) -> "qdrant_service_pb2.Filter":
-        """Build protobuf Filter from dictionary."""
-        proto_filter = qdrant_service_pb2.Filter()
+    def _build_filter(self, filter_conditions: Dict) -> Filter:
+        """Build Qdrant Filter from dictionary."""
+        must = []
+        should = []
+        must_not = []
 
         if 'must' in filter_conditions:
             for cond in filter_conditions['must']:
-                proto_filter.must.append(self._build_filter_condition(cond))
+                must.append(self._build_filter_condition(cond))
 
         if 'should' in filter_conditions:
             for cond in filter_conditions['should']:
-                proto_filter.should.append(self._build_filter_condition(cond))
+                should.append(self._build_filter_condition(cond))
 
         if 'must_not' in filter_conditions:
             for cond in filter_conditions['must_not']:
-                proto_filter.must_not.append(self._build_filter_condition(cond))
+                must_not.append(self._build_filter_condition(cond))
 
-        return proto_filter
+        return Filter(
+            must=must if must else None,
+            should=should if should else None,
+            must_not=must_not if must_not else None
+        )
 
-    def _build_filter_condition(self, condition: Dict) -> "qdrant_service_pb2.FilterCondition":
-        """Build protobuf FilterCondition from dictionary."""
-        filter_cond = qdrant_service_pb2.FilterCondition(field=condition['field'])
+    def _build_filter_condition(self, condition: Dict) -> FieldCondition:
+        """Build FieldCondition from dictionary."""
+        field = condition['field']
 
         if 'match' in condition:
-            match_cond = qdrant_service_pb2.MatchCondition()
             match_val = condition['match']
             if 'keyword' in match_val:
-                match_cond.keyword = match_val['keyword']
+                return FieldCondition(key=field, match=MatchValue(value=match_val['keyword']))
             elif 'integer' in match_val:
-                match_cond.integer = match_val['integer']
+                return FieldCondition(key=field, match=MatchValue(value=match_val['integer']))
             elif 'boolean' in match_val:
-                match_cond.boolean = match_val['boolean']
-            filter_cond.match.CopyFrom(match_cond)
+                return FieldCondition(key=field, match=MatchValue(value=match_val['boolean']))
 
         elif 'range' in condition:
-            range_cond = qdrant_service_pb2.RangeCondition()
             range_val = condition['range']
-            if 'gt' in range_val:
-                range_cond.gt = range_val['gt']
-            if 'gte' in range_val:
-                range_cond.gte = range_val['gte']
-            if 'lt' in range_val:
-                range_cond.lt = range_val['lt']
-            if 'lte' in range_val:
-                range_cond.lte = range_val['lte']
-            filter_cond.range.CopyFrom(range_cond)
+            return FieldCondition(
+                key=field,
+                range=Range(
+                    gt=range_val.get('gt'),
+                    gte=range_val.get('gte'),
+                    lt=range_val.get('lt'),
+                    lte=range_val.get('lte')
+                )
+            )
 
         elif 'geo_bounding_box' in condition:
-            geo_box = qdrant_service_pb2.GeoBoundingBoxCondition(
-                top_left=qdrant_service_pb2.GeoPoint(**condition['geo_bounding_box']['top_left']),
-                bottom_right=qdrant_service_pb2.GeoPoint(**condition['geo_bounding_box']['bottom_right'])
+            geo_box = condition['geo_bounding_box']
+            return FieldCondition(
+                key=field,
+                geo_bounding_box=GeoBoundingBox(
+                    top_left=GeoPoint(**geo_box['top_left']),
+                    bottom_right=GeoPoint(**geo_box['bottom_right'])
+                )
             )
-            filter_cond.geo_bounding_box.CopyFrom(geo_box)
 
         elif 'geo_radius' in condition:
-            geo_rad = qdrant_service_pb2.GeoRadiusCondition(
-                center=qdrant_service_pb2.GeoPoint(**condition['geo_radius']['center']),
-                radius_meters=condition['geo_radius']['radius_meters']
+            geo_rad = condition['geo_radius']
+            return FieldCondition(
+                key=field,
+                geo_radius=GeoRadius(
+                    center=GeoPoint(**geo_rad['center']),
+                    radius=geo_rad['radius_meters']
+                )
             )
-            filter_cond.geo_radius.CopyFrom(geo_rad)
 
-        return filter_cond
+        # Default to match any value
+        return FieldCondition(key=field, match=MatchValue(value=True))
 
-    def _parse_scored_points(self, scored_points, with_payload: bool,
-                            with_vectors: bool) -> List[Dict]:
-        """Parse scored points from protobuf to dictionary."""
+    def _parse_query_response(self, response, with_payload: bool, with_vectors: bool) -> List[Dict]:
+        """Parse query response to dictionary (new qdrant-client API)."""
         results = []
-        for scored_point in scored_points:
+        for point in response.points:
             result = {
-                'score': scored_point.score,
-                'id': None,
-                'payload': None,
-                'vector': None
+                'score': point.score if hasattr(point, 'score') else None,
+                'id': point.id,
+                'payload': point.payload if with_payload and hasattr(point, 'payload') else None,
+                'vector': point.vector if with_vectors and hasattr(point, 'vector') else None
             }
-
-            if scored_point.point.HasField('num_id'):
-                result['id'] = scored_point.point.num_id
-            elif scored_point.point.HasField('str_id'):
-                result['id'] = scored_point.point.str_id
-
-            if with_payload and scored_point.point.payload:
-                result['payload'] = MessageToDict(scored_point.point.payload)
-
-            if with_vectors and scored_point.point.HasField('vector'):
-                result['vector'] = list(scored_point.point.vector.data)
-
             results.append(result)
-
         return results
+
+    def _parse_scored_points(self, scored_points: List[ScoredPoint],
+                            with_payload: bool, with_vectors: bool) -> List[Dict]:
+        """Parse scored points to dictionary."""
+        results = []
+        for sp in scored_points:
+            result = {
+                'score': sp.score,
+                'id': sp.id,
+                'payload': sp.payload if with_payload else None,
+                'vector': sp.vector if with_vectors else None
+            }
+            results.append(result)
+        return results
+
+
+# Example usage
+if __name__ == '__main__':
+    async def main():
+        async with AsyncQdrantClient(
+            host='localhost',
+            port=6333,
+            user_id='test_user'
+        ) as client:
+            # Health check
+            health = await client.health_check()
+            print(f"Health: {health}")
+
+            # List collections
+            collections = await client.list_collections()
+            print(f"Collections: {collections}")
+
+            # Create collection
+            await client.create_collection('test_collection', vector_size=128)
+
+            # Upsert points
+            points = [
+                {'id': 1, 'vector': [0.1] * 128, 'payload': {'name': 'test1'}},
+                {'id': 2, 'vector': [0.2] * 128, 'payload': {'name': 'test2'}},
+            ]
+            await client.upsert_points('test_collection', points)
+
+            # Search
+            results = await client.search('test_collection', [0.1] * 128, limit=5)
+            print(f"Search results: {results}")
+
+            # Cleanup
+            await client.delete_collection('test_collection')
+
+    asyncio.run(main())

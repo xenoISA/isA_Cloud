@@ -1,97 +1,165 @@
 #!/usr/bin/env python3
 """
-Async PostgreSQL gRPC Client
-High-performance async PostgreSQL client using grpc.aio
+Async PostgreSQL Native Client
+High-performance async PostgreSQL client using asyncpg.
+
+This client connects directly to PostgreSQL using the official asyncpg library,
+providing full support for all PostgreSQL operations including:
+- Query execution (SELECT, INSERT, UPDATE, DELETE)
+- Prepared statements and parameterized queries
+- Connection pooling
+- Transaction management
+- Batch operations
 
 Performance Benefits:
 - True async I/O without GIL blocking
-- Concurrent query execution
-- Memory-efficient connection pooling
+- Connection pooling via asyncpg
+- Binary protocol for faster data transfer
+- Prepared statements for query optimization
+- Direct protocol (no gRPC gateway overhead)
 """
 
-from typing import List, Dict, Optional, Any, TYPE_CHECKING
-from google.protobuf.struct_pb2 import Struct, Value
-from .async_base_client import AsyncBaseGRPCClient
-from .proto import postgres_service_pb2, postgres_service_pb2_grpc
+import os
+import logging
+import asyncio
+from typing import List, Dict, Optional, Any
 
-if TYPE_CHECKING:
-    from .consul_client import ConsulRegistry
+import asyncpg
+from asyncpg import Pool, Connection
+
+logger = logging.getLogger(__name__)
 
 
-class AsyncPostgresClient(AsyncBaseGRPCClient):
-    """Async PostgreSQL gRPC client for high-performance concurrent operations."""
+class AsyncPostgresClient:
+    """
+    Async PostgreSQL client using native asyncpg driver.
+
+    Provides direct connection to PostgreSQL with full feature support including
+    all query operations, transactions, and high-performance connection pooling.
+    """
 
     def __init__(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
         user_id: Optional[str] = None,
+        database: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         lazy_connect: bool = True,
-        enable_compression: bool = True,
-        enable_retry: bool = True,
-        consul_registry: Optional['ConsulRegistry'] = None,
-        service_name_override: Optional[str] = None
+        min_pool_size: int = 5,
+        max_pool_size: int = 20,
+        **kwargs  # Accept additional kwargs for compatibility
     ):
         """
-        Initialize async PostgreSQL client.
+        Initialize async PostgreSQL client with native driver.
 
         Args:
-            host: Service address (optional, will use Consul discovery if not provided)
-            port: Service port (optional, will use Consul discovery if not provided)
-            user_id: User ID
-            lazy_connect: Lazy connection (default: True)
-            enable_compression: Enable compression (default: True)
-            enable_retry: Enable retry (default: True)
-            consul_registry: ConsulRegistry instance for service discovery (optional)
-            service_name_override: Override service name for Consul lookup (optional)
+            host: PostgreSQL host (default: from POSTGRES_HOST env or 'localhost')
+            port: PostgreSQL port (default: from POSTGRES_PORT env or 5432)
+            user_id: User ID for isolation (optional)
+            database: Database name (default: from POSTGRES_DB env or 'postgres')
+            username: Database username (default: from POSTGRES_USER env)
+            password: Database password (default: from POSTGRES_PASSWORD env)
+            lazy_connect: Delay connection until first use (default: True)
+            min_pool_size: Minimum connections in pool (default: 5)
+            max_pool_size: Maximum connections in pool (default: 20)
         """
-        super().__init__(
-            host=host,
-            port=port,
-            user_id=user_id,
-            lazy_connect=lazy_connect,
-            enable_compression=enable_compression,
-            enable_retry=enable_retry,
-            consul_registry=consul_registry,
-            service_name_override=service_name_override
-        )
+        self._host = host or os.getenv('POSTGRES_HOST', 'localhost')
+        self._port = port or int(os.getenv('POSTGRES_PORT', '5432'))
+        self._database = database or os.getenv('POSTGRES_DB', 'postgres')
+        self._username = username or os.getenv('POSTGRES_USER', 'postgres')
+        self._password = password or os.getenv('POSTGRES_PASSWORD', '')
+        self._min_pool_size = min_pool_size
+        self._max_pool_size = max_pool_size
 
-    def _create_stub(self):
-        """Create PostgreSQL service stub."""
-        return postgres_service_pb2_grpc.PostgresServiceStub(self.channel)
+        self.user_id = user_id or 'default'
 
-    def service_name(self) -> str:
-        return "PostgreSQL"
+        self._pool: Optional[Pool] = None
 
-    def default_port(self) -> int:
-        return 50061
+        logger.info(f"AsyncPostgresClient initialized: {self._host}:{self._port}/{self._database}")
+
+    async def _ensure_connected(self):
+        """Ensure PostgreSQL connection pool is established."""
+        if self._pool is None:
+            self._pool = await asyncpg.create_pool(
+                host=self._host,
+                port=self._port,
+                database=self._database,
+                user=self._username,
+                password=self._password,
+                min_size=self._min_pool_size,
+                max_size=self._max_pool_size,
+                command_timeout=60
+            )
+            logger.info(f"Connected to PostgreSQL at {self._host}:{self._port}/{self._database}")
+
+    async def close(self):
+        """Close PostgreSQL connection pool."""
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+        logger.info("PostgreSQL connection pool closed")
+
+    async def __aenter__(self):
+        """Async context manager entry - ensures connection pool is ready."""
+        await self._ensure_connected()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - keeps pool alive for reuse.
+
+        Note: Pool is intentionally NOT closed here to allow connection reuse.
+        Call close() or shutdown() explicitly when done with the client.
+        """
+        # Don't close pool - keep it alive for reuse
+        pass
+
+    async def shutdown(self):
+        """Explicitly shutdown the connection pool. Call at application exit."""
+        await self.close()
+
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle and log errors."""
+        logger.error(f"PostgreSQL {operation} failed: {error}")
+        return None
 
     # ============================================
     # Health Check
     # ============================================
 
     async def health_check(self, detailed: bool = True) -> Optional[Dict]:
-        """Health check."""
+        """Check PostgreSQL service health."""
         try:
             await self._ensure_connected()
-            request = postgres_service_pb2.HealthCheckRequest(detailed=detailed)
-            response = await self.stub.HealthCheck(request)
 
-            return {
-                'status': response.status,
-                'healthy': response.healthy,
-                'version': response.version,
-                'details': dict(response.details) if response.details else {}
-            }
+            async with self._pool.acquire() as conn:
+                # Simple ping
+                result = await conn.fetchval('SELECT 1')
+
+                details = {}
+                if detailed:
+                    version = await conn.fetchval('SELECT version()')
+                    details['version'] = version
+                    details['pool_size'] = self._pool.get_size()
+                    details['pool_free'] = self._pool.get_idle_size()
+
+                return {
+                    'status': 'healthy',
+                    'healthy': True,
+                    'version': details.get('version', ''),
+                    'details': details
+                }
 
         except Exception as e:
-            return self.handle_error(e, "Health check")
+            return self.handle_error(e, "health check")
 
     # ============================================
     # Query Operations
     # ============================================
 
-    async def query(self, sql: str, params: Optional[List[Any]] = None, schema: str = 'public') -> Optional[List[Dict]]:
+    async def query(self, sql: str, params: Optional[List[Any]] = None,
+                   schema: str = 'public') -> Optional[List[Dict]]:
         """Execute SELECT query.
 
         Args:
@@ -105,28 +173,23 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_params = []
-            if params:
-                for param in params:
-                    proto_params.append(self._python_to_proto_value(param))
+            async with self._pool.acquire() as conn:
+                # Set search path for schema
+                if schema != 'public':
+                    await conn.execute(f'SET search_path TO {schema}, public')
 
-            request = postgres_service_pb2.QueryRequest(
-                sql=sql,
-                params=proto_params,
-                schema=schema
-            )
+                if params:
+                    rows = await conn.fetch(sql, *params)
+                else:
+                    rows = await conn.fetch(sql)
 
-            response = await self.stub.Query(request)
-
-            if response.metadata.success:
-                rows = [self._proto_struct_to_dict(row) for row in response.rows]
-                return rows
-            return None
+                return [dict(row) for row in rows]
 
         except Exception as e:
-            return self.handle_error(e, "Query")
+            return self.handle_error(e, "query")
 
-    async def query_row(self, sql: str, params: Optional[List[Any]] = None, schema: str = 'public') -> Optional[Dict]:
+    async def query_row(self, sql: str, params: Optional[List[Any]] = None,
+                       schema: str = 'public') -> Optional[Dict]:
         """Execute single row query.
 
         Args:
@@ -140,27 +203,24 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_params = []
-            if params:
-                for param in params:
-                    proto_params.append(self._python_to_proto_value(param))
+            async with self._pool.acquire() as conn:
+                if schema != 'public':
+                    await conn.execute(f'SET search_path TO {schema}, public')
 
-            request = postgres_service_pb2.QueryRowRequest(
-                sql=sql,
-                params=proto_params,
-                schema=schema
-            )
+                if params:
+                    row = await conn.fetchrow(sql, *params)
+                else:
+                    row = await conn.fetchrow(sql)
 
-            response = await self.stub.QueryRow(request)
-
-            if response.metadata.success and response.found:
-                return self._proto_struct_to_dict(response.row)
-            return None
+                if row:
+                    return dict(row)
+                return None
 
         except Exception as e:
-            return self.handle_error(e, "Query row")
+            return self.handle_error(e, "query row")
 
-    async def execute(self, sql: str, params: Optional[List[Any]] = None, schema: str = 'public') -> Optional[int]:
+    async def execute(self, sql: str, params: Optional[List[Any]] = None,
+                     schema: str = 'public') -> Optional[int]:
         """Execute INSERT/UPDATE/DELETE statement.
 
         Args:
@@ -174,28 +234,27 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            proto_params = []
-            if params:
-                for param in params:
-                    proto_params.append(self._python_to_proto_value(param))
+            async with self._pool.acquire() as conn:
+                if schema != 'public':
+                    await conn.execute(f'SET search_path TO {schema}, public')
 
-            request = postgres_service_pb2.ExecuteRequest(
-                sql=sql,
-                params=proto_params,
-                schema=schema
-            )
+                if params:
+                    result = await conn.execute(sql, *params)
+                else:
+                    result = await conn.execute(sql)
 
-            response = await self.stub.Execute(request)
-
-            if response.metadata.success:
-                return response.rows_affected
-            return None
+                # Parse rows affected from result string (e.g., "UPDATE 5")
+                parts = result.split()
+                if len(parts) >= 2 and parts[-1].isdigit():
+                    return int(parts[-1])
+                return 0
 
         except Exception as e:
-            return self.handle_error(e, "Execute")
+            return self.handle_error(e, "execute")
 
-    async def execute_batch(self, operations: List[Dict[str, Any]], schema: str = 'public') -> Optional[Dict]:
-        """Execute batch operations.
+    async def execute_batch(self, operations: List[Dict[str, Any]],
+                           schema: str = 'public') -> Optional[Dict]:
+        """Execute batch operations in a transaction.
 
         Args:
             operations: List of {'sql': str, 'params': List} dictionaries
@@ -207,34 +266,39 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            batch_ops = []
-            for op in operations:
-                proto_params = []
-                if 'params' in op and op['params']:
-                    for param in op['params']:
-                        proto_params.append(self._python_to_proto_value(param))
+            results = []
+            total_rows = 0
 
-                batch_ops.append(postgres_service_pb2.BatchOperation(
-                    sql=op['sql'],
-                    params=proto_params
-                ))
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    if schema != 'public':
+                        await conn.execute(f'SET search_path TO {schema}, public')
 
-            request = postgres_service_pb2.ExecuteBatchRequest(
-                operations=batch_ops,
-                schema=schema
-            )
+                    for op in operations:
+                        sql = op.get('sql', '')
+                        params = op.get('params', [])
 
-            response = await self.stub.ExecuteBatch(request)
+                        try:
+                            if params:
+                                result = await conn.execute(sql, *params)
+                            else:
+                                result = await conn.execute(sql)
 
-            if response.metadata.success:
-                return {
-                    'total_rows_affected': response.total_rows_affected,
-                    'results': [{'rows_affected': r.rows_affected, 'error': r.error} for r in response.results]
-                }
-            return None
+                            # Parse rows affected
+                            parts = result.split()
+                            rows_affected = int(parts[-1]) if len(parts) >= 2 and parts[-1].isdigit() else 0
+                            total_rows += rows_affected
+                            results.append({'rows_affected': rows_affected, 'error': ''})
+                        except Exception as e:
+                            results.append({'rows_affected': 0, 'error': str(e)})
+
+            return {
+                'total_rows_affected': total_rows,
+                'results': results
+            }
 
         except Exception as e:
-            return self.handle_error(e, "Execute batch")
+            return self.handle_error(e, "execute batch")
 
     # ============================================
     # Query Builder Operations
@@ -265,35 +329,39 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
             List of result rows
         """
         try:
-            await self._ensure_connected()
+            # Build SELECT clause
+            cols = ', '.join(columns) if columns else '*'
+            sql = f'SELECT {cols} FROM {table}'
 
-            where_clauses = []
+            params = []
+            param_idx = 1
+
+            # Build WHERE clause
             if where:
+                conditions = []
                 for w in where:
-                    where_clauses.append(postgres_service_pb2.WhereClause(
-                        column=w.get('column', ''),
-                        operator=w.get('operator', '='),
-                        value=self._python_to_proto_value(w.get('value'))
-                    ))
+                    col = w.get('column', '')
+                    op = w.get('operator', '=')
+                    val = w.get('value')
+                    conditions.append(f'{col} {op} ${param_idx}')
+                    params.append(val)
+                    param_idx += 1
+                sql += ' WHERE ' + ' AND '.join(conditions)
 
-            request = postgres_service_pb2.SelectFromRequest(
-                table=table,
-                columns=columns or [],
-                where=where_clauses,
-                order_by=order_by or [],
-                limit=limit,
-                offset=offset,
-                schema=schema
-            )
+            # Build ORDER BY clause
+            if order_by:
+                sql += ' ORDER BY ' + ', '.join(order_by)
 
-            response = await self.stub.SelectFrom(request)
+            # Add LIMIT and OFFSET
+            if limit > 0:
+                sql += f' LIMIT {limit}'
+            if offset > 0:
+                sql += f' OFFSET {offset}'
 
-            if response.metadata.success:
-                return [self._proto_struct_to_dict(row) for row in response.rows]
-            return None
+            return await self.query(sql, params if params else None, schema)
 
         except Exception as e:
-            return self.handle_error(e, "Select from")
+            return self.handle_error(e, "select from")
 
     async def insert_into(
         self,
@@ -314,29 +382,38 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
             Number of rows inserted
         """
         try:
+            if not rows:
+                return 0
+
             await self._ensure_connected()
 
-            proto_rows = []
-            for row in rows:
-                struct = Struct()
-                struct.update(row)
-                proto_rows.append(struct)
+            async with self._pool.acquire() as conn:
+                if schema != 'public':
+                    await conn.execute(f'SET search_path TO {schema}, public')
 
-            request = postgres_service_pb2.InsertIntoRequest(
-                table=table,
-                rows=proto_rows,
-                returning=returning,
-                schema=schema
-            )
+                # Get columns from first row
+                columns = list(rows[0].keys())
+                cols_str = ', '.join(columns)
 
-            response = await self.stub.InsertInto(request)
+                # Build values placeholders
+                placeholders = ', '.join(f'${i+1}' for i in range(len(columns)))
+                sql = f'INSERT INTO {table} ({cols_str}) VALUES ({placeholders})'
 
-            if response.metadata.success:
-                return response.rows_inserted
-            return None
+                if returning:
+                    sql += ' RETURNING *'
+
+                # Use executemany for batch insert
+                count = 0
+                async with conn.transaction():
+                    for row in rows:
+                        values = [row.get(col) for col in columns]
+                        await conn.execute(sql, *values)
+                        count += 1
+
+                return count
 
         except Exception as e:
-            return self.handle_error(e, "Insert into")
+            return self.handle_error(e, "insert into")
 
     # ============================================
     # Table Operations
@@ -354,15 +431,20 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            request = postgres_service_pb2.ListTablesRequest(schema=schema)
-            response = await self.stub.ListTables(request)
+            sql = """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = $1
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """
 
-            if response.metadata.success:
-                return list(response.tables)
-            return []
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(sql, schema)
+                return [row['table_name'] for row in rows]
 
         except Exception as e:
-            self.handle_error(e, "List tables")
+            self.handle_error(e, "list tables")
             return []
 
     async def table_exists(self, table: str, schema: str = 'public') -> bool:
@@ -378,18 +460,19 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            request = postgres_service_pb2.TableExistsRequest(
-                table=table,
-                schema=schema
-            )
-            response = await self.stub.TableExists(request)
+            sql = """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = $1
+                    AND table_name = $2
+                )
+            """
 
-            if response.metadata.success:
-                return response.exists
-            return False
+            async with self._pool.acquire() as conn:
+                return await conn.fetchval(sql, schema, table)
 
         except Exception as e:
-            self.handle_error(e, "Table exists check")
+            self.handle_error(e, "table exists check")
             return False
 
     # ============================================
@@ -405,52 +488,73 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         try:
             await self._ensure_connected()
 
-            request = postgres_service_pb2.GetStatsRequest()
-            response = await self.stub.GetStats(request)
+            async with self._pool.acquire() as conn:
+                version = await conn.fetchval('SELECT version()')
 
-            if response.metadata.success:
                 return {
                     'pool': {
-                        'max_connections': response.pool_stats.max_connections,
-                        'open_connections': response.pool_stats.open_connections,
-                        'idle_connections': response.pool_stats.idle_connections,
-                        'active_connections': response.pool_stats.active_connections,
-                        'total_queries': response.pool_stats.total_queries,
+                        'max_connections': self._max_pool_size,
+                        'open_connections': self._pool.get_size(),
+                        'idle_connections': self._pool.get_idle_size(),
+                        'active_connections': self._pool.get_size() - self._pool.get_idle_size(),
+                        'total_queries': 0,  # asyncpg doesn't track this
                     },
                     'database': {
-                        'version': response.db_stats.version,
+                        'version': version,
                     }
                 }
-            return None
 
         except Exception as e:
-            return self.handle_error(e, "Get stats")
+            return self.handle_error(e, "get stats")
 
     # ============================================
-    # Helper Methods
+    # Transaction Support
     # ============================================
 
-    def _python_to_proto_value(self, value: Any) -> Value:
-        """Convert Python value to proto Value."""
-        proto_value = Value()
+    async def transaction(self):
+        """Get a connection with transaction context.
 
-        if value is None:
-            proto_value.null_value = 0
-        elif isinstance(value, bool):
-            proto_value.bool_value = value
-        elif isinstance(value, (int, float)):
-            proto_value.number_value = float(value)
-        elif isinstance(value, str):
-            proto_value.string_value = value
-        elif isinstance(value, list):
-            proto_value.list_value.values.extend([self._python_to_proto_value(v) for v in value])
-        elif isinstance(value, dict):
-            for k, v in value.items():
-                proto_value.struct_value.fields[k].CopyFrom(self._python_to_proto_value(v))
-        else:
-            proto_value.string_value = str(value)
+        Usage:
+            async with client.transaction() as conn:
+                await conn.execute(...)
+                await conn.execute(...)
+        """
+        await self._ensure_connected()
+        return self._pool.acquire()
 
-        return proto_value
+    async def execute_in_transaction(self, operations: List[Dict[str, Any]],
+                                     schema: str = 'public') -> bool:
+        """Execute multiple operations in a single transaction.
+
+        Args:
+            operations: List of {'sql': str, 'params': list} dicts
+            schema: Database schema
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            await self._ensure_connected()
+
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    if schema != 'public':
+                        await conn.execute(f'SET search_path TO {schema}, public')
+
+                    for op in operations:
+                        sql = op.get('sql', '')
+                        params = op.get('params', [])
+
+                        if params:
+                            await conn.execute(sql, *params)
+                        else:
+                            await conn.execute(sql)
+
+            return True
+
+        except Exception as e:
+            self.handle_error(e, "execute in transaction")
+            return False
 
     # ============================================
     # Concurrent Operations
@@ -466,8 +570,6 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         Returns:
             List of results for each query
         """
-        import asyncio
-
         async def execute_query(q: Dict) -> Optional[List[Dict]]:
             return await self.query(
                 sql=q.get('sql', ''),
@@ -487,8 +589,6 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
         Returns:
             List of rows affected for each statement
         """
-        import asyncio
-
         async def execute_stmt(s: Dict) -> Optional[int]:
             return await self.execute(
                 sql=s.get('sql', ''),
@@ -501,17 +601,26 @@ class AsyncPostgresClient(AsyncBaseGRPCClient):
 
 # Example usage
 if __name__ == '__main__':
-    import asyncio
-
     async def main():
-        async with AsyncPostgresClient(host='localhost', port=50061, user_id='test_user') as client:
+        async with AsyncPostgresClient(
+            host='localhost',
+            port=5432,
+            database='testdb',
+            username='postgres',
+            password='postgres',
+            user_id='test_user'
+        ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
-            # Query
+            # List tables
             tables = await client.list_tables()
             print(f"Tables: {tables}")
+
+            # Query
+            results = await client.query("SELECT 1 as num, 'hello' as msg")
+            print(f"Query result: {results}")
 
             # Concurrent queries
             results = await client.query_many_concurrent([

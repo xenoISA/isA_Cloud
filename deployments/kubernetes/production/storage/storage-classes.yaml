@@ -1,0 +1,88 @@
+# Storage Classes for Infotrend Hybrid Storage Backend
+# Adjust provisioner names based on your specific Infotrend CSI driver installation
+
+---
+# Block Storage - High IOPS for databases
+# Used by: PostgreSQL, Redis, Neo4j, Qdrant, NATS
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-block
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    storage-type: block
+provisioner: csi.infotrend.com  # Adjust to your Infotrend CSI provisioner
+parameters:
+  type: "ssd"                    # or "hdd" based on your Infotrend pool
+  fsType: "ext4"
+  pool: "isa-production-block"   # Adjust to your storage pool name
+reclaimPolicy: Retain            # Retain data on PVC deletion (production safety)
+allowVolumeExpansion: true       # Allow online volume expansion
+volumeBindingMode: WaitForFirstConsumer  # Delay binding until pod scheduled
+mountOptions:
+  - noatime
+  - nodiratime
+
+---
+# NFS Storage - Shared access for ReadWriteMany
+# Used by: Shared logs, configurations, multi-pod access needs
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-nfs
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    storage-type: nfs
+provisioner: nfs.csi.k8s.io      # Standard NFS CSI or Infotrend NFS provisioner
+parameters:
+  server: "nfs.infotrend.local"  # Adjust to your NFS server address
+  share: "/isa-production"       # Adjust to your NFS share path
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+mountOptions:
+  - hard
+  - nfsvers=4.1
+  - rsize=1048576
+  - wsize=1048576
+
+---
+# Object Storage Class (for reference - typically used via S3 API, not CSI)
+# MinIO will connect directly to Infotrend object storage via S3 protocol
+# This StorageClass is for any workloads that need object storage as filesystem mount
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-object
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    storage-type: object
+provisioner: s3.csi.aws.com      # Or your S3-compatible CSI driver
+parameters:
+  bucket: "isa-production-data"
+  endpoint: "https://s3.infotrend.local"  # Adjust to your S3 endpoint
+reclaimPolicy: Retain
+allowVolumeExpansion: false      # Object storage doesn't support expansion same way
+volumeBindingMode: Immediate
+
+---
+# Fast Block Storage - Ultra-low latency for high-performance needs
+# Used by: Qdrant (vector search), Redis (caching)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-block-fast
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    storage-type: block-fast
+provisioner: csi.infotrend.com
+parameters:
+  type: "nvme"                   # NVMe tier if available
+  fsType: "ext4"
+  pool: "isa-production-nvme"    # High-performance pool
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+mountOptions:
+  - noatime
+  - nodiratime

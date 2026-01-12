@@ -13,7 +13,6 @@ database: 0                                    # 数据库编号（0-15）
 # Consul 服务发现配置
 use_consul: false                              # 是否使用 Consul 服务发现
 service_name: "redis-service"                  # Consul 服务名（use_consul=true 时需要）
-grpc_port: 50055                              # gRPC 端口
 
 # 连接池配置
 max_idle: 10                                   # 最大空闲连接数

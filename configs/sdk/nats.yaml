@@ -12,7 +12,6 @@ cluster_id: "isa-cloud-cluster"                # JetStream 集群 ID
 # Consul 服务发现配置
 use_consul: false                              # 是否使用 Consul 服务发现
 service_name: "nats-service"                   # Consul 服务名（use_consul=true 时需要）
-grpc_port: 50056                              # gRPC 端口
 
 # 认证配置
 username: ""                                   # 用户名（可选）

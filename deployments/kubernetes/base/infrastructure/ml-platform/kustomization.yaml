@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All ML Platform resources in isa-cloud-staging namespace
+namespace: isa-cloud-staging
+
+resources:
+  # KubeRay Operator (manages Ray clusters)
+  - kuberay-operator.yaml
+  - ray-crds.yaml
+
+  # Ray Cluster (local development - head only)
+  - ray-cluster-local.yaml
+
+  # MLflow Tracking Server
+  - mlflow.yaml
+
+  # JupyterHub Notebooks
+  - jupyterhub.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: ml-platform
+  project: isa-cloud
+  managed-by: kustomize
+  tier: ml-infrastructure
+
+commonAnnotations:
+  description: "isA ML Platform - Ray Serve, MLflow, JupyterHub"
+  version: "1.0.0"

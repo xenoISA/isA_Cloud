@@ -12,16 +12,95 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# All ports used by this script
+PORTS=(
+    50051 50052 50053 50054 50055 50056 50061 50062 50063  # gRPC
+    5432 6379 9000 9001 4222 1883 7474 7687 6333 8500 2379  # Infrastructure
+    3000 3100 80 9090  # Monitoring
+    8265 5000 8888  # ML Platform (Ray Dashboard, MLflow, JupyterHub)
+    8080 8081 8082 8083 8084 8086  # Core apps
+    8201 8202 8203 8204 8205 8206 8207 8208 8209 8210  # Services 8201-8210
+    8211 8212 8213 8214 8215 8216 8217 8218 8219 8220  # Services 8211-8220
+    8221 8222 8223 8224 8225 8226 8227 8230  # Services 8221-8230
+)
+
 # Kill existing port-forwards for isa-cloud-staging namespace
 echo -e "${YELLOW}Cleaning up existing port-forwards...${NC}"
 EXISTING=$(pgrep -f "kubectl port-forward -n $NAMESPACE" 2>/dev/null)
 if [ -n "$EXISTING" ]; then
-    echo -e "${RED}Found existing port-forwards, killing them...${NC}"
+    echo -e "${RED}Found existing kubectl port-forwards, killing them...${NC}"
     pkill -f "kubectl port-forward -n $NAMESPACE" 2>/dev/null
     sleep 1
-    echo -e "${GREEN}Existing port-forwards killed${NC}"
+    echo -e "${GREEN}Existing kubectl port-forwards killed${NC}"
 else
-    echo -e "${GREEN}No existing port-forwards found${NC}"
+    echo -e "${GREEN}No existing kubectl port-forwards found${NC}"
+fi
+
+# Kill any process occupying our target ports (but not kubectl proxy or critical k8s processes)
+echo -e "${YELLOW}Checking for processes using target ports...${NC}"
+KILLED_PORTS=()
+SKIPPED_PORTS=()
+for port in "${PORTS[@]}"; do
+    # Find PID using lsof (works on macOS and Linux)
+    PIDS=$(lsof -ti tcp:$port 2>/dev/null)
+    if [ -n "$PIDS" ]; then
+        for PID in $PIDS; do
+            # Get the process command to check if it's kubectl proxy or other critical process
+            PROC_CMD=$(ps -p $PID -o comm= 2>/dev/null)
+            PROC_ARGS=$(ps -p $PID -o args= 2>/dev/null)
+
+            # Skip kubectl proxy and other critical processes
+            if [[ "$PROC_CMD" == "kubectl" && "$PROC_ARGS" == *"proxy"* ]]; then
+                echo -e "${YELLOW}Port $port is used by kubectl proxy (PID $PID), skipping...${NC}"
+                SKIPPED_PORTS+=($port)
+                continue
+            fi
+
+            # Skip if it's the kubernetes API server proxy
+            if [[ "$PROC_ARGS" == *"kube"* && "$PROC_ARGS" == *"proxy"* ]]; then
+                echo -e "${YELLOW}Port $port is used by kube proxy (PID $PID), skipping...${NC}"
+                SKIPPED_PORTS+=($port)
+                continue
+            fi
+
+            # Skip Docker processes (critical for kind clusters)
+            if [[ "$PROC_ARGS" == *"Docker"* ]] || [[ "$PROC_ARGS" == *"docker"* ]] || [[ "$PROC_CMD" == *"docker"* ]] || [[ "$PROC_CMD" == "com.docker"* ]]; then
+                echo -e "${YELLOW}Port $port is used by Docker (PID $PID), skipping...${NC}"
+                SKIPPED_PORTS+=($port)
+                continue
+            fi
+
+            # Skip Shadowrocket (VPN/proxy app)
+            if [[ "$PROC_ARGS" == *"Shadowrocket"* ]]; then
+                echo -e "${YELLOW}Port $port is used by Shadowrocket (PID $PID), skipping...${NC}"
+                SKIPPED_PORTS+=($port)
+                continue
+            fi
+
+            # Skip WeChat Work (企业微信)
+            if [[ "$PROC_ARGS" == *"企业微信"* ]]; then
+                echo -e "${YELLOW}Port $port is used by WeChat Work (PID $PID), skipping...${NC}"
+                SKIPPED_PORTS+=($port)
+                continue
+            fi
+
+            echo -e "${RED}Port $port is in use by PID $PID ($PROC_CMD), killing...${NC}"
+            kill -9 $PID 2>/dev/null
+            KILLED_PORTS+=($port)
+        done
+    fi
+done
+
+if [ ${#KILLED_PORTS[@]} -gt 0 ]; then
+    echo -e "${GREEN}Killed processes on ports: ${KILLED_PORTS[*]}${NC}"
+    sleep 1
+else
+    echo -e "${GREEN}No conflicting processes found on target ports${NC}"
+fi
+
+if [ ${#SKIPPED_PORTS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}Skipped critical processes on ports: ${SKIPPED_PORTS[*]}${NC}"
+    echo -e "${YELLOW}If port-forward fails for these, manually stop the conflicting process${NC}"
 fi
 
 echo -e "\n${GREEN}Starting port-forward for all services...${NC}"
@@ -178,6 +257,26 @@ PIDS+=($!)
 
 echo -e "${GREEN}[Monitor] APISIX Dashboard (localhost:9090)${NC}"
 kubectl port-forward -n $NAMESPACE svc/apisix-dashboard 9090:9000 &
+PIDS+=($!)
+((COUNT++))
+
+# ==========================================
+# ML Platform Services
+# ==========================================
+echo -e "\n${BLUE}=== ML Platform Services ===${NC}"
+
+echo -e "${GREEN}[ML] Ray Dashboard (localhost:8265)${NC}"
+kubectl port-forward -n $NAMESPACE svc/ray-dashboard 8265:8265 &
+PIDS+=($!)
+((COUNT++))
+
+echo -e "${GREEN}[ML] MLflow (localhost:5000)${NC}"
+kubectl port-forward -n $NAMESPACE svc/mlflow 5000:5000 &
+PIDS+=($!)
+((COUNT++))
+
+echo -e "${GREEN}[ML] JupyterHub (localhost:8888)${NC}"
+kubectl port-forward -n $NAMESPACE svc/jupyterhub 8888:8888 &
 PIDS+=($!)
 ((COUNT++))
 
@@ -390,6 +489,11 @@ echo "  Grafana:         localhost:3000"
 echo "  Loki:            localhost:3100"
 echo "  APISIX Gateway:  localhost:80"
 echo "  APISIX Dashboard:localhost:9090"
+echo ""
+echo -e "${BLUE}=== ML Platform ===${NC}"
+echo "  Ray Dashboard:   localhost:8265"
+echo "  MLflow:          localhost:5000"
+echo "  JupyterHub:      localhost:8888"
 echo ""
 echo -e "${BLUE}=== Application Services ===${NC}"
 echo "  Agent:           localhost:8080"

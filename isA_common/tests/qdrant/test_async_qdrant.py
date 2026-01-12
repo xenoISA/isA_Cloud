@@ -28,7 +28,7 @@ from isa_common import AsyncQdrantClient
 
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50062'))
+PORT = int(os.environ.get('PORT', '6333'))
 USER_ID = os.environ.get('USER_ID', 'test-user')
 
 # Test results

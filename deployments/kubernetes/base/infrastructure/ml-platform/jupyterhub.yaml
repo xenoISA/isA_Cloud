@@ -1,0 +1,124 @@
+# JupyterHub for Local Development (Kind)
+# Single-user mode with no authentication
+# For production, use zero-to-jupyterhub Helm chart with auth
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyterhub-data
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: jupyterhub
+    app.kubernetes.io/component: ml-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jupyterhub-config
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: jupyterhub
+    app.kubernetes.io/component: ml-platform
+data:
+  jupyter_server_config.py: |
+    c.ServerApp.token = ''
+    c.ServerApp.password = ''
+    c.ServerApp.allow_origin = '*'
+    c.ServerApp.allow_remote_access = True
+    c.ServerApp.ip = '0.0.0.0'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyterhub
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: jupyterhub
+    app.kubernetes.io/component: ml-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jupyterhub
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jupyterhub
+        app.kubernetes.io/component: ml-platform
+    spec:
+      containers:
+        - name: jupyter
+          image: jupyter/scipy-notebook:python-3.11
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8888
+              name: http
+              protocol: TCP
+          env:
+            - name: JUPYTER_ENABLE_LAB
+              value: "yes"
+            - name: GRANT_SUDO
+              value: "yes"
+            - name: RAY_ADDRESS
+              value: "ray://ray-head-svc.isa-cloud-staging:10001"
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow.mlflow:5000"
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: jupyterhub-data
+              mountPath: /home/jovyan/work
+            - name: jupyter-config
+              mountPath: /home/jovyan/.jupyter
+          livenessProbe:
+            httpGet:
+              path: /api
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        fsGroup: 100
+      volumes:
+        - name: jupyterhub-data
+          persistentVolumeClaim:
+            claimName: jupyterhub-data
+        - name: jupyter-config
+          configMap:
+            name: jupyterhub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyterhub
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: jupyterhub
+    app.kubernetes.io/component: ml-platform
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8888
+      targetPort: 8888
+      name: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: jupyterhub

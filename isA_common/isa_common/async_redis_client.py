@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
 """
-Async Redis gRPC Client
-High-performance async Redis client using grpc.aio
+Async Redis Native Client
+High-performance async Redis client using redis-py async API.
+
+This client connects directly to Redis using the official redis-py library,
+providing full support for all Redis operations including:
+- String, List, Hash, Set, Sorted Set operations
+- Pub/Sub messaging
+- Distributed locks
+- Sessions management
+- Pipelining and batching
 
 Performance Benefits:
 - True async I/O without GIL blocking
-- Concurrent request execution (10x-50x throughput improvement)
-- Automatic request batching support
-- Memory-efficient connection pooling
+- Connection pooling via redis-py
+- Pipeline support for batch operations
+- Direct protocol (no gRPC gateway overhead)
 """
 
-from typing import List, Dict, Optional, AsyncIterator, TYPE_CHECKING
-from .async_base_client import AsyncBaseGRPCClient, BatchedRedisGet, BatchedRedisSet
-from .proto import redis_service_pb2, redis_service_pb2_grpc
+import os
+import logging
+import asyncio
+import uuid
+from typing import List, Dict, Optional, AsyncIterator, Any
 
-if TYPE_CHECKING:
-    from .consul_client import ConsulRegistry
+import redis.asyncio as redis
+from redis.asyncio import ConnectionPool
+
+logger = logging.getLogger(__name__)
 
 
-class AsyncRedisClient(AsyncBaseGRPCClient):
-    """Async Redis gRPC Client for high-performance concurrent operations."""
+class AsyncRedisClient:
+    """
+    Async Redis client using native redis-py async driver.
+
+    Provides direct connection to Redis with full feature support including
+    all data structures, pub/sub, locks, and high-performance pipelining.
+    """
 
     def __init__(
         self,
@@ -27,313 +44,263 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         port: Optional[int] = None,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
+        password: Optional[str] = None,
+        db: int = 0,
         lazy_connect: bool = True,
-        enable_compression: bool = True,
-        enable_retry: bool = True,
-        consul_registry: Optional['ConsulRegistry'] = None,
-        service_name_override: Optional[str] = None,
-        enable_auto_batching: bool = False,
-        auto_batch_size: int = 100,
-        auto_batch_wait_ms: int = 5
+        **kwargs  # Accept additional kwargs for compatibility
     ):
         """
-        Initialize async Redis client.
+        Initialize async Redis client with native driver.
 
         Args:
-            host: Service host (optional, will use Consul discovery if not provided)
-            port: Service port (optional, will use Consul discovery if not provided)
-            user_id: User ID
-            organization_id: Organization ID
-            lazy_connect: Lazy connection (default: True)
-            enable_compression: Enable compression (default: True)
-            enable_retry: Enable retry (default: True)
-            consul_registry: ConsulRegistry instance for service discovery (optional)
-            service_name_override: Override service name for Consul lookup (optional)
-            enable_auto_batching: Enable automatic request batching (default: False)
-            auto_batch_size: Max items per batch when auto-batching
-            auto_batch_wait_ms: Max wait time before flush when auto-batching
+            host: Redis host (default: from REDIS_HOST env or 'localhost')
+            port: Redis port (default: from REDIS_PORT env or 6379)
+            user_id: User ID for key prefixing (optional)
+            organization_id: Organization ID (optional)
+            password: Redis password (default: from REDIS_PASSWORD env)
+            db: Redis database number (default: 0)
+            lazy_connect: Delay connection until first use (default: True)
         """
-        super().__init__(
-            host=host,
-            port=port,
-            user_id=user_id,
-            lazy_connect=lazy_connect,
-            enable_compression=enable_compression,
-            enable_retry=enable_retry,
-            consul_registry=consul_registry,
-            service_name_override=service_name_override
-        )
+        self._host = host or os.getenv('REDIS_HOST', 'localhost')
+        self._port = port or int(os.getenv('REDIS_PORT', '6379'))
+        self._password = password or os.getenv('REDIS_PASSWORD')
+        self._db = db
+        self.user_id = user_id or 'default'
         self.organization_id = organization_id or 'default-org'
 
-        # Auto-batching support
-        self._enable_auto_batching = enable_auto_batching
-        self._batched_get: Optional[BatchedRedisGet] = None
-        self._batched_set: Optional[BatchedRedisSet] = None
-        if enable_auto_batching:
-            self._batched_get = BatchedRedisGet(self, auto_batch_size, auto_batch_wait_ms)
-            self._batched_set = BatchedRedisSet(self, auto_batch_size, auto_batch_wait_ms)
+        self._pool: Optional[ConnectionPool] = None
+        self._client: Optional[redis.Redis] = None
+        self._pubsub = None
 
-    def _create_stub(self):
-        """Create Redis service stub."""
-        return redis_service_pb2_grpc.RedisServiceStub(self.channel)
+        logger.info(f"AsyncRedisClient initialized: {self._host}:{self._port}")
 
-    def service_name(self) -> str:
-        return "Redis"
+    def _get_key_prefix(self) -> str:
+        """Get key prefix for multi-tenant isolation."""
+        return f"{self.organization_id}:{self.user_id}:"
 
-    def default_port(self) -> int:
-        return 50055
+    def _prefix_key(self, key: str) -> str:
+        """Add prefix to key for isolation."""
+        prefix = self._get_key_prefix()
+        if key.startswith(prefix):
+            return key
+        return f"{prefix}{key}"
+
+    async def _ensure_connected(self):
+        """Ensure Redis connection is established."""
+        if self._client is None:
+            self._pool = ConnectionPool(
+                host=self._host,
+                port=self._port,
+                password=self._password,
+                db=self._db,
+                decode_responses=True,
+                max_connections=20
+            )
+            self._client = redis.Redis(connection_pool=self._pool)
+            logger.info(f"Connected to Redis at {self._host}:{self._port}")
+
+    async def close(self):
+        """Close Redis connection."""
+        if self._client:
+            await self._client.close()
+            self._client = None
+        if self._pool:
+            await self._pool.disconnect()
+            self._pool = None
+        logger.info("Redis connection closed")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._ensure_connected()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - keeps connection alive for reuse."""
+        pass
+
+    async def shutdown(self):
+        """Explicitly shutdown the connection. Call at application exit."""
+        await self.close()
+
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle and log errors."""
+        logger.error(f"Redis {operation} failed: {error}")
+        return None
 
     # ============================================
     # Health Check
     # ============================================
 
     async def health_check(self, deep_check: bool = False) -> Optional[Dict]:
-        """Health check."""
+        """Check Redis service health."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.RedisHealthCheckRequest(deep_check=deep_check)
-            response = await self.stub.HealthCheck(request)
+            await self._client.ping()
+
+            info = await self._client.info() if deep_check else {}
 
             return {
-                'healthy': response.healthy,
-                'redis_status': response.redis_status,
-                'connected_clients': response.connected_clients,
-                'used_memory_bytes': response.used_memory_bytes
+                'healthy': True,
+                'redis_status': 'connected',
+                'connected_clients': info.get('connected_clients', 0),
+                'used_memory_bytes': info.get('used_memory', 0)
             }
 
         except Exception as e:
-            return self.handle_error(e, "Health check")
+            return self.handle_error(e, "health check")
 
     # ============================================
     # String Operations
     # ============================================
 
     async def set(self, key: str, value: str, ttl_seconds: int = 0) -> Optional[bool]:
-        """Set key-value."""
+        """Set key-value with optional TTL."""
         try:
             await self._ensure_connected()
+            prefixed_key = self._prefix_key(key)
 
             if ttl_seconds > 0:
-                from google.protobuf.duration_pb2 import Duration
-                duration = Duration()
-                duration.seconds = ttl_seconds
-
-                request = redis_service_pb2.SetWithExpirationRequest(
-                    user_id=self.user_id,
-                    organization_id=self.organization_id,
-                    key=key,
-                    value=value,
-                    expiration=duration
-                )
-                response = await self.stub.SetWithExpiration(request)
+                result = await self._client.setex(prefixed_key, ttl_seconds, value)
             else:
-                request = redis_service_pb2.SetRequest(
-                    user_id=self.user_id,
-                    organization_id=self.organization_id,
-                    key=key,
-                    value=value
-                )
-                response = await self.stub.Set(request)
+                result = await self._client.set(prefixed_key, value)
 
-            return response.success
+            return result is True or result == 'OK'
 
         except Exception as e:
-            self.handle_error(e, "Set key-value")
+            self.handle_error(e, "set")
             return False
 
     async def get(self, key: str) -> Optional[str]:
         """Get value by key."""
-        # Use auto-batching if enabled
-        if self._enable_auto_batching and self._batched_get:
-            return await self._batched_get.get(key)
-
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.GetRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.Get(request)
-
-            if response.found:
-                return response.value
-            return None
+            return await self._client.get(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get key-value")
+            return self.handle_error(e, "get")
 
     async def delete(self, key: str) -> Optional[bool]:
         """Delete key."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.DeleteRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.Delete(request)
-            return response.success
+            result = await self._client.delete(self._prefix_key(key))
+            return result > 0
 
         except Exception as e:
-            self.handle_error(e, "Delete key")
+            self.handle_error(e, "delete")
             return False
 
     async def exists(self, key: str) -> bool:
         """Check if key exists."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ExistsRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.Exists(request)
-            return response.exists
+            return await self._client.exists(self._prefix_key(key)) > 0
 
         except Exception as e:
-            self.handle_error(e, "Check key exists")
+            self.handle_error(e, "exists")
             return False
 
     async def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> Optional[bool]:
-        """Set key-value with TTL."""
+        """Set key-value with TTL (alias for set with ttl)."""
         return await self.set(key, value, ttl_seconds)
 
     async def append(self, key: str, value: str) -> Optional[int]:
         """Append value to key."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.AppendRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                value=value
-            )
-
-            response = await self.stub.Append(request)
-            return response.length
+            return await self._client.append(self._prefix_key(key), value)
 
         except Exception as e:
-            return self.handle_error(e, "Append to key")
+            return self.handle_error(e, "append")
 
     # ============================================
     # Batch Operations
     # ============================================
 
     async def mset(self, key_values: Dict[str, str], ttl_seconds: int = 0) -> Optional[bool]:
-        """Batch set key-values using ExecuteBatch for optimal performance."""
+        """Batch set key-values."""
         try:
             await self._ensure_connected()
 
-            batch_commands = []
-            for key, value in key_values.items():
-                cmd = redis_service_pb2.BatchCommand(
-                    operation='SET',
-                    key=key,
-                    value=value
-                )
-                if ttl_seconds > 0:
-                    from google.protobuf.duration_pb2 import Duration
-                    expiration = Duration()
-                    expiration.seconds = ttl_seconds
-                    cmd.expiration.CopyFrom(expiration)
-                batch_commands.append(cmd)
+            prefixed = {self._prefix_key(k): v for k, v in key_values.items()}
 
-            request = redis_service_pb2.RedisBatchRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                commands=batch_commands
-            )
+            if ttl_seconds > 0:
+                pipe = self._client.pipeline()
+                for key, value in prefixed.items():
+                    pipe.setex(key, ttl_seconds, value)
+                await pipe.execute()
+            else:
+                await self._client.mset(prefixed)
 
-            response = await self.stub.ExecuteBatch(request)
-
-            if response.success and response.executed_count == len(key_values):
-                return True
-            return False
+            return True
 
         except Exception as e:
-            self.handle_error(e, "Batch set key-values")
+            self.handle_error(e, "mset")
             return False
 
     async def mget(self, keys: List[str]) -> Dict[str, str]:
         """Batch get key-values."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.GetMultipleRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                keys=keys
-            )
+            prefixed_keys = [self._prefix_key(k) for k in keys]
+            values = await self._client.mget(prefixed_keys)
 
-            response = await self.stub.GetMultiple(request)
-
-            values = {kv.key: kv.value for kv in response.values}
-            return values
+            result = {}
+            for key, value in zip(keys, values):
+                if value is not None:
+                    result[key] = value
+            return result
 
         except Exception as e:
-            return self.handle_error(e, "Batch get key-values") or {}
+            return self.handle_error(e, "mget") or {}
 
     async def delete_multiple(self, keys: List[str]) -> Optional[int]:
         """Delete multiple keys."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.DeleteMultipleRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                keys=keys
-            )
-
-            response = await self.stub.DeleteMultiple(request)
-
-            if response.success:
-                return response.deleted_count
-            return 0
+            prefixed_keys = [self._prefix_key(k) for k in keys]
+            return await self._client.delete(*prefixed_keys)
 
         except Exception as e:
-            self.handle_error(e, "Delete multiple keys")
+            self.handle_error(e, "delete_multiple")
             return 0
 
     async def execute_batch(self, commands: List[Dict]) -> Optional[Dict]:
-        """Execute batch commands."""
+        """Execute batch commands using pipeline."""
         try:
             await self._ensure_connected()
+            pipe = self._client.pipeline()
 
-            batch_commands = []
             for cmd in commands:
-                from google.protobuf.duration_pb2 import Duration
+                op = cmd.get('operation', '').upper()
+                key = self._prefix_key(cmd.get('key', ''))
+                value = cmd.get('value', '')
+                expiration = cmd.get('expiration')
 
-                expiration = None
-                if 'expiration' in cmd and cmd['expiration']:
-                    expiration = Duration()
-                    expiration.seconds = cmd['expiration']
+                if op == 'SET':
+                    if expiration:
+                        pipe.setex(key, expiration, value)
+                    else:
+                        pipe.set(key, value)
+                elif op == 'GET':
+                    pipe.get(key)
+                elif op == 'DELETE':
+                    pipe.delete(key)
+                elif op == 'INCR':
+                    pipe.incr(key)
+                elif op == 'DECR':
+                    pipe.decr(key)
 
-                batch_cmd = redis_service_pb2.BatchCommand(
-                    operation=cmd.get('operation', ''),
-                    key=cmd.get('key', ''),
-                    value=cmd.get('value', ''),
-                    expiration=expiration
-                )
-                batch_commands.append(batch_cmd)
-
-            request = redis_service_pb2.RedisBatchRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                commands=batch_commands
-            )
-
-            response = await self.stub.ExecuteBatch(request)
+            results = await pipe.execute()
 
             return {
-                'success': response.success,
-                'executed_count': response.executed_count,
-                'errors': list(response.errors)
+                'success': True,
+                'executed_count': len(results),
+                'errors': []
             }
 
         except Exception as e:
-            self.handle_error(e, "Execute batch")
+            self.handle_error(e, "execute_batch")
             return None
 
     # ============================================
@@ -341,116 +308,81 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
     # ============================================
 
     async def incr(self, key: str, delta: int = 1) -> Optional[int]:
-        """Increment."""
+        """Increment counter."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.IncrementRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                delta=delta
-            )
-
-            response = await self.stub.Increment(request)
-            return response.value
+            return await self._client.incrby(self._prefix_key(key), delta)
 
         except Exception as e:
-            return self.handle_error(e, "Increment")
+            return self.handle_error(e, "incr")
 
     async def decr(self, key: str, delta: int = 1) -> Optional[int]:
-        """Decrement."""
+        """Decrement counter."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.DecrementRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                delta=delta
-            )
-
-            response = await self.stub.Decrement(request)
-            return response.value
+            return await self._client.decrby(self._prefix_key(key), delta)
 
         except Exception as e:
-            return self.handle_error(e, "Decrement")
+            return self.handle_error(e, "decr")
 
     # ============================================
     # Key Operations
     # ============================================
 
     async def expire(self, key: str, seconds: int) -> Optional[bool]:
-        """Set expiration time."""
+        """Set key expiration."""
         try:
             await self._ensure_connected()
-
-            from google.protobuf.duration_pb2 import Duration
-            duration = Duration()
-            duration.seconds = seconds
-
-            request = redis_service_pb2.ExpireRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                expiration=duration
-            )
-
-            response = await self.stub.Expire(request)
-            return response.success
+            return await self._client.expire(self._prefix_key(key), seconds)
 
         except Exception as e:
-            self.handle_error(e, "Set expiration")
+            self.handle_error(e, "expire")
             return False
 
     async def ttl(self, key: str) -> Optional[int]:
-        """Get time to live (seconds)."""
+        """Get time to live."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.GetTTLRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.GetTTL(request)
-            return response.ttl_seconds
+            return await self._client.ttl(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get TTL")
+            return self.handle_error(e, "ttl")
 
     async def rename(self, old_key: str, new_key: str) -> Optional[bool]:
         """Rename key."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.RenameRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                old_key=old_key,
-                new_key=new_key
+            await self._client.rename(
+                self._prefix_key(old_key),
+                self._prefix_key(new_key)
             )
-
-            response = await self.stub.Rename(request)
-            return response.success
+            return True
 
         except Exception as e:
-            self.handle_error(e, "Rename key")
+            self.handle_error(e, "rename")
             return False
 
     async def list_keys(self, pattern: str = "*", limit: int = 100) -> List[str]:
         """List keys matching pattern."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ListKeysRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                pattern=pattern,
-                limit=limit
-            )
+            full_pattern = self._prefix_key(pattern)
+            keys = []
+            prefix = self._get_key_prefix()
 
-            response = await self.stub.ListKeys(request)
-            return list(response.keys)
+            async for key in self._client.scan_iter(match=full_pattern, count=limit):
+                # Remove prefix from returned keys
+                if key.startswith(prefix):
+                    keys.append(key[len(prefix):])
+                else:
+                    keys.append(key)
+                if len(keys) >= limit:
+                    break
+
+            return keys
 
         except Exception as e:
-            return self.handle_error(e, "List keys") or []
+            return self.handle_error(e, "list_keys") or []
 
     # ============================================
     # List Operations
@@ -460,107 +392,55 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Left push to list."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.LPushRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                values=values
-            )
-
-            response = await self.stub.LPush(request)
-            return response.length
+            return await self._client.lpush(self._prefix_key(key), *values)
 
         except Exception as e:
-            return self.handle_error(e, "Left push to list")
+            return self.handle_error(e, "lpush")
 
     async def rpush(self, key: str, values: List[str]) -> Optional[int]:
         """Right push to list."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.RPushRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                values=values
-            )
-
-            response = await self.stub.RPush(request)
-            return response.length
+            return await self._client.rpush(self._prefix_key(key), *values)
 
         except Exception as e:
-            return self.handle_error(e, "Right push to list")
+            return self.handle_error(e, "rpush")
 
     async def lrange(self, key: str, start: int = 0, stop: int = -1) -> List[str]:
         """Get list range."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.LRangeRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                start=start,
-                stop=stop
-            )
-
-            response = await self.stub.LRange(request)
-            return list(response.values)
+            return await self._client.lrange(self._prefix_key(key), start, stop)
 
         except Exception as e:
-            return self.handle_error(e, "Get list range") or []
+            return self.handle_error(e, "lrange") or []
 
     async def lpop(self, key: str) -> Optional[str]:
-        """Pop element from left of list."""
+        """Pop from left of list."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.LPopRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.LPop(request)
-
-            if response.found:
-                return response.value
-            return None
+            return await self._client.lpop(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Left pop from list")
+            return self.handle_error(e, "lpop")
 
     async def rpop(self, key: str) -> Optional[str]:
-        """Pop element from right of list."""
+        """Pop from right of list."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.RPopRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.RPop(request)
-
-            if response.found:
-                return response.value
-            return None
+            return await self._client.rpop(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Right pop from list")
+            return self.handle_error(e, "rpop")
 
     async def llen(self, key: str) -> Optional[int]:
         """Get list length."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.LLenRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.LLen(request)
-            return response.length
+            return await self._client.llen(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get list length")
+            return self.handle_error(e, "llen")
 
     # ============================================
     # Hash Operations
@@ -570,98 +450,49 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Set hash field."""
         try:
             await self._ensure_connected()
-
-            hash_field = redis_service_pb2.HashField(field=field, value=value)
-
-            request = redis_service_pb2.HSetRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                fields=[hash_field]
-            )
-
-            response = await self.stub.HSet(request)
-            return response.success
+            await self._client.hset(self._prefix_key(key), field, value)
+            return True
 
         except Exception as e:
-            self.handle_error(e, "Set hash field")
+            self.handle_error(e, "hset")
             return False
 
     async def hget(self, key: str, field: str) -> Optional[str]:
         """Get hash field."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.HGetRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                field=field
-            )
-
-            response = await self.stub.HGet(request)
-
-            if response.found:
-                return response.value
-            return None
+            return await self._client.hget(self._prefix_key(key), field)
 
         except Exception as e:
-            return self.handle_error(e, "Get hash field")
+            return self.handle_error(e, "hget")
 
     async def hgetall(self, key: str) -> Dict[str, str]:
         """Get all hash fields."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.HGetAllRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.HGetAll(request)
-
-            fields = {f.field: f.value for f in response.fields}
-            return fields
+            return await self._client.hgetall(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get all hash fields") or {}
+            return self.handle_error(e, "hgetall") or {}
 
     async def hdelete(self, key: str, fields: List[str]) -> Optional[int]:
         """Delete hash fields."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.HDeleteRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                fields=fields
-            )
-
-            response = await self.stub.HDelete(request)
-
-            if response.success:
-                return response.deleted_count
-            return 0
+            return await self._client.hdel(self._prefix_key(key), *fields)
 
         except Exception as e:
-            self.handle_error(e, "Delete hash fields")
+            self.handle_error(e, "hdelete")
             return 0
 
     async def hexists(self, key: str, field: str) -> bool:
         """Check if hash field exists."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.HExistsRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                field=field
-            )
-
-            response = await self.stub.HExists(request)
-            return response.exists
+            return await self._client.hexists(self._prefix_key(key), field)
 
         except Exception as e:
-            self.handle_error(e, "Check hash field exists")
+            self.handle_error(e, "hexists")
             return False
 
     # ============================================
@@ -672,283 +503,183 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Add members to set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SAddRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                members=members
-            )
-
-            response = await self.stub.SAdd(request)
-            return response.added_count
+            return await self._client.sadd(self._prefix_key(key), *members)
 
         except Exception as e:
-            return self.handle_error(e, "Add to set")
+            return self.handle_error(e, "sadd")
 
     async def sremove(self, key: str, members: List[str]) -> Optional[int]:
         """Remove members from set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SRemoveRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                members=members
-            )
-
-            response = await self.stub.SRemove(request)
-            return response.removed_count
+            return await self._client.srem(self._prefix_key(key), *members)
 
         except Exception as e:
-            return self.handle_error(e, "Remove from set")
+            return self.handle_error(e, "sremove")
 
     async def smembers(self, key: str) -> List[str]:
         """Get all set members."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SMembersRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.SMembers(request)
-            return list(response.members)
+            result = await self._client.smembers(self._prefix_key(key))
+            return list(result)
 
         except Exception as e:
-            return self.handle_error(e, "Get set members") or []
+            return self.handle_error(e, "smembers") or []
 
     async def sismember(self, key: str, member: str) -> bool:
         """Check if member is in set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SIsMemberRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                member=member
-            )
-
-            response = await self.stub.SIsMember(request)
-            return response.is_member
+            return await self._client.sismember(self._prefix_key(key), member)
 
         except Exception as e:
-            self.handle_error(e, "Check set membership")
+            self.handle_error(e, "sismember")
             return False
 
     async def scard(self, key: str) -> Optional[int]:
-        """Get set cardinality (size)."""
+        """Get set cardinality."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SCardRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.SCard(request)
-            return response.count
+            return await self._client.scard(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get set cardinality")
+            return self.handle_error(e, "scard")
 
     # ============================================
     # Sorted Set Operations
     # ============================================
 
     async def zadd(self, key: str, score_members: Dict[str, float]) -> Optional[int]:
-        """Add members to sorted set with scores."""
+        """Add members to sorted set."""
         try:
             await self._ensure_connected()
-
-            members = [
-                redis_service_pb2.ZSetMember(member=member, score=score)
-                for member, score in score_members.items()
-            ]
-
-            request = redis_service_pb2.ZAddRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                members=members
-            )
-
-            response = await self.stub.ZAdd(request)
-            return response.added_count
+            # redis-py expects {member: score} format
+            return await self._client.zadd(self._prefix_key(key), score_members)
 
         except Exception as e:
-            self.handle_error(e, "Add to sorted set")
+            self.handle_error(e, "zadd")
             return None
 
-    async def zrange(self, key: str, start: int = 0, stop: int = -1, with_scores: bool = False) -> List:
+    async def zrange(self, key: str, start: int = 0, stop: int = -1,
+                     with_scores: bool = False) -> List:
         """Get sorted set range."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ZRangeRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                start=start,
-                stop=stop,
-                with_scores=with_scores
+            result = await self._client.zrange(
+                self._prefix_key(key), start, stop, withscores=with_scores
             )
-
-            response = await self.stub.ZRange(request)
-
-            if with_scores:
-                return [(m.member, m.score) for m in response.members]
-            return [m.member for m in response.members]
+            return list(result)
 
         except Exception as e:
-            return self.handle_error(e, "Get sorted set range") or []
+            return self.handle_error(e, "zrange") or []
 
     async def zrem(self, key: str, members: List[str]) -> Optional[int]:
         """Remove members from sorted set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ZRemoveRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                members=members
-            )
-
-            response = await self.stub.ZRemove(request)
-            return response.removed_count
+            return await self._client.zrem(self._prefix_key(key), *members)
 
         except Exception as e:
-            self.handle_error(e, "Remove from sorted set")
+            self.handle_error(e, "zrem")
             return None
 
     async def zrank(self, key: str, member: str) -> Optional[int]:
         """Get member rank in sorted set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ZRankRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                member=member
-            )
-
-            response = await self.stub.ZRank(request)
-
-            if response.found:
-                return response.rank
-            return None
+            return await self._client.zrank(self._prefix_key(key), member)
 
         except Exception as e:
-            return self.handle_error(e, "Get sorted set rank")
+            return self.handle_error(e, "zrank")
 
     async def zscore(self, key: str, member: str) -> Optional[float]:
         """Get member score in sorted set."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ZScoreRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key,
-                member=member
-            )
-
-            response = await self.stub.ZScore(request)
-
-            if response.found:
-                return response.score
-            return None
+            return await self._client.zscore(self._prefix_key(key), member)
 
         except Exception as e:
-            return self.handle_error(e, "Get sorted set score")
+            return self.handle_error(e, "zscore")
 
     async def zcard(self, key: str) -> Optional[int]:
-        """Get sorted set cardinality (size)."""
+        """Get sorted set cardinality."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ZCardRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                key=key
-            )
-
-            response = await self.stub.ZCard(request)
-            return response.count
+            return await self._client.zcard(self._prefix_key(key))
 
         except Exception as e:
-            return self.handle_error(e, "Get sorted set cardinality")
+            return self.handle_error(e, "zcard")
 
     # ============================================
     # Distributed Lock Operations
     # ============================================
 
-    async def acquire_lock(self, lock_key: str, ttl_seconds: int = 10, wait_timeout_seconds: int = 5) -> Optional[str]:
-        """Acquire distributed lock."""
+    async def acquire_lock(self, lock_key: str, ttl_seconds: int = 10,
+                          wait_timeout_seconds: int = 5) -> Optional[str]:
+        """Acquire distributed lock using SET NX."""
         try:
             await self._ensure_connected()
+            lock_id = str(uuid.uuid4())
+            prefixed_key = self._prefix_key(f"lock:{lock_key}")
 
-            from google.protobuf.duration_pb2 import Duration
-            ttl = Duration()
-            ttl.seconds = ttl_seconds
-            wait_timeout = Duration()
-            wait_timeout.seconds = wait_timeout_seconds
+            deadline = asyncio.get_event_loop().time() + wait_timeout_seconds
 
-            request = redis_service_pb2.AcquireLockRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                lock_key=lock_key,
-                ttl=ttl,
-                wait_timeout=wait_timeout
-            )
+            while asyncio.get_event_loop().time() < deadline:
+                acquired = await self._client.set(
+                    prefixed_key, lock_id, nx=True, ex=ttl_seconds
+                )
+                if acquired:
+                    return lock_id
 
-            response = await self.stub.AcquireLock(request)
+                await asyncio.sleep(0.1)
 
-            if response.acquired:
-                return response.lock_id
             return None
 
         except Exception as e:
-            self.handle_error(e, "Acquire lock")
+            self.handle_error(e, "acquire_lock")
             return None
 
     async def release_lock(self, lock_key: str, lock_id: str) -> bool:
         """Release distributed lock."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.ReleaseLockRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                lock_key=lock_key,
-                lock_id=lock_id
-            )
+            prefixed_key = self._prefix_key(f"lock:{lock_key}")
 
-            response = await self.stub.ReleaseLock(request)
-            return response.released
+            # Lua script for atomic check-and-delete
+            script = """
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+                return redis.call("del", KEYS[1])
+            else
+                return 0
+            end
+            """
+            result = await self._client.eval(script, 1, prefixed_key, lock_id)
+            return result == 1
 
         except Exception as e:
-            self.handle_error(e, "Release lock")
+            self.handle_error(e, "release_lock")
             return False
 
     async def renew_lock(self, lock_key: str, lock_id: str, ttl_seconds: int = 10) -> bool:
-        """Renew distributed lock."""
+        """Renew distributed lock TTL."""
         try:
             await self._ensure_connected()
+            prefixed_key = self._prefix_key(f"lock:{lock_key}")
 
-            from google.protobuf.duration_pb2 import Duration
-            ttl = Duration()
-            ttl.seconds = ttl_seconds
-
-            request = redis_service_pb2.RenewLockRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                lock_key=lock_key,
-                lock_id=lock_id,
-                ttl=ttl
-            )
-
-            response = await self.stub.RenewLock(request)
-            return response.renewed
+            # Lua script for atomic check-and-expire
+            script = """
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+                return redis.call("expire", KEYS[1], ARGV[2])
+            else
+                return 0
+            end
+            """
+            result = await self._client.eval(script, 1, prefixed_key, lock_id, ttl_seconds)
+            return result == 1
 
         except Exception as e:
-            self.handle_error(e, "Renew lock")
+            self.handle_error(e, "renew_lock")
             return False
 
     # ============================================
@@ -959,43 +690,36 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Publish message to channel."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.PublishRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                channel=channel,
-                message=message
-            )
-
-            response = await self.stub.Publish(request)
-            return response.subscriber_count
+            prefixed_channel = self._prefix_key(channel)
+            return await self._client.publish(prefixed_channel, message)
 
         except Exception as e:
-            return self.handle_error(e, "Publish message")
+            return self.handle_error(e, "publish")
 
     async def subscribe(self, channels: List[str]) -> AsyncIterator[Dict]:
-        """
-        Subscribe to channels (streaming).
-
-        Yields:
-            Dict with 'channel', 'message', 'timestamp' for each message
-        """
+        """Subscribe to channels and yield messages."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.SubscribeRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                channels=channels
-            )
+            pubsub = self._client.pubsub()
+            prefixed_channels = [self._prefix_key(c) for c in channels]
 
-            async for message in self.stub.Subscribe(request):
-                yield {
-                    'channel': message.channel,
-                    'message': message.message,
-                    'timestamp': message.timestamp
-                }
+            await pubsub.subscribe(*prefixed_channels)
+
+            async for message in pubsub.listen():
+                if message['type'] == 'message':
+                    channel = message['channel']
+                    prefix = self._get_key_prefix()
+                    if channel.startswith(prefix):
+                        channel = channel[len(prefix):]
+
+                    yield {
+                        'channel': channel,
+                        'message': message['data'],
+                        'timestamp': ''
+                    }
 
         except Exception as e:
-            self.handle_error(e, "Subscribe to channels")
+            self.handle_error(e, "subscribe")
 
     # ============================================
     # Session Management
@@ -1005,56 +729,41 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Create session."""
         try:
             await self._ensure_connected()
+            session_id = str(uuid.uuid4())
+            session_key = self._prefix_key(f"session:{session_id}")
 
-            from google.protobuf.duration_pb2 import Duration
-            ttl = Duration()
-            ttl.seconds = ttl_seconds
+            await self._client.hset(session_key, mapping=data)
+            await self._client.expire(session_key, ttl_seconds)
 
-            request = redis_service_pb2.CreateSessionRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id,
-                data=data,
-                ttl=ttl
-            )
-
-            response = await self.stub.CreateSession(request)
-            return response.session_id
+            return session_id
 
         except Exception as e:
-            return self.handle_error(e, "Create session")
+            return self.handle_error(e, "create_session")
 
     async def get_session(self, session_id: str) -> Optional[Dict]:
-        """Get session."""
+        """Get session data."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.GetSessionRequest(
-                user_id=self.user_id,
-                session_id=session_id
-            )
+            session_key = self._prefix_key(f"session:{session_id}")
+            data = await self._client.hgetall(session_key)
 
-            response = await self.stub.GetSession(request)
-
-            if response.found:
-                return self._proto_map_to_dict(response.session.data)
+            if data:
+                return data
             return None
 
         except Exception as e:
-            return self.handle_error(e, "Get session")
+            return self.handle_error(e, "get_session")
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete session."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.DeleteSessionRequest(
-                user_id=self.user_id,
-                session_id=session_id
-            )
-
-            response = await self.stub.DeleteSession(request)
-            return response.success
+            session_key = self._prefix_key(f"session:{session_id}")
+            result = await self._client.delete(session_key)
+            return result > 0
 
         except Exception as e:
-            self.handle_error(e, "Delete session")
+            self.handle_error(e, "delete_session")
             return False
 
     # ============================================
@@ -1065,101 +774,58 @@ class AsyncRedisClient(AsyncBaseGRPCClient):
         """Get Redis statistics."""
         try:
             await self._ensure_connected()
-            request = redis_service_pb2.GetStatisticsRequest(
-                user_id=self.user_id,
-                organization_id=self.organization_id
-            )
-
-            response = await self.stub.GetStatistics(request)
+            info = await self._client.info()
 
             return {
-                'total_keys': response.total_keys,
-                'memory_used_bytes': response.memory_used_bytes,
-                'commands_processed': response.commands_processed,
-                'connections_received': response.connections_received,
-                'hit_rate': response.hit_rate,
-                'key_type_distribution': self._proto_map_to_dict(response.key_type_distribution)
+                'total_keys': info.get('db0', {}).get('keys', 0) if isinstance(info.get('db0'), dict) else 0,
+                'memory_used_bytes': info.get('used_memory', 0),
+                'commands_processed': info.get('total_commands_processed', 0),
+                'connections_received': info.get('total_connections_received', 0),
+                'hit_rate': 0,  # Would need keyspace_hits / (keyspace_hits + keyspace_misses)
+                'key_type_distribution': {}
             }
 
         except Exception as e:
-            return self.handle_error(e, "Get statistics")
+            return self.handle_error(e, "get_statistics")
 
     # ============================================
-    # Concurrent Operations Helper
+    # Concurrent Operations
     # ============================================
 
     async def get_many_concurrent(self, keys: List[str]) -> Dict[str, Optional[str]]:
-        """
-        Get multiple keys concurrently using asyncio.gather.
+        """Get multiple keys concurrently."""
+        return await self.mget(keys)
 
-        This is useful when you want individual get calls to run concurrently
-        without using the batch mget operation.
-
-        Args:
-            keys: List of keys to get
-
-        Returns:
-            Dict mapping keys to their values (None if not found)
-        """
-        import asyncio
-
-        async def get_single(key: str) -> tuple:
-            value = await self.get(key)
-            return (key, value)
-
-        results = await asyncio.gather(*[get_single(k) for k in keys])
-        return dict(results)
-
-    async def set_many_concurrent(self, key_values: Dict[str, str], ttl_seconds: int = 0) -> Dict[str, bool]:
-        """
-        Set multiple key-values concurrently using asyncio.gather.
-
-        Args:
-            key_values: Dict of key-value pairs
-            ttl_seconds: TTL for all keys
-
-        Returns:
-            Dict mapping keys to success status
-        """
-        import asyncio
-
-        async def set_single(key: str, value: str) -> tuple:
-            success = await self.set(key, value, ttl_seconds)
-            return (key, success)
-
-        results = await asyncio.gather(*[set_single(k, v) for k, v in key_values.items()])
-        return dict(results)
+    async def set_many_concurrent(self, key_values: Dict[str, str],
+                                  ttl_seconds: int = 0) -> Dict[str, bool]:
+        """Set multiple key-values concurrently."""
+        success = await self.mset(key_values, ttl_seconds)
+        return {k: success for k in key_values.keys()}
 
 
 # Example usage
 if __name__ == '__main__':
-    import asyncio
-
     async def main():
-        async with AsyncRedisClient(host='localhost', port=50055, user_id='test_user') as client:
+        async with AsyncRedisClient(
+            host='localhost',
+            port=6379,
+            user_id='test_user'
+        ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Basic operations
-            await client.set('async:key1', 'value1')
-            value = await client.get('async:key1')
+            await client.set('test:key1', 'value1')
+            value = await client.get('test:key1')
             print(f"Got: {value}")
 
             # Batch operations
             await client.mset({
-                'async:key2': 'value2',
-                'async:key3': 'value3',
-                'async:key4': 'value4'
+                'test:key2': 'value2',
+                'test:key3': 'value3'
             })
-
-            values = await client.mget(['async:key2', 'async:key3', 'async:key4'])
+            values = await client.mget(['test:key2', 'test:key3'])
             print(f"Batch get: {values}")
-
-            # Concurrent operations
-            concurrent_results = await client.get_many_concurrent([
-                'async:key1', 'async:key2', 'async:key3'
-            ])
-            print(f"Concurrent get: {concurrent_results}")
 
     asyncio.run(main())

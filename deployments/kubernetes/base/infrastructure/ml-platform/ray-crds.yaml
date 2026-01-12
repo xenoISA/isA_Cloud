@@ -1,0 +1,28 @@
+# Ray CRDs - Custom Resource Definitions for KubeRay
+# These define the RayCluster, RayJob, and RayService resources
+# Source: https://github.com/ray-project/kuberay/tree/master/ray-operator/config/crd/bases
+#
+# For Kind, apply this first:
+#   kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayclusters.yaml
+#   kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayjobs.yaml
+#   kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayservices.yaml
+#
+# Or use the install script: ./install-ray-crds.sh
+---
+# Placeholder - CRDs are large, install from upstream
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ray-crd-info
+  namespace: ray-system
+  labels:
+    app.kubernetes.io/name: kuberay
+    app.kubernetes.io/component: crd-info
+data:
+  version: "v1.2.2"
+  crd-source: "https://github.com/ray-project/kuberay"
+  install-instructions: |
+    # Install Ray CRDs from upstream:
+    kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayclusters.yaml
+    kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayjobs.yaml
+    kubectl apply -f https://raw.githubusercontent.com/ray-project/kuberay/v1.2.2/ray-operator/config/crd/bases/ray.io_rayservices.yaml

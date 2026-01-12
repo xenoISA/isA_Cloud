@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
 """
-Async MinIO gRPC Client
-High-performance async MinIO/S3 client using grpc.aio
+Async MinIO Native Client
+High-performance async MinIO/S3 client using aioboto3 for direct S3 protocol access.
+
+This client connects directly to MinIO using the S3-compatible API,
+providing full support for all object storage features including:
+- Bucket management
+- Object upload/download with streaming
+- Presigned URLs
+- Tags and metadata
+- Concurrent operations
 
 Performance Benefits:
 - True async I/O without GIL blocking
+- Direct S3 protocol (no gRPC gateway overhead)
 - Concurrent upload/download operations
 - Memory-efficient streaming
-- Connection pooling
+- Connection pooling via aioboto3
 """
 
+import os
 import logging
-from typing import List, Dict, Optional, AsyncIterator, Callable, TYPE_CHECKING
-from .async_base_client import AsyncBaseGRPCClient
-from .proto import minio_service_pb2, minio_service_pb2_grpc
+from typing import List, Dict, Optional, AsyncIterator, Callable, Any
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-if TYPE_CHECKING:
-    from .consul_client import ConsulRegistry
+# aioboto3 for async S3 operations
+import aioboto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -27,70 +39,189 @@ MAX_PRESIGN_EXPIRY = 7 * 24 * 3600  # 7 days
 MIN_PRESIGN_EXPIRY = 60  # 1 minute
 
 
-class AsyncMinIOClient(AsyncBaseGRPCClient):
-    """Async MinIO gRPC client for high-performance object storage operations."""
+class AsyncMinIOClient:
+    """
+    Async MinIO client using aioboto3 for direct S3 protocol access.
+
+    Provides direct connection to MinIO with full feature support including
+    bucket management, object operations, presigned URLs, and streaming.
+    """
 
     def __init__(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
         user_id: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        access_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        region: str = 'us-east-1',
+        secure: bool = False,
         lazy_connect: bool = True,
-        enable_compression: bool = True,
-        enable_retry: bool = True,
-        consul_registry: Optional['ConsulRegistry'] = None,
-        service_name_override: Optional[str] = None
+        **kwargs  # Accept additional kwargs for compatibility with gRPC version
     ):
         """
-        Initialize async MinIO client.
+        Initialize async MinIO client with native S3 driver.
 
         Args:
-            host: Service host (optional, uses Consul if not provided)
-            port: Service port (optional, uses Consul if not provided)
-            user_id: User ID for multi-tenant isolation
-            lazy_connect: Delay connection until first use
-            enable_compression: Enable gRPC compression
-            enable_retry: Enable automatic retries
-            consul_registry: ConsulRegistry for service discovery
-            service_name_override: Override service name for Consul
+            host: MinIO host (default: from MINIO_HOST env or 'localhost')
+            port: MinIO port (default: from MINIO_PORT env or 9000)
+            user_id: User ID for multi-tenant bucket prefixing (optional, for compatibility)
+            endpoint_url: Full MinIO endpoint URL (overrides host/port if provided)
+            access_key: MinIO access key (default: from MINIO_ACCESS_KEY env)
+            secret_key: MinIO secret key (default: from MINIO_SECRET_KEY env)
+            region: AWS region (default: 'us-east-1')
+            secure: Use HTTPS (default: False for local MinIO)
+            lazy_connect: Delay connection until first use (default: True)
+            **kwargs: Additional arguments for compatibility with gRPC version
+                - enable_compression: Ignored (handled by S3 protocol)
+                - enable_retry: Ignored (handled by botocore)
+                - consul_registry: Ignored (not needed for direct connection)
+                - service_name_override: Ignored (not needed for direct connection)
         """
-        super().__init__(
-            host=host,
-            port=port,
-            user_id=user_id,
-            lazy_connect=lazy_connect,
-            enable_compression=enable_compression,
-            enable_retry=enable_retry,
-            consul_registry=consul_registry,
-            service_name_override=service_name_override
+        # Build endpoint URL from host/port or use provided URL
+        if endpoint_url:
+            self._endpoint_url = endpoint_url
+        else:
+            _host = host or os.getenv('MINIO_HOST', 'localhost')
+            _port = port or int(os.getenv('MINIO_PORT', '9000'))
+            protocol = 'https' if secure else 'http'
+            self._endpoint_url = f"{protocol}://{_host}:{_port}"
+
+        # Get credentials from env or parameters
+        self._access_key = access_key or os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+        self._secret_key = secret_key or os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+        self._region = region
+        self._user_id = user_id  # For multi-tenant bucket prefixing (compatibility)
+
+        # aioboto3 session and client state
+        self._session = None
+        self._s3_client = None
+        self._s3_resource = None
+        self._connected = False
+
+        # boto config with retry
+        self._config = Config(
+            signature_version='s3v4',
+            retries={
+                'max_attempts': 3,
+                'mode': 'standard'
+            },
+            connect_timeout=10,
+            read_timeout=30
         )
 
-    def _create_stub(self):
-        """Create MinIO service stub."""
-        return minio_service_pb2_grpc.MinIOServiceStub(self.channel)
+        logger.info(f"AsyncMinIOClient initialized: {self._endpoint_url}")
 
-    def service_name(self) -> str:
-        return "MinIO"
+    def _get_prefixed_bucket_name(self, bucket_name: str) -> str:
+        """
+        Get bucket name with user prefix for multi-tenant isolation.
 
-    def default_port(self) -> int:
-        return 50051
+        Maintains compatibility with gRPC client's bucket naming convention:
+        user-{user_id}-{bucket_name}
+
+        S3 bucket naming rules:
+        - 3-63 characters
+        - Only lowercase letters, numbers, hyphens
+        - Must start/end with letter or number
+        """
+        if self._user_id:
+            # Sanitize user_id: replace underscores and special chars with hyphens
+            safe_user_id = self._user_id.lower().replace('_', '-').replace('|', '-')
+            # Remove consecutive hyphens
+            while '--' in safe_user_id:
+                safe_user_id = safe_user_id.replace('--', '-')
+            # Strip leading/trailing hyphens
+            safe_user_id = safe_user_id.strip('-')
+
+            # Sanitize bucket_name similarly
+            safe_bucket = bucket_name.lower().replace('_', '-')
+            while '--' in safe_bucket:
+                safe_bucket = safe_bucket.replace('--', '-')
+            safe_bucket = safe_bucket.strip('-')
+
+            return f"user-{safe_user_id}-{safe_bucket}"
+
+        # Sanitize bucket name even without user prefix
+        safe_bucket = bucket_name.lower().replace('_', '-')
+        while '--' in safe_bucket:
+            safe_bucket = safe_bucket.replace('--', '-')
+        return safe_bucket.strip('-')
+
+    async def _ensure_connected(self):
+        """Ensure aioboto3 session is created."""
+        if self._session is None:
+            self._session = aioboto3.Session()
+            logger.info(f"Created aioboto3 session for {self._endpoint_url}")
+
+    async def _get_client(self):
+        """Get or create S3 client context manager."""
+        await self._ensure_connected()
+        return self._session.client(
+            's3',
+            endpoint_url=self._endpoint_url,
+            aws_access_key_id=self._access_key,
+            aws_secret_access_key=self._secret_key,
+            region_name=self._region,
+            config=self._config
+        )
+
+    async def _get_resource(self):
+        """Get or create S3 resource context manager."""
+        await self._ensure_connected()
+        return self._session.resource(
+            's3',
+            endpoint_url=self._endpoint_url,
+            aws_access_key_id=self._access_key,
+            aws_secret_access_key=self._secret_key,
+            region_name=self._region,
+            config=self._config
+        )
+
+    async def close(self):
+        """Close the client (cleanup)."""
+        self._session = None
+        self._connected = False
+        logger.info("MinIO connection closed")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._ensure_connected()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - keeps connection alive for reuse."""
+        pass
+
+    async def shutdown(self):
+        """Explicitly shutdown the connection. Call at application exit."""
+        await self.close()
+
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle and log errors."""
+        logger.error(f"MinIO {operation} failed: {error}")
+        return None
 
     # ============================================
     # Health Check
     # ============================================
 
     async def health_check(self, detailed: bool = True) -> Optional[Dict]:
-        """Check MinIO service health."""
+        """Check MinIO service health by listing buckets."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.MinIOHealthCheckRequest(detailed=detailed)
-            response = await self.stub.HealthCheck(request)
+            async with await self._get_client() as client:
+                response = await client.list_buckets()
+                bucket_count = len(response.get('Buckets', []))
 
-            return {
-                'status': response.status,
-                'healthy': response.healthy,
-                'details': self._proto_struct_to_dict(response.details) if response.details else {}
-            }
+                return {
+                    'status': 'healthy',
+                    'healthy': True,
+                    'details': {
+                        'endpoint': self._endpoint_url,
+                        'bucket_count': bucket_count,
+                        'owner': response.get('Owner', {}).get('DisplayName', 'unknown')
+                    } if detailed else {}
+                }
 
         except Exception as e:
             return self.handle_error(e, "health check")
@@ -107,59 +238,86 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     ) -> Optional[Dict]:
         """Create a new bucket."""
         try:
-            await self._ensure_connected()
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            request = minio_service_pb2.CreateBucketRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                organization_id=organization_id,
-                region=region
-            )
+            async with await self._get_client() as client:
+                # MinIO ignores LocationConstraint for us-east-1
+                if region == 'us-east-1':
+                    await client.create_bucket(Bucket=prefixed_name)
+                else:
+                    await client.create_bucket(
+                        Bucket=prefixed_name,
+                        CreateBucketConfiguration={'LocationConstraint': region}
+                    )
 
-            response = await self.stub.CreateBucket(request)
-
-            if response.success:
+                logger.info(f"Created bucket: {prefixed_name}")
                 return {
                     'success': True,
-                    'bucket': response.bucket_info.name if response.bucket_info else bucket_name,
-                    'message': response.message
+                    'bucket': prefixed_name,
+                    'message': f'Bucket {prefixed_name} created successfully'
                 }
-            return None
 
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == 'BucketAlreadyOwnedByYou':
+                return {
+                    'success': True,
+                    'bucket': self._get_prefixed_bucket_name(bucket_name),
+                    'message': 'Bucket already exists'
+                }
+            return self.handle_error(e, "create bucket")
         except Exception as e:
             return self.handle_error(e, "create bucket")
 
     async def delete_bucket(self, bucket_name: str, force: bool = False) -> bool:
         """Delete a bucket."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.DeleteBucketRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                force=force
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.DeleteBucket(request)
-            return response.success
+            async with await self._get_client() as client:
+                if force:
+                    # Delete all objects first
+                    await self._empty_bucket(client, prefixed_name)
+
+                await client.delete_bucket(Bucket=prefixed_name)
+                logger.info(f"Deleted bucket: {prefixed_name}")
+                return True
 
         except Exception as e:
             self.handle_error(e, "delete bucket")
             return False
 
+    async def _empty_bucket(self, client, bucket_name: str):
+        """Delete all objects in a bucket."""
+        try:
+            paginator = client.get_paginator('list_objects_v2')
+            async for page in paginator.paginate(Bucket=bucket_name):
+                objects = page.get('Contents', [])
+                if objects:
+                    delete_objects = [{'Key': obj['Key']} for obj in objects]
+                    await client.delete_objects(
+                        Bucket=bucket_name,
+                        Delete={'Objects': delete_objects}
+                    )
+        except Exception as e:
+            logger.warning(f"Error emptying bucket {bucket_name}: {e}")
+
     async def list_buckets(self, organization_id: str = 'default-org') -> List[str]:
         """List all accessible buckets."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.ListBucketsRequest(
-                user_id=self.user_id,
-                organization_id=organization_id
-            )
+            async with await self._get_client() as client:
+                response = await client.list_buckets()
+                buckets = response.get('Buckets', [])
 
-            response = await self.stub.ListBuckets(request)
-
-            if response.success:
-                return [bucket.name for bucket in response.buckets]
-            return []
+                # Filter by user prefix if user_id is set
+                if self._user_id:
+                    prefix = f"user-{self._user_id}-"
+                    return [
+                        b['Name'].replace(prefix, '', 1)
+                        for b in buckets
+                        if b['Name'].startswith(prefix)
+                    ]
+                return [b['Name'] for b in buckets]
 
         except Exception as e:
             return self.handle_error(e, "list buckets") or []
@@ -167,32 +325,50 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def bucket_exists(self, bucket_name: str) -> bool:
         """Check if bucket exists."""
         try:
-            info = await self.get_bucket_info(bucket_name)
-            return info is not None
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
+
+            async with await self._get_client() as client:
+                await client.head_bucket(Bucket=prefixed_name)
+                return True
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code in ('404', 'NoSuchBucket'):
+                return False
+            return False
         except Exception:
             return False
 
     async def get_bucket_info(self, bucket_name: str) -> Optional[Dict]:
         """Get bucket metadata."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.GetBucketInfoRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.GetBucketInfo(request)
+            async with await self._get_client() as client:
+                # Check bucket exists
+                await client.head_bucket(Bucket=prefixed_name)
 
-            if response.success and response.bucket_info:
+                # Get bucket location
+                location = await client.get_bucket_location(Bucket=prefixed_name)
+                region = location.get('LocationConstraint') or 'us-east-1'
+
+                # Count objects and calculate size
+                total_size = 0
+                object_count = 0
+                paginator = client.get_paginator('list_objects_v2')
+                async for page in paginator.paginate(Bucket=prefixed_name):
+                    for obj in page.get('Contents', []):
+                        total_size += obj.get('Size', 0)
+                        object_count += 1
+
                 return {
-                    'name': response.bucket_info.name,
-                    'owner_id': response.bucket_info.owner_id,
-                    'organization_id': response.bucket_info.organization_id,
-                    'region': response.bucket_info.region,
-                    'size_bytes': response.bucket_info.size_bytes,
-                    'object_count': response.bucket_info.object_count
+                    'name': bucket_name,
+                    'owner_id': self._user_id,
+                    'organization_id': 'default-org',
+                    'region': region,
+                    'size_bytes': total_size,
+                    'object_count': object_count
                 }
-            return None
 
         except Exception as e:
             return self.handle_error(e, "get bucket info")
@@ -210,9 +386,9 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
         metadata: Optional[Dict[str, str]] = None,
         auto_create_bucket: bool = True
     ) -> Optional[Dict]:
-        """Upload object using streaming gRPC."""
+        """Upload object to MinIO."""
         try:
-            await self._ensure_connected()
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             # Auto-create bucket if needed
             if auto_create_bucket and not await self.bucket_exists(bucket_name):
@@ -223,34 +399,26 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
                         'error': f"Failed to create bucket '{bucket_name}'"
                     }
 
-            async def request_generator():
-                # First message: metadata
-                meta = minio_service_pb2.PutObjectMetadata(
-                    bucket_name=bucket_name,
-                    object_key=object_key,
-                    user_id=self.user_id,
-                    content_type=content_type,
-                    content_length=len(data)
-                )
+            async with await self._get_client() as client:
+                put_args = {
+                    'Bucket': prefixed_name,
+                    'Key': object_key,
+                    'Body': data,
+                    'ContentType': content_type
+                }
+
                 if metadata:
-                    meta.metadata.update(metadata)
-                yield minio_service_pb2.PutObjectRequest(metadata=meta)
+                    # S3 metadata keys must be strings
+                    put_args['Metadata'] = {k: str(v) for k, v in metadata.items()}
 
-                # Subsequent messages: data chunks
-                for i in range(0, len(data), DEFAULT_CHUNK_SIZE):
-                    chunk = data[i:i + DEFAULT_CHUNK_SIZE]
-                    yield minio_service_pb2.PutObjectRequest(chunk=chunk)
+                response = await client.put_object(**put_args)
 
-            response = await self.stub.PutObject(request_generator())
-
-            if response.success:
                 return {
                     'success': True,
-                    'object_key': response.object_key,
-                    'size': response.size,
-                    'etag': response.etag
+                    'object_key': object_key,
+                    'size': len(data),
+                    'etag': response.get('ETag', '').strip('"')
                 }
-            return None
 
         except Exception as e:
             return self.handle_error(e, "upload object")
@@ -265,44 +433,70 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
         chunk_size: int = 5 * 1024 * 1024,  # 5MB
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> bool:
-        """Upload large file using streaming with progress support."""
+        """Upload large file using multipart upload with progress support."""
         try:
-            await self._ensure_connected()
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             if not await self.bucket_exists(bucket_name):
                 create_result = await self.create_bucket(bucket_name)
                 if not create_result:
                     return False
 
-            bytes_sent = 0
-
-            async def request_generator():
-                nonlocal bytes_sent
-
-                # First message: metadata
-                meta = minio_service_pb2.PutObjectMetadata(
-                    bucket_name=bucket_name,
-                    object_key=object_key,
-                    user_id=self.user_id,
-                    content_type=content_type,
-                    content_length=file_size or 0
+            async with await self._get_client() as client:
+                # Start multipart upload
+                mpu = await client.create_multipart_upload(
+                    Bucket=prefixed_name,
+                    Key=object_key,
+                    ContentType=content_type
                 )
-                yield minio_service_pb2.PutObjectRequest(metadata=meta)
+                upload_id = mpu['UploadId']
 
-                # Stream chunks
-                while True:
-                    chunk = file_obj.read(chunk_size)
-                    if not chunk:
-                        break
+                parts = []
+                part_number = 1
+                bytes_sent = 0
 
-                    yield minio_service_pb2.PutObjectRequest(chunk=chunk)
+                try:
+                    while True:
+                        chunk = file_obj.read(chunk_size)
+                        if not chunk:
+                            break
 
-                    bytes_sent += len(chunk)
-                    if progress_callback and file_size:
-                        progress_callback(bytes_sent, file_size)
+                        response = await client.upload_part(
+                            Bucket=prefixed_name,
+                            Key=object_key,
+                            UploadId=upload_id,
+                            PartNumber=part_number,
+                            Body=chunk
+                        )
 
-            response = await self.stub.PutObject(request_generator())
-            return response.success
+                        parts.append({
+                            'PartNumber': part_number,
+                            'ETag': response['ETag']
+                        })
+
+                        bytes_sent += len(chunk)
+                        if progress_callback and file_size:
+                            progress_callback(bytes_sent, file_size)
+
+                        part_number += 1
+
+                    # Complete multipart upload
+                    await client.complete_multipart_upload(
+                        Bucket=prefixed_name,
+                        Key=object_key,
+                        UploadId=upload_id,
+                        MultipartUpload={'Parts': parts}
+                    )
+                    return True
+
+                except Exception as e:
+                    # Abort on failure
+                    await client.abort_multipart_upload(
+                        Bucket=prefixed_name,
+                        Key=object_key,
+                        UploadId=upload_id
+                    )
+                    raise e
 
         except Exception as e:
             self.handle_error(e, "upload large file")
@@ -315,21 +509,18 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def get_object(self, bucket_name: str, object_key: str) -> Optional[bytes]:
         """Download object to memory."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.GetObjectRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            data = bytearray()
-            async for response in self.stub.GetObject(request):
-                if response.HasField('metadata'):
-                    continue
-                elif response.HasField('chunk'):
-                    data.extend(response.chunk)
+            async with await self._get_client() as client:
+                response = await client.get_object(
+                    Bucket=prefixed_name,
+                    Key=object_key
+                )
 
-            return bytes(data)
+                # Read the streaming body
+                async with response['Body'] as stream:
+                    data = await stream.read()
+                return data
 
         except Exception as e:
             return self.handle_error(e, "get object")
@@ -337,16 +528,20 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def download_stream(self, bucket_name: str, object_key: str) -> AsyncIterator[bytes]:
         """Stream download for memory-efficient large file handling."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.GetObjectRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            async for response in self.stub.GetObject(request):
-                if response.HasField('chunk'):
-                    yield response.chunk
+            async with await self._get_client() as client:
+                response = await client.get_object(
+                    Bucket=prefixed_name,
+                    Key=object_key
+                )
+
+                async with response['Body'] as stream:
+                    while True:
+                        chunk = await stream.read(DEFAULT_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        yield chunk
 
         except Exception as e:
             self.handle_error(e, "download stream")
@@ -414,28 +609,26 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     ) -> List[Dict]:
         """List objects in bucket."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.ListObjectsRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                prefix=prefix,
-                max_keys=max_keys
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.ListObjects(request)
+            async with await self._get_client() as client:
+                response = await client.list_objects_v2(
+                    Bucket=prefixed_name,
+                    Prefix=prefix,
+                    MaxKeys=max_keys
+                )
 
-            if response.success:
-                return [
-                    {
-                        'name': obj.key,
-                        'key': obj.key,
-                        'size': obj.size,
-                        'content_type': obj.content_type,
-                        'etag': obj.etag,
-                    }
-                    for obj in response.objects
-                ]
-            return []
+                objects = []
+                for obj in response.get('Contents', []):
+                    objects.append({
+                        'name': obj['Key'],
+                        'key': obj['Key'],
+                        'size': obj['Size'],
+                        'content_type': '',  # Not returned by list
+                        'etag': obj.get('ETag', '').strip('"'),
+                        'last_modified': obj.get('LastModified')
+                    })
+                return objects
 
         except Exception as e:
             return self.handle_error(e, "list objects") or []
@@ -443,15 +636,14 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def delete_object(self, bucket_name: str, object_key: str) -> bool:
         """Delete single object."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.DeleteObjectRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.DeleteObject(request)
-            return response.success
+            async with await self._get_client() as client:
+                await client.delete_object(
+                    Bucket=prefixed_name,
+                    Key=object_key
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "delete object")
@@ -460,16 +652,15 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def delete_objects(self, bucket_name: str, object_keys: List[str]) -> bool:
         """Batch delete objects."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.DeleteObjectsRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                object_keys=object_keys,
-                quiet=False
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.DeleteObjects(request)
-            return response.success
+            async with await self._get_client() as client:
+                delete_objects = [{'Key': key} for key in object_keys]
+                await client.delete_objects(
+                    Bucket=prefixed_name,
+                    Delete={'Objects': delete_objects}
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "delete objects")
@@ -484,17 +675,16 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     ) -> bool:
         """Copy object between buckets or within bucket."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.CopyObjectRequest(
-                source_bucket=source_bucket,
-                source_key=source_key,
-                dest_bucket=dest_bucket,
-                dest_key=dest_key,
-                user_id=self.user_id
-            )
+            dest_prefixed = self._get_prefixed_bucket_name(dest_bucket)
+            source_prefixed = self._get_prefixed_bucket_name(source_bucket)
 
-            response = await self.stub.CopyObject(request)
-            return response.success
+            async with await self._get_client() as client:
+                await client.copy_object(
+                    Bucket=dest_prefixed,
+                    Key=dest_key,
+                    CopySource={'Bucket': source_prefixed, 'Key': source_key}
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "copy object")
@@ -503,25 +693,26 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def get_object_metadata(self, bucket_name: str, object_key: str) -> Optional[Dict]:
         """Get object metadata without downloading content."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.StatObjectRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.StatObject(request)
+            async with await self._get_client() as client:
+                response = await client.head_object(
+                    Bucket=prefixed_name,
+                    Key=object_key
+                )
 
-            if response.success and response.object_info:
+                last_modified = response.get('LastModified')
+                if last_modified:
+                    last_modified = last_modified.isoformat()
+
                 return {
-                    'key': response.object_info.key,
-                    'size': response.object_info.size,
-                    'etag': response.object_info.etag,
-                    'content_type': response.object_info.content_type,
-                    'last_modified': response.object_info.last_modified,
-                    'metadata': dict(response.object_info.metadata) if response.object_info.metadata else {}
+                    'key': object_key,
+                    'size': response.get('ContentLength', 0),
+                    'etag': response.get('ETag', '').strip('"'),
+                    'content_type': response.get('ContentType', ''),
+                    'last_modified': last_modified,
+                    'metadata': response.get('Metadata', {})
                 }
-            return None
 
         except Exception as e:
             return self.handle_error(e, "get object metadata")
@@ -539,17 +730,18 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
         """Generate presigned URL for download (GET)."""
         try:
             expiry_seconds = max(MIN_PRESIGN_EXPIRY, min(expiry_seconds, MAX_PRESIGN_EXPIRY))
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            await self._ensure_connected()
-            request = minio_service_pb2.GetPresignedURLRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id,
-                expiry_seconds=expiry_seconds
-            )
-
-            response = await self.stub.GetPresignedURL(request)
-            return response.url if response.success else None
+            async with await self._get_client() as client:
+                url = await client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': prefixed_name,
+                        'Key': object_key
+                    },
+                    ExpiresIn=expiry_seconds
+                )
+                return url
 
         except Exception as e:
             return self.handle_error(e, "get presigned URL")
@@ -564,18 +756,19 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
         """Generate presigned URL for upload (PUT)."""
         try:
             expiry_seconds = max(MIN_PRESIGN_EXPIRY, min(expiry_seconds, MAX_PRESIGN_EXPIRY))
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            await self._ensure_connected()
-            request = minio_service_pb2.GetPresignedPutURLRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id,
-                expiry_seconds=expiry_seconds,
-                content_type=content_type
-            )
-
-            response = await self.stub.GetPresignedPutURL(request)
-            return response.url if response.success else None
+            async with await self._get_client() as client:
+                url = await client.generate_presigned_url(
+                    'put_object',
+                    Params={
+                        'Bucket': prefixed_name,
+                        'Key': object_key,
+                        'ContentType': content_type
+                    },
+                    ExpiresIn=expiry_seconds
+                )
+                return url
 
         except Exception as e:
             return self.handle_error(e, "get presigned PUT URL")
@@ -587,15 +780,16 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def set_bucket_versioning(self, bucket_name: str, enabled: bool) -> bool:
         """Enable/disable bucket versioning."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.SetBucketVersioningRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                enabled=enabled
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.SetBucketVersioning(request)
-            return response.success
+            async with await self._get_client() as client:
+                await client.put_bucket_versioning(
+                    Bucket=prefixed_name,
+                    VersioningConfiguration={
+                        'Status': 'Enabled' if enabled else 'Suspended'
+                    }
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "set bucket versioning")
@@ -604,15 +798,15 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def set_bucket_tags(self, bucket_name: str, tags: Dict[str, str]) -> bool:
         """Set bucket tags."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.SetBucketTagsRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id,
-                tags=tags
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.SetBucketTags(request)
-            return response.success
+            async with await self._get_client() as client:
+                tag_set = [{'Key': k, 'Value': v} for k, v in tags.items()]
+                await client.put_bucket_tagging(
+                    Bucket=prefixed_name,
+                    Tagging={'TagSet': tag_set}
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "set bucket tags")
@@ -621,15 +815,20 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def get_bucket_tags(self, bucket_name: str) -> Optional[Dict[str, str]]:
         """Get bucket tags."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.GetBucketTagsRequest(
-                bucket_name=bucket_name,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.GetBucketTags(request)
-            return dict(response.tags) if response.success else None
+            async with await self._get_client() as client:
+                response = await client.get_bucket_tagging(Bucket=prefixed_name)
+                tags = {}
+                for tag in response.get('TagSet', []):
+                    tags[tag['Key']] = tag['Value']
+                return tags
 
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code == 'NoSuchTagSet':
+                return {}
+            return self.handle_error(e, "get bucket tags")
         except Exception as e:
             return self.handle_error(e, "get bucket tags")
 
@@ -640,16 +839,16 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def set_object_tags(self, bucket_name: str, object_key: str, tags: Dict[str, str]) -> bool:
         """Set object tags."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.SetObjectTagsRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id,
-                tags=tags
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.SetObjectTags(request)
-            return response.success
+            async with await self._get_client() as client:
+                tag_set = [{'Key': k, 'Value': v} for k, v in tags.items()]
+                await client.put_object_tagging(
+                    Bucket=prefixed_name,
+                    Key=object_key,
+                    Tagging={'TagSet': tag_set}
+                )
+                return True
 
         except Exception as e:
             self.handle_error(e, "set object tags")
@@ -658,15 +857,17 @@ class AsyncMinIOClient(AsyncBaseGRPCClient):
     async def get_object_tags(self, bucket_name: str, object_key: str) -> Optional[Dict[str, str]]:
         """Get object tags."""
         try:
-            await self._ensure_connected()
-            request = minio_service_pb2.GetObjectTagsRequest(
-                bucket_name=bucket_name,
-                object_key=object_key,
-                user_id=self.user_id
-            )
+            prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
-            response = await self.stub.GetObjectTags(request)
-            return dict(response.tags) if response.success else None
+            async with await self._get_client() as client:
+                response = await client.get_object_tagging(
+                    Bucket=prefixed_name,
+                    Key=object_key
+                )
+                tags = {}
+                for tag in response.get('TagSet', []):
+                    tags[tag['Key']] = tag['Value']
+                return tags
 
         except Exception as e:
             return self.handle_error(e, "get object tags")
@@ -744,7 +945,12 @@ if __name__ == '__main__':
     import asyncio
 
     async def main():
-        async with AsyncMinIOClient(host='localhost', port=50051, user_id='test-user') as client:
+        # Using environment variables for credentials
+        async with AsyncMinIOClient(
+            host='localhost',
+            port=9000,
+            user_id='test-user'
+        ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
@@ -764,6 +970,10 @@ if __name__ == '__main__':
             # List objects
             objects = await client.list_objects('async-test-bucket')
             print(f"Objects: {objects}")
+
+            # Generate presigned URL
+            url = await client.get_presigned_url('async-test-bucket', 'file0.txt')
+            print(f"Presigned URL: {url}")
 
             # Download concurrently
             downloads = [

@@ -34,7 +34,6 @@ type NATSServiceConfig struct {
 	// 服务发现配置
 	UseConsul   bool   `mapstructure:"use_consul"`
 	ServiceName string `mapstructure:"service_name"`
-	GRPCPort    int    `mapstructure:"grpc_port"`
 
 	// 连接配置
 	MaxReconnect  int    `mapstructure:"max_reconnect"`
@@ -104,7 +103,6 @@ func setEventDefaults(v *viper.Viper) {
 	v.SetDefault("nats.cluster_id", "isa-cloud-cluster")
 	v.SetDefault("nats.use_consul", false)
 	v.SetDefault("nats.service_name", "nats-service")
-	v.SetDefault("nats.grpc_port", 50056)
 	v.SetDefault("nats.max_reconnect", 10)
 	v.SetDefault("nats.reconnect_wait", "2s")
 	v.SetDefault("nats.timeout", "10s")
@@ -256,7 +254,6 @@ func LoadFromEnv() *EventConfig {
 			Token:            getEnv("NATS_TOKEN", ""),
 			UseConsul:        getEnvBool("NATS_USE_CONSUL", false),
 			ServiceName:      getEnv("NATS_SERVICE_NAME", "nats-service"),
-			GRPCPort:         getEnvInt("NATS_GRPC_PORT", 50056),
 			MaxReconnect:     10,
 			ReconnectWait:    "2s",
 			Timeout:          "10s",

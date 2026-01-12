@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isa-common"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared Python infrastructure library for isA platform"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -26,7 +26,16 @@ dependencies = [
     "pydantic>=2.0.0",
     "tenacity>=8.0.0",
     "python-consul2>=0.1.5",
-    "asyncpg>=0.29.0",
+    # Native async database/service drivers
+    "asyncpg>=0.29.0",  # Async PostgreSQL
+    "neo4j>=5.0.0",  # Neo4j native driver
+    "aioboto3>=12.0.0",  # Async S3/MinIO client
+    "aiofiles>=23.0.0",  # Async file I/O for streaming downloads
+    "redis>=5.0.0",  # Async Redis (redis-py with asyncio)
+    "nats-py>=2.6.0",  # Async NATS with JetStream
+    "qdrant-client>=1.7.0",  # Async Qdrant vector database
+    "aiomqtt>=2.0.0",  # Async MQTT client
+    "duckdb>=0.10.0",  # DuckDB analytics database
 ]
 
 [project.optional-dependencies]

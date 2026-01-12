@@ -6,7 +6,6 @@ namespace: isa-cloud-dev
 # 引用基础配置
 resources:
   - ../../base/infrastructure
-  - ../../base/grpc-services
   - ../../base/applications
 
 # 通用标签

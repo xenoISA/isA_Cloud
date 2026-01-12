@@ -2,7 +2,7 @@
 """
 Async MinIO Client - Comprehensive Functional Tests
 
-Tests all async MinIO operations including:
+Tests all async MinIO operations using native aioboto3 S3 client including:
 - Health check
 - Bucket operations (create, list, delete, info)
 - Object upload (small, large, streaming)
@@ -15,7 +15,14 @@ Tests all async MinIO operations including:
 
 Usage:
     python test_async_minio.py
-    HOST=minio-service PORT=50051 python test_async_minio.py
+    MINIO_HOST=localhost MINIO_PORT=9000 python test_async_minio.py
+
+Environment Variables:
+    MINIO_HOST - MinIO host (default: localhost)
+    MINIO_PORT - MinIO S3 API port (default: 9000)
+    MINIO_ACCESS_KEY - MinIO access key (default: minioadmin)
+    MINIO_SECRET_KEY - MinIO secret key (default: minioadmin)
+    USER_ID - User ID for multi-tenant isolation (default: test_user)
 """
 
 import os
@@ -29,9 +36,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncMinIOClient
 
-# Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50051'))
+# Configuration - Native S3 client (aioboto3)
+HOST = os.environ.get('MINIO_HOST', 'localhost')
+PORT = int(os.environ.get('MINIO_PORT', '9000'))  # S3 API port (not gRPC)
+ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', 'minioadmin')
+SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', 'minioadmin')
 USER_ID = os.environ.get('USER_ID', 'test_user')
 TEST_BUCKET = 'async-test-bucket'
 
@@ -429,18 +438,22 @@ async def main():
     """Run all async tests."""
     print("=" * 70)
     print("     ASYNC MINIO CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
+    print("            (Native aioboto3 S3 Protocol)")
     print("=" * 70)
     print(f"\nConfiguration:")
     print(f"  Host: {HOST}")
-    print(f"  Port: {PORT}")
-    print(f"  User: {USER_ID}")
+    print(f"  Port: {PORT} (S3 API)")
+    print(f"  Access Key: {ACCESS_KEY[:4]}****")
+    print(f"  User ID: {USER_ID}")
     print(f"  Test Bucket: {TEST_BUCKET}")
     print()
 
     async with AsyncMinIOClient(
         host=HOST,
         port=PORT,
-        user_id=USER_ID
+        user_id=USER_ID,
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY
     ) as client:
         # Initial cleanup
         await cleanup(client)

@@ -1,0 +1,118 @@
+# MLflow Tracking Server - Bitnami Chart Values
+# Chart: bitnami/mlflow
+# Docs: https://github.com/bitnami/charts/tree/main/bitnami/mlflow
+
+# Global settings
+global:
+  storageClass: "infotrend-block"
+
+# Tracking server configuration
+tracking:
+  enabled: true
+  replicaCount: 2
+
+  # Pod resources
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 5000
+
+  # Artifact storage (MinIO)
+  artifactRoot: "s3://mlflow-artifacts"
+
+  # Backend store (PostgreSQL)
+  # Connection string set via external secret
+  # backendStore:
+  #   databaseUri: "postgresql://mlflow:password@postgresql-ha-pgpool:5432/mlflow"
+
+  # Authentication (enable for production)
+  auth:
+    enabled: true
+    # username: ""  # Set via --set or external secret
+    # password: ""  # Set via --set or external secret
+
+  # Liveness/Readiness probes
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+  # Pod anti-affinity
+  podAntiAffinityPreset: soft
+
+# Run experiments (disabled - we use Ray for training)
+run:
+  enabled: false
+
+# External PostgreSQL
+externalDatabase:
+  host: "postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local"
+  port: 5432
+  database: "mlflow"
+  user: "mlflow"
+  password: ""  # Set via --set or external secret
+  existingSecret: ""
+  existingSecretPasswordKey: ""
+
+# Use existing PostgreSQL in cluster
+postgresql:
+  enabled: false
+
+# MinIO for artifact storage
+minio:
+  enabled: false
+
+# External S3/MinIO configuration
+externalS3:
+  host: "minio.isa-cloud-production.svc.cluster.local"
+  port: 9000
+  accessKeyID: ""      # Set via --set or external secret
+  accessKeySecret: ""  # Set via --set or external secret
+  bucket: "mlflow-artifacts"
+  protocol: "http"
+  serveArtifacts: true
+
+# Persistence for local artifacts (if not using S3)
+persistence:
+  enabled: true
+  storageClass: "infotrend-block"
+  size: 50Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Metrics (Prometheus)
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: mlflow
+    labels:
+      release: prometheus
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  allowExternal: false
+  ingressNSMatchLabels:
+    kubernetes.io/metadata.name: isa-cloud-production
+
+# Ingress (optional - expose via APISIX instead)
+ingress:
+  enabled: false

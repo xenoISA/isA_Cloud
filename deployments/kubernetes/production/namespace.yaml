@@ -1,0 +1,171 @@
+# Production Namespace and RBAC Configuration
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: isa-cloud-production
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    environment: production
+    tier: production
+
+---
+# Service Account for infrastructure services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: isa-infrastructure
+  namespace: isa-cloud-production
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+
+---
+# Service Account for application services
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: isa-application
+  namespace: isa-cloud-production
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+
+---
+# Role for infrastructure services (database operations)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: isa-infrastructure-role
+  namespace: isa-cloud-production
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# Role binding for infrastructure services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: isa-infrastructure-binding
+  namespace: isa-cloud-production
+subjects:
+  - kind: ServiceAccount
+    name: isa-infrastructure
+    namespace: isa-cloud-production
+roleRef:
+  kind: Role
+  name: isa-infrastructure-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Role for application services (limited access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: isa-application-role
+  namespace: isa-cloud-production
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Role binding for application services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: isa-application-binding
+  namespace: isa-cloud-production
+subjects:
+  - kind: ServiceAccount
+    name: isa-application
+    namespace: isa-cloud-production
+roleRef:
+  kind: Role
+  name: isa-application-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Network Policy: Deny all ingress by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: isa-cloud-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Network Policy: Allow internal namespace traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal
+  namespace: isa-cloud-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: isa-cloud-production
+
+---
+# Resource Quota for production namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: isa-cloud-production
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    limits.cpu: "100"
+    limits.memory: "200Gi"
+    persistentvolumeclaims: "50"
+    requests.storage: "5Ti"
+
+---
+# Limit Range for default resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limits
+  namespace: isa-cloud-production
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "8"
+        memory: "16Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: PersistentVolumeClaim
+      max:
+        storage: "500Gi"
+      min:
+        storage: "1Gi"

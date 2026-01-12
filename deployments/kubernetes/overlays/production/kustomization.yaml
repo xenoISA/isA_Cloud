@@ -6,7 +6,6 @@ namespace: isa-cloud-production
 # 引用基础配置
 resources:
   - ../../base/infrastructure
-  - ../../base/grpc-services
   - ../../base/applications
   # 生产环境额外资源
   - hpa.yaml  # Horizontal Pod Autoscaler
