@@ -1,0 +1,151 @@
+# Helmfile - Declarative Helm Release Management
+# Usage: helmfile -f helmfile.yaml sync
+
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: false
+  atomic: true
+
+repositories:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+  - name: nats
+    url: https://nats-io.github.io/k8s/helm/charts/
+  - name: minio
+    url: https://charts.min.io/
+  - name: qdrant
+    url: https://qdrant.github.io/qdrant-helm/
+  - name: neo4j
+    url: https://helm.neo4j.com/neo4j
+  - name: emqx
+    url: https://repos.emqx.io/charts
+  # ML Platform
+  - name: kuberay
+    url: https://ray-project.github.io/kuberay-helm/
+  - name: jupyterhub
+    url: https://hub.jupyter.org/helm-chart/
+
+environments:
+  production:
+    values:
+      - namespace: isa-cloud-production
+      - storageClass: infotrend-block
+      - storageClassFast: infotrend-block-fast
+
+releases:
+  # PostgreSQL HA - Primary database
+  - name: postgresql
+    namespace: isa-cloud-production
+    chart: bitnami/postgresql-ha
+    version: "14.2.0"
+    values:
+      - values/postgresql-ha.yaml
+    hooks:
+      - events: ["presync"]
+        command: "kubectl"
+        args: ["apply", "-f", "../storage/storage-classes.yaml"]
+
+  # Redis Cluster - Caching and pub/sub
+  - name: redis
+    namespace: isa-cloud-production
+    chart: bitnami/redis-cluster
+    version: "10.3.0"
+    values:
+      - values/redis-cluster.yaml
+    needs:
+      - isa-cloud-production/postgresql
+
+  # NATS JetStream - Message streaming
+  - name: nats
+    namespace: isa-cloud-production
+    chart: nats/nats
+    version: "1.2.0"
+    values:
+      - values/nats-jetstream.yaml
+    needs:
+      - isa-cloud-production/redis
+
+  # MinIO Distributed - Object storage
+  - name: minio
+    namespace: isa-cloud-production
+    chart: minio/minio
+    version: "5.2.0"
+    values:
+      - values/minio-distributed.yaml
+    needs:
+      - isa-cloud-production/nats
+
+  # Qdrant Distributed - Vector database
+  - name: qdrant
+    namespace: isa-cloud-production
+    chart: qdrant/qdrant
+    version: "0.10.0"
+    values:
+      - values/qdrant-distributed.yaml
+    needs:
+      - isa-cloud-production/minio
+
+  # Neo4j Cluster - Graph database
+  - name: neo4j
+    namespace: isa-cloud-production
+    chart: neo4j/neo4j
+    version: "5.23.0"
+    values:
+      - values/neo4j-cluster.yaml
+    needs:
+      - isa-cloud-production/qdrant
+
+  # EMQX Cluster - MQTT broker
+  - name: emqx
+    namespace: isa-cloud-production
+    chart: emqx/emqx
+    version: "5.7.0"
+    values:
+      - values/emqx-cluster.yaml
+    needs:
+      - isa-cloud-production/neo4j
+
+  # ============================================
+  # ML Platform
+  # ============================================
+
+  # KubeRay Operator - Ray cluster management
+  - name: kuberay-operator
+    namespace: ray-system
+    chart: kuberay/kuberay-operator
+    version: "1.2.2"
+    values:
+      - values/kuberay-operator.yaml
+    needs:
+      - isa-cloud-production/emqx
+
+  # Ray Cluster - Production cluster with GPU workers
+  - name: ray-cluster
+    namespace: isa-cloud-production
+    chart: kuberay/ray-cluster
+    version: "1.2.2"
+    values:
+      - values/ray-cluster.yaml
+    needs:
+      - ray-system/kuberay-operator
+
+  # MLflow - Model tracking and registry
+  - name: mlflow
+    namespace: mlflow
+    chart: bitnami/mlflow
+    version: "1.4.0"
+    values:
+      - values/mlflow.yaml
+    needs:
+      - isa-cloud-production/kuberay-operator
+
+  # JupyterHub - Multi-user notebook environment
+  - name: jupyterhub
+    namespace: isa-cloud-production
+    chart: jupyterhub/jupyterhub
+    version: "3.3.0"
+    values:
+      - values/jupyterhub.yaml
+    needs:
+      - isa-cloud-production/mlflow

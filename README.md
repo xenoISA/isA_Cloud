@@ -103,7 +103,7 @@
 │ Grafana      │   │ loki-grpc    │   │ isA_MCP      │
 │ Qdrant       │   │ qdrant-grpc  │   │ isA_Model    │
 └──────────────┘   └──────────────┘   │ isa-data     │
-                                       │ web-service  │
+                                       │ isa-os  │
                                        └──────────────┘
 ```
 

@@ -1,0 +1,157 @@
+# Redis Cluster - Bitnami Chart Values
+# Chart: bitnami/redis-cluster
+# Docs: https://github.com/bitnami/charts/tree/main/bitnami/redis-cluster
+
+global:
+  storageClass: "infotrend-block-fast"
+  redis:
+    password: ""                  # Set via --set or external secret
+
+# Cluster configuration
+cluster:
+  nodes: 6                        # 3 masters + 3 replicas
+  replicas: 1                     # 1 replica per master
+
+  # Cluster initialization
+  init: true
+
+  # External access (disabled for production)
+  externalAccess:
+    enabled: false
+
+# Redis configuration
+redis:
+  # Pod resources
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+  # Configuration
+  configuration: |
+    maxmemory 1500mb
+    maxmemory-policy allkeys-lru
+    appendonly yes
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    tcp-keepalive 300
+    timeout 0
+    tcp-backlog 511
+    cluster-require-full-coverage no
+    cluster-node-timeout 15000
+    cluster-replica-validity-factor 10
+    cluster-migration-barrier 1
+
+  # Pod anti-affinity
+  podAntiAffinityPreset: hard
+
+  # Topology spread constraints (spread across zones if available)
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis-cluster
+
+  # Liveness probe
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+  # Readiness probe
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 5
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: "infotrend-block-fast"
+  size: 20Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    redis: 6379
+
+# Metrics (Prometheus)
+metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+  serviceMonitor:
+    enabled: true
+    namespace: isa-cloud-production
+    labels:
+      release: prometheus
+  prometheusRule:
+    enabled: true
+    rules:
+      - alert: RedisClusterDown
+        expr: redis_cluster_state == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis cluster is down"
+      - alert: RedisClusterFlapping
+        expr: changes(redis_cluster_state[5m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis cluster is flapping"
+
+# Pod Disruption Budget
+pdb:
+  create: true
+  minAvailable: 4                 # At least 4 of 6 nodes available
+  maxUnavailable: 2
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  allowExternal: false
+  ingressNSMatchLabels:
+    kubernetes.io/metadata.name: isa-cloud-production
+
+# Security context
+containerSecurityContext:
+  enabled: true
+  runAsUser: 1001
+  runAsNonRoot: true
+
+podSecurityContext:
+  enabled: true
+  fsGroup: 1001
+
+# Init containers (wait for volume permissions)
+volumePermissions:
+  enabled: true
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"

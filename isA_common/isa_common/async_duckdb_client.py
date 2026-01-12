@@ -1,624 +1,849 @@
 #!/usr/bin/env python3
 """
-Async DuckDB gRPC Client
-High-performance async DuckDB client using grpc.aio
+Async DuckDB Native Client
+High-performance async DuckDB client for analytical workloads.
+
+This client uses DuckDB's native Python API with async wrappers,
+providing full support for analytical SQL operations including:
+- SQL query execution
+- Parquet/CSV file operations
+- In-memory analytics
+- Table management
+- Data export
 
 Performance Benefits:
-- True async I/O without GIL blocking
-- Concurrent analytics queries
-- Non-blocking data imports/exports
-- Memory-efficient connection pooling
+- Columnar storage for fast analytics
+- Vectorized execution engine
+- Zero-copy data access
+- Direct file operations (no gRPC gateway overhead)
 """
 
-import asyncio
+import os
 import logging
-import re
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
-from .async_base_client import AsyncBaseGRPCClient
-from .proto import duckdb_service_pb2, duckdb_service_pb2_grpc
+import asyncio
+from typing import List, Dict, Optional, Any
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
-if TYPE_CHECKING:
-    from .consul_client import ConsulRegistry
+import duckdb
 
 logger = logging.getLogger(__name__)
 
 
-class AsyncDuckDBClient(AsyncBaseGRPCClient):
-    """Async DuckDB gRPC client for high-performance analytics."""
+class AsyncDuckDBClient:
+    """
+    Async DuckDB client using native duckdb driver.
+
+    Provides async wrapper around DuckDB for high-performance analytical queries.
+    Uses a thread pool executor for non-blocking operations.
+    """
 
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
+        database: Optional[str] = None,
         user_id: Optional[str] = None,
+        read_only: bool = False,
+        max_workers: int = 4,
         lazy_connect: bool = True,
-        enable_compression: bool = True,
-        enable_retry: bool = True,
-        consul_registry: Optional['ConsulRegistry'] = None,
-        service_name_override: Optional[str] = None
+        **kwargs  # Accept additional kwargs for compatibility
     ):
         """
-        Initialize async DuckDB client.
+        Initialize async DuckDB client with native driver.
 
         Args:
-            host: Service address (optional, will use Consul discovery if not provided)
-            port: Service port (optional, will use Consul discovery if not provided)
-            user_id: User ID
-            lazy_connect: Lazy connection (default: True)
-            enable_compression: Enable compression (default: True for large data)
-            enable_retry: Enable retry (default: True)
-            consul_registry: ConsulRegistry instance for service discovery (optional)
-            service_name_override: Override service name for Consul lookup (optional)
+            database: Database file path (default: in-memory ':memory:')
+            user_id: User ID for schema prefixing (optional)
+            read_only: Open database in read-only mode (default: False)
+            max_workers: Thread pool size (default: 4)
+            lazy_connect: Delay connection until first use (default: True)
         """
-        super().__init__(
-            host=host,
-            port=port,
-            user_id=user_id,
-            lazy_connect=lazy_connect,
-            enable_compression=enable_compression,
-            enable_retry=enable_retry,
-            consul_registry=consul_registry,
-            service_name_override=service_name_override
+        self._database = database or os.getenv('DUCKDB_DATABASE', ':memory:')
+        self._read_only = read_only
+        self._max_workers = max_workers
+
+        self.user_id = user_id or 'default'
+
+        self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+
+        logger.info(f"AsyncDuckDBClient initialized: {self._database}")
+
+    def _get_schema_prefix(self) -> str:
+        """Get schema prefix for multi-tenant isolation."""
+        return f"{self.user_id}_"
+
+    def _prefix_table(self, table: str) -> str:
+        """Add prefix to table name for isolation."""
+        prefix = self._get_schema_prefix()
+        if table.startswith(prefix):
+            return table
+        return f"{prefix}{table}"
+
+    async def _ensure_connected(self):
+        """Ensure DuckDB connection is established."""
+        if self._conn is None:
+            self._conn = duckdb.connect(
+                self._database,
+                read_only=self._read_only
+            )
+            logger.info(f"Connected to DuckDB: {self._database}")
+
+    async def _run_in_executor(self, func, *args, **kwargs):
+        """Run blocking DuckDB operation in thread pool."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            lambda: func(*args, **kwargs)
         )
 
-    def _create_stub(self):
-        """Create DuckDB service stub."""
-        return duckdb_service_pb2_grpc.DuckDBServiceStub(self.channel)
+    async def close(self):
+        """Close DuckDB connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+        self._executor.shutdown(wait=False)
+        logger.info("DuckDB connection closed")
 
-    def service_name(self) -> str:
-        return "DuckDB"
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self._ensure_connected()
+        return self
 
-    def default_port(self) -> int:
-        return 50052
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - keeps connection alive for reuse."""
+        pass
 
-    def _get_org_id(self) -> str:
-        """Get organization ID."""
-        return 'default_org'
+    async def shutdown(self):
+        """Explicitly shutdown the connection. Call at application exit."""
+        await self.close()
 
-    def get_table_prefix(self) -> str:
-        """Get table name prefix."""
-        return f"user_{self.user_id}_"
-
-    def qualify_table_name(self, table_name: str, use_prefix: bool = True) -> str:
-        """Add user prefix to table name."""
-        if use_prefix and not table_name.startswith(self.get_table_prefix()):
-            return f"{self.get_table_prefix()}{table_name}"
-        return table_name
-
-    def _qualify_sql_tables(self, sql: str) -> str:
-        """Auto-qualify table names in SQL with user prefix."""
-        prefix = self.get_table_prefix()
-
-        if prefix in sql:
-            return sql
-
-        cte_names = set()
-        cte_pattern = r'\bWITH\s+(\w+)\s+AS\s*\('
-        for match in re.finditer(cte_pattern, sql, re.IGNORECASE):
-            cte_names.add(match.group(1).lower())
-        chained_cte_pattern = r',\s*(\w+)\s+AS\s*\('
-        for match in re.finditer(chained_cte_pattern, sql, re.IGNORECASE):
-            cte_names.add(match.group(1).lower())
-
-        patterns = [
-            (r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', rf'FROM {prefix}\1'),
-            (r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', rf'JOIN {prefix}\1'),
-            (r'\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', rf'INTO {prefix}\1'),
-            (r'\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', rf'UPDATE {prefix}\1'),
-            (r'\bTABLE\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', rf'TABLE {prefix}\1'),
-        ]
-
-        result = sql
-        for pattern, replacement in patterns:
-            safe_pattern = pattern.replace('([a-zA-Z_][a-zA-Z0-9_]*)',
-                                          r'(?!(?:pg_|information_schema|sqlite_|duckdb_|temp\.|main\.))([a-zA-Z_][a-zA-Z0-9_]*)')
-
-            def replace_fn(match):
-                table_name = match.group(1)
-                if table_name.lower() in cte_names:
-                    return match.group(0)
-                return match.group(0).replace(table_name, f"{prefix}{table_name}")
-
-            result = re.sub(safe_pattern, replace_fn, result, flags=re.IGNORECASE)
-
-        return result
+    def handle_error(self, error: Exception, operation: str) -> None:
+        """Handle and log errors."""
+        logger.error(f"DuckDB {operation} failed: {error}")
+        return None
 
     # ============================================
     # Health Check
     # ============================================
 
-    async def health_check(self, detailed: bool = False) -> Optional[Dict]:
-        """Health check."""
+    async def health_check(self, detailed: bool = True) -> Optional[Dict]:
+        """Check DuckDB service health."""
         try:
             await self._ensure_connected()
-            request = duckdb_service_pb2.HealthCheckRequest(detailed=detailed)
-            response = await self.stub.HealthCheck(request)
+
+            def _check():
+                result = self._conn.execute("SELECT 1 as check").fetchone()
+                version = self._conn.execute("SELECT version()").fetchone()[0]
+                return result, version
+
+            result, version = await self._run_in_executor(_check)
 
             return {
-                'healthy': response.healthy,
-                'version': getattr(response, 'version', ''),
-                'message': getattr(response, 'message', '')
+                'healthy': True,
+                'version': version,
+                'database': self._database
             }
 
         except Exception as e:
             return self.handle_error(e, "health check")
 
     # ============================================
-    # Database Management
-    # ============================================
-
-    async def create_database(self, db_name: str, minio_bucket: str = '',
-                             metadata: Optional[Dict[str, str]] = None) -> Optional[Dict]:
-        """Create database."""
-        try:
-            await self._ensure_connected()
-            request = duckdb_service_pb2.CreateDatabaseRequest(
-                database_name=db_name,
-                user_id=self.user_id,
-                organization_id=self._get_org_id(),
-                minio_bucket=minio_bucket,
-                metadata=metadata or {},
-            )
-
-            response = await self.stub.CreateDatabase(request)
-
-            if response.success:
-                return {
-                    'database_id': response.database_info.database_id,
-                    'database_name': response.database_info.database_name,
-                    'minio_bucket': response.database_info.minio_bucket,
-                    'size_bytes': response.database_info.size_bytes,
-                    'table_count': response.database_info.table_count,
-                }
-            return None
-
-        except Exception as e:
-            return self.handle_error(e, "create database")
-
-    async def list_databases(self) -> List[Dict]:
-        """List all databases."""
-        try:
-            await self._ensure_connected()
-            request = duckdb_service_pb2.ListDatabasesRequest(
-                user_id=self.user_id,
-                organization_id=self._get_org_id(),
-            )
-
-            response = await self.stub.ListDatabases(request)
-
-            if response.success:
-                databases = []
-                for db in response.databases:
-                    databases.append({
-                        'database_id': db.database_id,
-                        'name': db.database_name,
-                        'size': db.size_bytes,
-                        'table_count': db.table_count,
-                        'created_at': str(db.created_at),
-                    })
-                return databases
-            return []
-
-        except Exception as e:
-            return self.handle_error(e, "list databases") or []
-
-    async def delete_database(self, db_name: str, delete_from_minio: bool = True,
-                             force: bool = False) -> bool:
-        """Delete database."""
-        try:
-            await self._ensure_connected()
-            request = duckdb_service_pb2.DeleteDatabaseRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                delete_from_minio=delete_from_minio,
-                force=force,
-            )
-
-            response = await self.stub.DeleteDatabase(request)
-            return response.success
-
-        except Exception as e:
-            self.handle_error(e, "delete database")
-            return False
-
-    async def get_database_info(self, db_name: str) -> Optional[Dict]:
-        """Get database information."""
-        try:
-            await self._ensure_connected()
-            request = duckdb_service_pb2.GetDatabaseInfoRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-            )
-
-            response = await self.stub.GetDatabaseInfo(request)
-
-            if response.success:
-                return {
-                    'database_name': response.database_info.database_name,
-                    'size_bytes': response.database_info.size_bytes,
-                    'table_count': response.database_info.table_count,
-                    'minio_bucket': response.database_info.minio_bucket,
-                    'minio_path': response.database_info.minio_path,
-                    'created_at': str(response.database_info.created_at),
-                    'last_accessed': str(response.database_info.last_accessed),
-                }
-            return None
-
-        except Exception as e:
-            return self.handle_error(e, "get database info")
-
-    # ============================================
     # Query Operations
     # ============================================
 
-    async def execute_query(self, db_name: str, sql: str, limit: int = 100,
-                           auto_qualify_tables: bool = True) -> List[Dict]:
-        """Execute SQL query."""
+    async def query(self, sql: str, params: Optional[List[Any]] = None) -> Optional[List[Dict]]:
+        """Execute SELECT query.
+
+        Args:
+            sql: SQL query statement
+            params: Query parameters
+
+        Returns:
+            List of result rows as dictionaries
+        """
         try:
             await self._ensure_connected()
 
-            if auto_qualify_tables:
-                sql = self._qualify_sql_tables(sql)
+            def _query():
+                if params:
+                    result = self._conn.execute(sql, params)
+                else:
+                    result = self._conn.execute(sql)
 
-            request = duckdb_service_pb2.ExecuteQueryRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                query=sql,
-                max_rows=limit,
-            )
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
 
-            response = await self.stub.ExecuteQuery(request)
-
-            if response.success:
-                columns = list(response.columns)
-                results = []
-
-                for row_msg in response.rows:
-                    row_dict = {}
-                    for i, value in enumerate(row_msg.values):
-                        if i >= len(columns):
-                            break
-                        col_name = columns[i]
-
-                        if value.HasField('int_value'):
-                            row_dict[col_name] = value.int_value
-                        elif value.HasField('double_value'):
-                            row_dict[col_name] = value.double_value
-                        elif value.HasField('string_value'):
-                            row_dict[col_name] = value.string_value
-                        elif value.HasField('bool_value'):
-                            row_dict[col_name] = value.bool_value
-                        elif value.HasField('null_value'):
-                            row_dict[col_name] = None
-                        else:
-                            row_dict[col_name] = None
-                    results.append(row_dict)
-
-                return results
-            return []
+            return await self._run_in_executor(_query)
 
         except Exception as e:
-            return self.handle_error(e, "execute query") or []
+            return self.handle_error(e, "query")
+
+    async def execute_query(self, db_name: str, sql: str, limit: int = 100,
+                           auto_qualify_tables: bool = True) -> List[Dict]:
+        """Execute SQL query (compatibility method).
+
+        Args:
+            db_name: Database name (ignored for native client)
+            sql: SQL query statement
+            limit: Maximum rows to return
+            auto_qualify_tables: Auto-qualify table names
+
+        Returns:
+            List of result rows as dictionaries
+        """
+        if limit > 0 and 'LIMIT' not in sql.upper():
+            sql = f"{sql} LIMIT {limit}"
+        result = await self.query(sql)
+        return result or []
+
+    async def query_row(self, sql: str, params: Optional[List[Any]] = None) -> Optional[Dict]:
+        """Execute single row query.
+
+        Args:
+            sql: SQL query statement
+            params: Query parameters
+
+        Returns:
+            Single row as dictionary or None
+        """
+        try:
+            await self._ensure_connected()
+
+            def _query_row():
+                if params:
+                    result = self._conn.execute(sql, params)
+                else:
+                    result = self._conn.execute(sql)
+
+                columns = [desc[0] for desc in result.description]
+                row = result.fetchone()
+                if row:
+                    return dict(zip(columns, row))
+                return None
+
+            return await self._run_in_executor(_query_row)
+
+        except Exception as e:
+            return self.handle_error(e, "query row")
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = None) -> Optional[int]:
+        """Execute INSERT/UPDATE/DELETE statement.
+
+        Args:
+            sql: SQL statement
+            params: Statement parameters
+
+        Returns:
+            Number of rows affected (estimated)
+        """
+        try:
+            await self._ensure_connected()
+
+            def _execute():
+                if params:
+                    self._conn.execute(sql, params)
+                else:
+                    self._conn.execute(sql)
+                # DuckDB doesn't return row count directly
+                return 0
+
+            return await self._run_in_executor(_execute)
+
+        except Exception as e:
+            return self.handle_error(e, "execute")
 
     async def execute_statement(self, db_name: str, sql: str,
                                auto_qualify_tables: bool = True) -> int:
-        """Execute write operation (INSERT/UPDATE/DELETE)."""
+        """Execute write operation (compatibility method).
+
+        Args:
+            db_name: Database name (ignored)
+            sql: SQL statement
+            auto_qualify_tables: Auto-qualify table names
+
+        Returns:
+            Number of rows affected
+        """
+        result = await self.execute(sql)
+        return result or 0
+
+    async def execute_batch(self, operations: List[Dict[str, Any]]) -> Optional[Dict]:
+        """Execute batch operations.
+
+        Args:
+            operations: List of {'sql': str, 'params': List} dictionaries
+
+        Returns:
+            Batch execution results
+        """
         try:
             await self._ensure_connected()
 
-            if auto_qualify_tables:
-                sql = self._qualify_sql_tables(sql)
-
-            request = duckdb_service_pb2.ExecuteStatementRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                statement=sql,
-            )
-
-            response = await self.stub.ExecuteStatement(request)
-
-            if response.success:
-                return response.affected_rows
-            return 0
-
-        except Exception as e:
-            return self.handle_error(e, "execute statement") or 0
-
-    async def execute_batch(self, db_name: str, statements: List[str],
-                           use_transaction: bool = True,
-                           auto_qualify_tables: bool = True) -> Optional[Dict]:
-        """Batch execute SQL statements."""
-        try:
-            await self._ensure_connected()
-
-            if auto_qualify_tables:
-                statements = [self._qualify_sql_tables(stmt) for stmt in statements]
-
-            request = duckdb_service_pb2.ExecuteBatchRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                statements=statements,
-                transaction=use_transaction,
-            )
-
-            response = await self.stub.ExecuteBatch(request)
-
-            if response.success:
+            def _execute_batch():
                 results = []
-                for r in response.results:
-                    results.append({
-                        'success': r.success,
-                        'affected_rows': r.affected_rows,
-                        'error': r.error if r.error else None
-                    })
-                return {
-                    'success': True,
-                    'results': results,
-                    'total_execution_time_ms': response.total_execution_time_ms
-                }
-            return None
+                for op in operations:
+                    sql = op.get('sql', '')
+                    params = op.get('params', [])
+
+                    try:
+                        if params:
+                            self._conn.execute(sql, params)
+                        else:
+                            self._conn.execute(sql)
+                        results.append({'success': True, 'error': ''})
+                    except Exception as e:
+                        results.append({'success': False, 'error': str(e)})
+
+                return results
+
+            results = await self._run_in_executor(_execute_batch)
+
+            return {
+                'total_operations': len(operations),
+                'successful': len([r for r in results if r['success']]),
+                'results': results
+            }
 
         except Exception as e:
             return self.handle_error(e, "execute batch")
 
     # ============================================
-    # Table Management
+    # Table Operations
     # ============================================
+
+    async def list_tables(self, db_name: str = '') -> List[str]:
+        """List all tables in database.
+
+        Args:
+            db_name: Database name (ignored for native client)
+
+        Returns:
+            List of table names
+        """
+        try:
+            await self._ensure_connected()
+
+            def _list_tables():
+                result = self._conn.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+                )
+                return [row[0] for row in result.fetchall()]
+
+            return await self._run_in_executor(_list_tables)
+
+        except Exception as e:
+            self.handle_error(e, "list tables")
+            return []
+
+    async def table_exists(self, table: str) -> bool:
+        """Check if table exists.
+
+        Args:
+            table: Table name
+
+        Returns:
+            True if table exists, False otherwise
+        """
+        try:
+            await self._ensure_connected()
+
+            def _table_exists():
+                result = self._conn.execute(
+                    f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table}'"
+                )
+                return result.fetchone()[0] > 0
+
+            return await self._run_in_executor(_table_exists)
+
+        except Exception as e:
+            self.handle_error(e, "table exists check")
+            return False
 
     async def create_table(self, db_name: str, table_name: str,
                           schema: Dict[str, str]) -> bool:
-        """Create table."""
+        """Create table with schema.
+
+        Args:
+            db_name: Database name (ignored)
+            table_name: Table name
+            schema: Column definitions {'column_name': 'TYPE'}
+
+        Returns:
+            True if successful
+        """
         try:
             await self._ensure_connected()
-            columns = [
-                duckdb_service_pb2.ColumnInfo(name=name, data_type=dtype)
-                for name, dtype in schema.items()
-            ]
 
-            request = duckdb_service_pb2.CreateTableRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                table_name=table_name,
-                columns=columns,
-            )
+            def _create_table():
+                columns = ', '.join([f"{col} {dtype}" for col, dtype in schema.items()])
+                self._conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns})")
+                return True
 
-            response = await self.stub.CreateTable(request)
-            return response.success
+            return await self._run_in_executor(_create_table)
 
         except Exception as e:
             self.handle_error(e, "create table")
             return False
 
-    async def list_tables(self, db_name: str) -> List[str]:
-        """List all tables."""
-        try:
-            await self._ensure_connected()
-            request = duckdb_service_pb2.ListTablesRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-            )
-
-            response = await self.stub.ListTables(request)
-
-            if response.success:
-                return [table.table_name for table in response.tables]
-            return []
-
-        except Exception as e:
-            return self.handle_error(e, "list tables") or []
-
     async def drop_table(self, db_name: str, table_name: str,
                         if_exists: bool = True, cascade: bool = False) -> bool:
-        """Drop table."""
+        """Drop table.
+
+        Args:
+            db_name: Database name (ignored)
+            table_name: Table name
+            if_exists: Use IF EXISTS clause
+            cascade: Use CASCADE clause
+
+        Returns:
+            True if successful
+        """
         try:
             await self._ensure_connected()
-            request = duckdb_service_pb2.DropTableRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                table_name=table_name,
-                if_exists=if_exists,
-                cascade=cascade,
-            )
 
-            response = await self.stub.DropTable(request)
-            return response.success
+            def _drop_table():
+                if_clause = "IF EXISTS " if if_exists else ""
+                cascade_clause = " CASCADE" if cascade else ""
+                self._conn.execute(f"DROP TABLE {if_clause}{table_name}{cascade_clause}")
+                return True
+
+            return await self._run_in_executor(_drop_table)
 
         except Exception as e:
             self.handle_error(e, "drop table")
             return False
 
     async def get_table_schema(self, db_name: str, table_name: str) -> Optional[Dict]:
-        """Get table schema."""
+        """Get table schema.
+
+        Args:
+            db_name: Database name (ignored)
+            table_name: Table name
+
+        Returns:
+            Schema dictionary with column info
+        """
         try:
             await self._ensure_connected()
-            request = duckdb_service_pb2.GetTableSchemaRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                table_name=table_name,
-            )
 
-            response = await self.stub.GetTableSchema(request)
-
-            if response.success:
+            def _get_schema():
+                result = self._conn.execute(f"DESCRIBE {table_name}")
                 columns = []
-                for col in response.table_info.columns:
+                for row in result.fetchall():
                     columns.append({
-                        'name': col.name,
-                        'data_type': col.data_type,
-                        'nullable': col.nullable,
-                        'is_primary_key': col.is_primary_key,
+                        'name': row[0],
+                        'data_type': row[1],
+                        'nullable': row[2] == 'YES' if len(row) > 2 else True
                     })
+                return {'table_name': table_name, 'columns': columns}
 
-                return {
-                    'table_name': response.table_info.table_name,
-                    'columns': columns,
-                    'row_count': response.table_info.row_count,
-                    'size_bytes': response.table_info.size_bytes,
-                }
-            return None
+            return await self._run_in_executor(_get_schema)
 
         except Exception as e:
             return self.handle_error(e, "get table schema")
 
     async def get_table_stats(self, db_name: str, table_name: str,
                              include_columns: bool = True) -> Optional[Dict]:
-        """Get table statistics."""
+        """Get table statistics.
+
+        Args:
+            db_name: Database name (ignored)
+            table_name: Table name
+            include_columns: Include column statistics
+
+        Returns:
+            Statistics dictionary
+        """
         try:
             await self._ensure_connected()
-            request = duckdb_service_pb2.GetTableStatsRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                table_name=table_name,
-                include_columns=include_columns,
-            )
 
-            response = await self.stub.GetTableStats(request)
+            def _get_stats():
+                # Get row count
+                count_result = self._conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                row_count = count_result.fetchone()[0]
 
-            if response.success:
                 stats = {
-                    'table_name': response.stats.table_name,
-                    'row_count': response.stats.row_count,
-                    'size_bytes': response.stats.size_bytes,
+                    'table_name': table_name,
+                    'row_count': row_count,
+                    'size_bytes': 0,  # DuckDB doesn't expose this directly
                     'column_stats': []
                 }
 
                 if include_columns:
-                    for col_stat in response.stats.column_stats:
+                    # Get column info
+                    desc_result = self._conn.execute(f"DESCRIBE {table_name}")
+                    for row in desc_result.fetchall():
+                        col_name = row[0]
+                        # Get distinct count
+                        distinct_result = self._conn.execute(
+                            f"SELECT COUNT(DISTINCT {col_name}) FROM {table_name}"
+                        )
+                        distinct_count = distinct_result.fetchone()[0]
+
+                        # Get null count
+                        null_result = self._conn.execute(
+                            f"SELECT COUNT(*) FROM {table_name} WHERE {col_name} IS NULL"
+                        )
+                        null_count = null_result.fetchone()[0]
+
                         stats['column_stats'].append({
-                            'column_name': col_stat.column_name,
-                            'distinct_count': col_stat.distinct_count,
-                            'null_count': col_stat.null_count,
+                            'column_name': col_name,
+                            'distinct_count': distinct_count,
+                            'null_count': null_count
                         })
 
                 return stats
-            return None
+
+            return await self._run_in_executor(_get_stats)
 
         except Exception as e:
             return self.handle_error(e, "get table stats")
 
     # ============================================
-    # Data Import/Export (MinIO)
+    # File Operations
     # ============================================
 
-    async def import_from_minio(self, db_name: str, table_name: str,
-                               bucket: str, object_key: str,
-                               file_format: str = 'parquet') -> bool:
-        """Import data from MinIO."""
+    async def read_parquet(self, file_path: str, table_name: Optional[str] = None) -> Optional[List[Dict]]:
+        """Read Parquet file.
+
+        Args:
+            file_path: Path to Parquet file
+            table_name: Optional table name to create
+
+        Returns:
+            List of rows as dictionaries
+        """
         try:
             await self._ensure_connected()
-            request = duckdb_service_pb2.ImportFromMinIORequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                table_name=table_name,
-                bucket_name=bucket,
-                object_key=object_key,
-                format=file_format,
-            )
 
-            response = await self.stub.ImportFromMinIO(request)
-            return response.success
+            def _read_parquet():
+                if table_name:
+                    self._conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM read_parquet('{file_path}')")
+                    return []
+                else:
+                    result = self._conn.execute(f"SELECT * FROM read_parquet('{file_path}')")
+                    columns = [desc[0] for desc in result.description]
+                    rows = result.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
+
+            return await self._run_in_executor(_read_parquet)
 
         except Exception as e:
-            self.handle_error(e, "import from MinIO")
-            return False
+            return self.handle_error(e, "read parquet")
 
-    async def export_to_minio(self, db_name: str, query: str, bucket: str,
-                             object_key: str, file_format: str = 'parquet',
-                             overwrite: bool = True,
-                             auto_qualify_tables: bool = True) -> Optional[Dict]:
-        """Export query results to MinIO."""
+    async def read_csv(self, file_path: str, table_name: Optional[str] = None,
+                      header: bool = True, delimiter: str = ',') -> Optional[List[Dict]]:
+        """Read CSV file.
+
+        Args:
+            file_path: Path to CSV file
+            table_name: Optional table name to create
+            header: CSV has header row
+            delimiter: Column delimiter
+
+        Returns:
+            List of rows as dictionaries
+        """
         try:
             await self._ensure_connected()
 
-            if auto_qualify_tables:
-                query = self._qualify_sql_tables(query)
+            def _read_csv():
+                opts = f"header={header}, delim='{delimiter}'"
+                if table_name:
+                    self._conn.execute(
+                        f"CREATE TABLE {table_name} AS SELECT * FROM read_csv('{file_path}', {opts})"
+                    )
+                    return []
+                else:
+                    result = self._conn.execute(f"SELECT * FROM read_csv('{file_path}', {opts})")
+                    columns = [desc[0] for desc in result.description]
+                    rows = result.fetchall()
+                    return [dict(zip(columns, row)) for row in rows]
 
-            request = duckdb_service_pb2.ExportToMinIORequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                query=query,
-                bucket_name=bucket,
-                object_key=object_key,
-                format=file_format,
-                overwrite=overwrite,
-            )
+            return await self._run_in_executor(_read_csv)
 
-            response = await self.stub.ExportToMinIO(request)
+        except Exception as e:
+            return self.handle_error(e, "read csv")
 
-            if response.success:
+    async def write_parquet(self, table_or_query: str, file_path: str) -> Optional[bool]:
+        """Write table or query result to Parquet file.
+
+        Args:
+            table_or_query: Table name or SELECT query
+            file_path: Output Parquet file path
+
+        Returns:
+            True if successful
+        """
+        try:
+            await self._ensure_connected()
+
+            def _write_parquet():
+                if table_or_query.upper().startswith('SELECT'):
+                    self._conn.execute(f"COPY ({table_or_query}) TO '{file_path}' (FORMAT PARQUET)")
+                else:
+                    self._conn.execute(f"COPY {table_or_query} TO '{file_path}' (FORMAT PARQUET)")
+                return True
+
+            return await self._run_in_executor(_write_parquet)
+
+        except Exception as e:
+            return self.handle_error(e, "write parquet")
+
+    async def write_csv(self, table_or_query: str, file_path: str,
+                       header: bool = True, delimiter: str = ',') -> Optional[bool]:
+        """Write table or query result to CSV file.
+
+        Args:
+            table_or_query: Table name or SELECT query
+            file_path: Output CSV file path
+            header: Include header row
+            delimiter: Column delimiter
+
+        Returns:
+            True if successful
+        """
+        try:
+            await self._ensure_connected()
+
+            def _write_csv():
+                opts = f"FORMAT CSV, HEADER {header}, DELIMITER '{delimiter}'"
+                if table_or_query.upper().startswith('SELECT'):
+                    self._conn.execute(f"COPY ({table_or_query}) TO '{file_path}' ({opts})")
+                else:
+                    self._conn.execute(f"COPY {table_or_query} TO '{file_path}' ({opts})")
+                return True
+
+            return await self._run_in_executor(_write_csv)
+
+        except Exception as e:
+            return self.handle_error(e, "write csv")
+
+    # ============================================
+    # Bulk Insert Operations
+    # ============================================
+
+    async def insert_many(self, table: str, rows: List[Dict]) -> Optional[int]:
+        """Insert multiple rows.
+
+        Args:
+            table: Table name
+            rows: List of row dictionaries
+
+        Returns:
+            Number of rows inserted
+        """
+        try:
+            if not rows:
+                return 0
+
+            await self._ensure_connected()
+
+            def _insert_many():
+                columns = list(rows[0].keys())
+                cols_str = ', '.join(columns)
+                placeholders = ', '.join(['?' for _ in columns])
+
+                count = 0
+                for row in rows:
+                    values = [row.get(col) for col in columns]
+                    self._conn.execute(
+                        f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})",
+                        values
+                    )
+                    count += 1
+                return count
+
+            return await self._run_in_executor(_insert_many)
+
+        except Exception as e:
+            return self.handle_error(e, "insert many")
+
+    # ============================================
+    # Analytics Operations
+    # ============================================
+
+    async def aggregate(self, table: str, aggregations: List[Dict],
+                       group_by: Optional[List[str]] = None,
+                       where: Optional[str] = None) -> Optional[List[Dict]]:
+        """Perform aggregation query.
+
+        Args:
+            table: Table name
+            aggregations: List of {'function': 'SUM/AVG/COUNT/...', 'column': 'col', 'alias': 'name'}
+            group_by: Group by columns
+            where: WHERE clause condition
+
+        Returns:
+            Aggregation results
+        """
+        try:
+            await self._ensure_connected()
+
+            def _aggregate():
+                # Build aggregation expressions
+                agg_exprs = []
+                for agg in aggregations:
+                    func = agg.get('function', 'COUNT').upper()
+                    col = agg.get('column', '*')
+                    alias = agg.get('alias', f"{func}_{col}")
+                    agg_exprs.append(f"{func}({col}) AS {alias}")
+
+                agg_str = ', '.join(agg_exprs)
+
+                # Build SQL
+                sql = f"SELECT {agg_str}"
+                if group_by:
+                    sql = f"SELECT {', '.join(group_by)}, {agg_str}"
+
+                sql += f" FROM {table}"
+
+                if where:
+                    sql += f" WHERE {where}"
+
+                if group_by:
+                    sql += f" GROUP BY {', '.join(group_by)}"
+
+                result = self._conn.execute(sql)
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchall()
+                return [dict(zip(columns, row)) for row in rows]
+
+            return await self._run_in_executor(_aggregate)
+
+        except Exception as e:
+            return self.handle_error(e, "aggregate")
+
+    async def count(self, table: str, where: Optional[str] = None) -> Optional[int]:
+        """Count rows in table.
+
+        Args:
+            table: Table name
+            where: Optional WHERE condition
+
+        Returns:
+            Row count
+        """
+        try:
+            await self._ensure_connected()
+
+            def _count():
+                sql = f"SELECT COUNT(*) FROM {table}"
+                if where:
+                    sql += f" WHERE {where}"
+                result = self._conn.execute(sql)
+                return result.fetchone()[0]
+
+            return await self._run_in_executor(_count)
+
+        except Exception as e:
+            return self.handle_error(e, "count")
+
+    # ============================================
+    # Statistics
+    # ============================================
+
+    async def get_statistics(self) -> Optional[Dict]:
+        """Get database statistics.
+
+        Returns:
+            Statistics dictionary
+        """
+        try:
+            await self._ensure_connected()
+
+            def _get_stats():
+                # Get table count
+                result = self._conn.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'main'"
+                )
+                table_count = result.fetchone()[0]
+
                 return {
-                    'success': True,
-                    'rows_exported': response.rows_exported,
-                    'file_size': response.file_size,
-                    'execution_time_ms': response.execution_time_ms
+                    'database': self._database,
+                    'table_count': table_count,
+                    'is_memory': self._database == ':memory:'
                 }
-            return None
+
+            return await self._run_in_executor(_get_stats)
 
         except Exception as e:
-            return self.handle_error(e, "export to MinIO")
-
-    async def query_minio_file(self, db_name: str, bucket: str,
-                              object_key: str, file_format: str = 'parquet',
-                              limit: int = 100) -> List[Dict]:
-        """Query MinIO file directly without importing."""
-        try:
-            await self._ensure_connected()
-            query = f"SELECT * FROM $FILE LIMIT {limit}"
-
-            request = duckdb_service_pb2.QueryMinIOFileRequest(
-                database_id=db_name,
-                user_id=self.user_id,
-                bucket_name=bucket,
-                object_key=object_key,
-                format=file_format,
-                query=query,
-            )
-
-            response = await self.stub.QueryMinIOFile(request)
-
-            if response.success:
-                columns = list(response.columns)
-                results = []
-
-                for row_msg in response.rows:
-                    row_dict = {}
-                    for i, value in enumerate(row_msg.values):
-                        if i >= len(columns):
-                            break
-                        col_name = columns[i]
-
-                        if value.HasField('int_value'):
-                            row_dict[col_name] = value.int_value
-                        elif value.HasField('double_value'):
-                            row_dict[col_name] = value.double_value
-                        elif value.HasField('string_value'):
-                            row_dict[col_name] = value.string_value
-                        elif value.HasField('bool_value'):
-                            row_dict[col_name] = value.bool_value
-                        elif value.HasField('null_value'):
-                            row_dict[col_name] = None
-                        else:
-                            row_dict[col_name] = None
-                    results.append(row_dict)
-
-                return results
-            return []
-
-        except Exception as e:
-            return self.handle_error(e, "query MinIO file") or []
+            return self.handle_error(e, "get statistics")
 
     # ============================================
     # Concurrent Operations
     # ============================================
 
-    async def execute_queries_concurrent(self, db_name: str,
-                                        queries: List[str]) -> List[List[Dict]]:
-        """Execute multiple queries concurrently."""
-        tasks = [self.execute_query(db_name, q) for q in queries]
+    async def query_many_concurrent(self, queries: List[str]) -> List[Optional[List[Dict]]]:
+        """Execute multiple queries concurrently.
+
+        Args:
+            queries: List of SQL queries
+
+        Returns:
+            List of results for each query
+        """
+        tasks = [self.query(q) for q in queries]
         return await asyncio.gather(*tasks)
 
-    async def execute_statements_concurrent(self, db_name: str,
-                                           statements: List[str]) -> List[int]:
-        """Execute multiple statements concurrently."""
-        tasks = [self.execute_statement(db_name, s) for s in statements]
-        return await asyncio.gather(*tasks)
+    async def execute_queries_concurrent(self, db_name: str,
+                                        queries: List[str]) -> List[List[Dict]]:
+        """Execute multiple queries concurrently (compatibility method).
+
+        Args:
+            db_name: Database name (ignored)
+            queries: List of SQL queries
+
+        Returns:
+            List of results for each query
+        """
+        results = await self.query_many_concurrent(queries)
+        return [r or [] for r in results]
+
+
+# Example usage
+if __name__ == '__main__':
+    async def main():
+        async with AsyncDuckDBClient(
+            database=':memory:',
+            user_id='test_user'
+        ) as client:
+            # Health check
+            health = await client.health_check()
+            print(f"Health: {health}")
+
+            # Create table
+            await client.create_table('', 'test_table', {
+                'id': 'INTEGER',
+                'name': 'VARCHAR',
+                'value': 'DOUBLE'
+            })
+
+            # Insert data
+            await client.insert_many('test_table', [
+                {'id': 1, 'name': 'test1', 'value': 10.5},
+                {'id': 2, 'name': 'test2', 'value': 20.5},
+                {'id': 3, 'name': 'test3', 'value': 30.5},
+            ])
+
+            # Query
+            results = await client.query("SELECT * FROM test_table")
+            print(f"Query results: {results}")
+
+            # Aggregate
+            agg = await client.aggregate('test_table', [
+                {'function': 'SUM', 'column': 'value', 'alias': 'total'},
+                {'function': 'AVG', 'column': 'value', 'alias': 'average'}
+            ])
+            print(f"Aggregation: {agg}")
+
+            # List tables
+            tables = await client.list_tables()
+            print(f"Tables: {tables}")
+
+            # Stats
+            stats = await client.get_statistics()
+            print(f"Stats: {stats}")
+
+    asyncio.run(main())

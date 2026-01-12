@@ -29,7 +29,10 @@ from isa_common import AsyncPostgresClient
 
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50061'))
+PORT = int(os.environ.get('PORT', '5432'))
+DATABASE = os.environ.get('DATABASE', 'postgres')
+USERNAME = os.environ.get('USERNAME', 'postgres')
+PASSWORD = os.environ.get('PASSWORD', 'postgres')
 USER_ID = os.environ.get('USER_ID', 'test_user')
 
 # Test results
@@ -333,12 +336,17 @@ async def main():
     print(f"\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
-    print(f"  User: {USER_ID}")
+    print(f"  Database: {DATABASE}")
+    print(f"  Username: {USERNAME}")
+    print(f"  User ID: {USER_ID}")
     print()
 
     async with AsyncPostgresClient(
         host=HOST,
         port=PORT,
+        database=DATABASE,
+        username=USERNAME,
+        password=PASSWORD,
         user_id=USER_ID
     ) as client:
         # Initial cleanup

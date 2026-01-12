@@ -14,7 +14,6 @@ region: "us-east-1"                        # 区域
 # Consul 服务发现配置
 use_consul: false                          # 是否使用 Consul 发现服务
 service_name: "minio-service"              # Consul 中的服务名
-grpc_port: 50051                          # gRPC 端口
 
 # 连接配置
 connect_timeout: "30s"                     # 连接超时

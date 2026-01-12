@@ -17,9 +17,9 @@ COPY deployments/configs/staging/nats.conf /nats.conf
 
 # Expose NATS ports
 # 4222: Client connections
-# 8222: HTTP monitoring
+# 4223: HTTP monitoring
 # 6222: Cluster routing
-EXPOSE 4222 8222 6222
+EXPOSE 4222 4223 6222
 
 # Start NATS with config file
 ENTRYPOINT ["nats-server", "-c", "/nats.conf"]

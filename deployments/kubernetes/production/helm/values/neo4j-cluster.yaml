@@ -1,0 +1,153 @@
+# Neo4j Cluster - Official Chart Values
+# Chart: neo4j/neo4j
+# Docs: https://neo4j.com/docs/operations-manual/current/kubernetes/
+# Note: Cluster mode requires Neo4j Enterprise Edition
+
+# Deployment mode
+neo4j:
+  name: "neo4j"
+  edition: "enterprise"           # Required for clustering (community = single node only)
+
+  # Accept license agreement (required for enterprise)
+  acceptLicenseAgreement: "yes"
+
+  # Cluster configuration (enterprise only)
+  minimumClusterSize: 3
+
+  # Password (set via --set or external secret)
+  password: ""                    # Set via --set neo4j.password=xxx
+  # passwordFromSecret: neo4j-credentials
+
+  # Resources
+  resources:
+    cpu: "2000m"
+    memory: "4Gi"
+
+# Image configuration
+image:
+  imageName: neo4j/neo4j
+  imageTag: "5.23.0-enterprise"
+  pullPolicy: IfNotPresent
+
+# Pod configuration
+podSpec:
+  # Pod anti-affinity
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app: neo4j
+        topologyKey: kubernetes.io/hostname
+
+# Volumes configuration
+volumes:
+  data:
+    mode: dynamic
+    dynamic:
+      storageClassName: infotrend-block
+      requests:
+        storage: 50Gi
+      accessModes:
+        - ReadWriteOnce
+
+  logs:
+    mode: dynamic
+    dynamic:
+      storageClassName: infotrend-block
+      requests:
+        storage: 10Gi
+      accessModes:
+        - ReadWriteOnce
+
+# Neo4j configuration
+config:
+  # Cluster settings
+  causal_clustering.initial_discovery_members: "neo4j-0.neo4j.isa-cloud-production.svc.cluster.local:5000,neo4j-1.neo4j.isa-cloud-production.svc.cluster.local:5000,neo4j-2.neo4j.isa-cloud-production.svc.cluster.local:5000"
+  causal_clustering.minimum_core_cluster_size_at_formation: "3"
+  causal_clustering.minimum_core_cluster_size_at_runtime: "3"
+
+  # Memory settings
+  dbms.memory.heap.initial_size: "1G"
+  dbms.memory.heap.max_size: "2G"
+  dbms.memory.pagecache.size: "1G"
+
+  # Transaction settings
+  dbms.transaction.timeout: "60s"
+  dbms.lock.acquisition.timeout: "60s"
+
+  # Connection settings
+  dbms.connector.bolt.enabled: "true"
+  dbms.connector.http.enabled: "true"
+  dbms.connector.https.enabled: "false"
+
+  # Security
+  dbms.security.auth_enabled: "true"
+  dbms.security.procedures.unrestricted: "apoc.*"
+
+  # Logging
+  dbms.logs.query.enabled: "INFO"
+  dbms.logs.debug.level: "INFO"
+
+# Services
+services:
+  neo4j:
+    enabled: true
+    spec:
+      type: ClusterIP
+      ports:
+        http:
+          port: 7474
+          targetPort: 7474
+        bolt:
+          port: 7687
+          targetPort: 7687
+
+# Cluster admin service (for cluster operations)
+clusterService:
+  enabled: true
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 7474
+  runAsGroup: 7474
+  fsGroup: 7474
+
+# Probes
+startupProbe:
+  enabled: true
+  failureThreshold: 120
+  periodSeconds: 10
+
+readinessProbe:
+  enabled: true
+  failureThreshold: 3
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+livenessProbe:
+  enabled: true
+  failureThreshold: 5
+  periodSeconds: 30
+  timeoutSeconds: 10
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+  # maxUnavailable: 1
+
+# Service account
+serviceAccountName: ""            # Uses default if empty
+
+# APOC plugin (optional)
+# apoc_config:
+#   apoc.export.file.enabled: "true"
+#   apoc.import.file.enabled: "true"
+#   apoc.import.file.use_neo4j_config: "true"
+
+# Backup configuration (enterprise only)
+# backup:
+#   enabled: true
+#   schedule: "0 3 * * *"         # Daily at 3 AM
+#   target: "s3://isa-backups/neo4j/"

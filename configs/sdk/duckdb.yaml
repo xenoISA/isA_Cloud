@@ -12,7 +12,6 @@ threads: 4                                 # 并发线程数
 # Consul 服务发现配置
 use_consul: false                          # 是否使用 Consul 发现服务
 service_name: "duckdb-service"             # Consul 中的服务名
-grpc_port: 50052                          # gRPC 端口
 
 # 连接池配置
 max_open_conns: 10                        # 最大打开连接数

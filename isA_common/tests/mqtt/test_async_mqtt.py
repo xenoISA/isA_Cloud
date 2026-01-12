@@ -26,7 +26,7 @@ from isa_common import AsyncMQTTClient
 
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50053'))
+PORT = int(os.environ.get('PORT', '1883'))
 USER_ID = os.environ.get('USER_ID', 'test-user')
 ORG_ID = os.environ.get('ORG_ID', 'test-org')
 
@@ -225,23 +225,24 @@ async def test_get_statistics(client: AsyncMQTTClient):
         test_result(False, f"Get statistics - {e}")
 
 
-async def test_concurrent_publish(client: AsyncMQTTClient, session_id: str):
-    """Test 17: Concurrent Publish"""
+async def test_bulk_publish(client: AsyncMQTTClient, session_id: str):
+    """Test 17: Bulk Publish (using single connection batch)"""
     try:
+        # Note: MQTT with aiomqtt creates new connection per publish call,
+        # so we use publish_batch which shares a single connection
         messages = [
-            {'topic': f'test/async/concurrent/{i}', 'payload': f'Message {i}'.encode(), 'qos': 1}
+            {'topic': f'test/async/bulk/{i}', 'payload': f'Message {i}'.encode(), 'qos': 1}
             for i in range(10)
         ]
 
         start = time.time()
-        results = await client.publish_many_concurrent(session_id, messages)
+        result = await client.publish_batch(session_id, messages)
         elapsed = (time.time() - start) * 1000
 
-        success_count = sum(1 for r in results if r and r.get('success'))
-        success = success_count == len(messages)
-        test_result(success, f"Concurrent publish ({success_count}/{len(messages)} in {elapsed:.1f}ms)")
+        success = result is not None and result.get('published_count', 0) == len(messages)
+        test_result(success, f"Bulk publish ({result.get('published_count', 0)}/{len(messages)} in {elapsed:.1f}ms)")
     except Exception as e:
-        test_result(False, f"Concurrent publish - {e}")
+        test_result(False, f"Bulk publish - {e}")
 
 
 async def test_unregister_device(client: AsyncMQTTClient, device_id: str):
@@ -333,9 +334,9 @@ async def run_tests():
         print("\n--- Statistics ---")
         await test_get_statistics(client)
 
-        # Concurrent Operations
-        print("\n--- Concurrent Operations ---")
-        await test_concurrent_publish(client, session_id)
+        # Bulk Operations
+        print("\n--- Bulk Operations ---")
+        await test_bulk_publish(client, session_id)
 
         # Cleanup
         print("\n--- Cleanup ---")

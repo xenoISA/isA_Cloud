@@ -34,7 +34,7 @@ from isa_common import AsyncRedisClient, BatchedRedisGet, BatchedRedisSet
 
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50055'))
+PORT = int(os.environ.get('PORT', '6379'))
 USER_ID = os.environ.get('USER_ID', 'test_user')
 
 # Test results

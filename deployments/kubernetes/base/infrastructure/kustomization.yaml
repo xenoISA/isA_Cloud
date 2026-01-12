@@ -53,6 +53,9 @@ resources:
   # APISIX - API Gateway
   - apisix
 
+  # ML Platform - Ray Serve, MLflow, JupyterHub
+  - ml-platform
+
 commonLabels:
   project: isa-cloud
   managed-by: kustomize

@@ -14,8 +14,8 @@ spec:
     targetPort: 4222
     protocol: TCP
   - name: monitoring
-    port: 8222
-    targetPort: 8222
+    port: 4223
+    targetPort: 4223
     protocol: TCP
   - name: cluster
     port: 6222
