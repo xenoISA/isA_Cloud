@@ -1,0 +1,72 @@
+# =============================================================================
+# isA Cloud - Production Environment (App of Apps)
+# =============================================================================
+# Production environment with manual sync required.
+# Tracks the 'production' branch or release tags.
+# IMPORTANT: Auto-sync disabled for safety.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: isa-cloud-production
+  namespace: argocd
+  labels:
+    environment: production
+    project: isa-cloud
+  annotations:
+    notifications.argoproj.io/subscribe.on-deployed.slack: "isa-cloud-production"
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: "isa-cloud-alerts"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # App-of-apps source
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/argocd/apps/production
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    # IMPORTANT: Production requires manual sync approval
+    automated:
+      prune: false
+      selfHeal: false
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas
+        - /spec/maxReplicas
+
+  info:
+    - name: 'Environment'
+      value: 'Production'
+    - name: 'Pattern'
+      value: 'App-of-Apps'
+    - name: 'Auto-Sync'
+      value: 'Disabled - Manual Approval Required'
+    - name: 'Critical'
+      value: 'true'

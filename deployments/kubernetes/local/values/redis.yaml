@@ -1,0 +1,50 @@
+# Redis Helm Values - LOCAL (Simple)
+# Chart: bitnami/redis
+# Install: helm install redis bitnami/redis -n isa-cloud-local -f local/values/redis.yaml
+
+# Standalone mode (no replication for local dev)
+architecture: standalone
+
+# Authentication
+auth:
+  enabled: true
+  password: "staging_redis_2024"
+
+# Master configuration
+master:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+  # Service - NodePort for local access
+  service:
+    type: NodePort
+    ports:
+      redis: 6379
+    nodePorts:
+      redis: "30379"
+
+  # Configuration
+  configuration: |
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+
+  podLabels:
+    tier: infrastructure
+    environment: local
+
+# Disable replica for local
+replica:
+  replicaCount: 0
+
+# Disable metrics for lighter footprint
+metrics:
+  enabled: false

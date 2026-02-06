@@ -1,0 +1,62 @@
+# MinIO Helm Values - STAGING
+# Chart: minio-official/minio
+# Install: helm install minio minio-official/minio -n isa-cloud-staging -f staging/values/minio.yaml
+
+# Mode: standalone for staging
+mode: standalone
+
+# Replicas
+replicas: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 50Gi
+
+# Credentials from K8s secret
+existingSecret: "minio-secret"
+
+# Service - ClusterIP for internal access
+service:
+  type: ClusterIP
+  port: 9000
+
+# Console service - ClusterIP
+consoleService:
+  type: ClusterIP
+  port: 9001
+
+# Default buckets to create
+buckets:
+  - name: isa-data
+    policy: none
+    purge: false
+  - name: isa-models
+    policy: none
+    purge: false
+  - name: isa-logs
+    policy: none
+    purge: false
+  - name: isa-backups
+    policy: none
+    purge: false
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: staging
+
+# Enable metrics for staging monitoring
+metrics:
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring

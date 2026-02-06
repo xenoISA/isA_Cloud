@@ -1,0 +1,88 @@
+# Consul Helm Values - STAGING
+# Chart: hashicorp/consul
+# Install: helm install consul hashicorp/consul -n isa-cloud-staging -f staging/values/consul.yaml
+
+global:
+  name: consul
+  datacenter: staging
+
+  # Enable TLS for staging
+  tls:
+    enabled: false  # Enable when ready for production-like staging
+
+  # Gossip encryption (enable for security)
+  gossipEncryption:
+    autoGenerate: false
+
+# =============================================================================
+# SERVER (Consul Server)
+# =============================================================================
+server:
+  enabled: true
+  replicas: 1  # Use 3 for HA in production
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  storage: 10Gi
+  storageClass: null
+
+  # Expose server via ClusterIP
+  exposeService:
+    enabled: false
+
+# =============================================================================
+# CLIENT AGENT (Shared agent for service registration)
+# =============================================================================
+client:
+  enabled: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Expose client agent service for application registration
+  exposeGossipPorts: true
+
+# =============================================================================
+# UI
+# =============================================================================
+ui:
+  enabled: true
+  service:
+    enabled: true
+    type: ClusterIP
+
+# =============================================================================
+# CONNECT (Service Mesh) - Disabled for staging
+# =============================================================================
+connectInject:
+  enabled: false
+
+# =============================================================================
+# OTHER FEATURES
+# =============================================================================
+meshGateway:
+  enabled: false
+
+ingressGateways:
+  enabled: false
+
+terminatingGateways:
+  enabled: false
+
+dns:
+  enabled: true
+
+# Sync K8s services to Consul
+syncCatalog:
+  enabled: false

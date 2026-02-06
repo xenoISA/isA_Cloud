@@ -1,317 +1,458 @@
 #!/bin/bash
-# Production Infrastructure Deployment Script
-# Usage: ./deploy.sh [all|component-name] [--dry-run]
+# =============================================================================
+# ISA Platform - Production Deployment Script
+# =============================================================================
+# IMPORTANT: This script requires manual approval for each step.
+# Production deployments should go through CI/CD pipeline (ArgoCD).
+#
+# Usage:
+#   ./deploy.sh infrastructure    # Deploy HA infrastructure
+#   ./deploy.sh services          # Deploy application services (ArgoCD)
+#   ./deploy.sh mlplatform        # Deploy ML platform (Ray, MLflow, JupyterHub)
+#   ./deploy.sh etcd              # Deploy etcd cluster only
+#   ./deploy.sh all               # Deploy everything (with confirmations)
+#   ./deploy.sh status            # Check deployment status
+#   ./deploy.sh rollback <name>   # Rollback a Helm release
+# =============================================================================
 
-set -euo pipefail
+set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRODUCTION_DIR="$(dirname "$SCRIPT_DIR")"
+# Configuration
 NAMESPACE="isa-cloud-production"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VALUES_DIR="${SCRIPT_DIR}/../values"
+MANIFESTS_DIR="${SCRIPT_DIR}/../manifests"
+TIMEOUT="10m"
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
+
+confirm() {
+    echo -e "${YELLOW}[CONFIRM]${NC} $1"
+    read -p "Type 'yes' to continue: " response
+    if [[ "$response" != "yes" ]]; then
+        log_error "Deployment cancelled"
+        exit 1
+    fi
+}
 
 # Check prerequisites
 check_prerequisites() {
     log_info "Checking prerequisites..."
 
-    if ! command -v kubectl &> /dev/null; then
+    # Check kubectl
+    if ! command -v kubectl &>/dev/null; then
         log_error "kubectl not found. Please install kubectl."
         exit 1
     fi
 
-    if ! command -v helm &> /dev/null; then
-        log_error "helm not found. Please install helm."
+    # Check helm
+    if ! command -v helm &>/dev/null; then
+        log_error "Helm not found. Please install Helm."
         exit 1
     fi
 
-    if ! command -v helmfile &> /dev/null; then
-        log_warn "helmfile not found. Will use helm directly."
-        USE_HELMFILE=false
-    else
-        USE_HELMFILE=true
+    # Check kubectl context
+    local context=$(kubectl config current-context)
+    log_warn "Current kubectl context: ${context}"
+    confirm "Are you deploying to the correct PRODUCTION cluster?"
+
+    # Check namespace exists
+    if ! kubectl get namespace ${NAMESPACE} &>/dev/null; then
+        log_info "Creating namespace ${NAMESPACE}..."
+        kubectl create namespace ${NAMESPACE}
     fi
 
-    # Check cluster connectivity
-    if ! kubectl cluster-info &> /dev/null; then
-        log_error "Cannot connect to Kubernetes cluster. Check your kubeconfig."
-        exit 1
-    fi
-
-    log_success "Prerequisites check passed"
-}
-
-# Add Helm repositories
-add_helm_repos() {
-    log_info "Adding Helm repositories..."
-
-    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-    helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true
-    helm repo add minio https://charts.min.io/ 2>/dev/null || true
-    helm repo add qdrant https://qdrant.github.io/qdrant-helm/ 2>/dev/null || true
-    helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
-    helm repo add emqx https://repos.emqx.io/charts 2>/dev/null || true
-
-    helm repo update
-
-    log_success "Helm repositories updated"
-}
-
-# Deploy storage classes
-deploy_storage() {
-    log_info "Deploying storage classes..."
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        kubectl apply -f "$PRODUCTION_DIR/storage/storage-classes.yaml" --dry-run=client
-    else
-        kubectl apply -f "$PRODUCTION_DIR/storage/storage-classes.yaml"
-    fi
-
-    log_success "Storage classes deployed"
-}
-
-# Deploy namespace and RBAC
-deploy_namespace() {
-    log_info "Deploying namespace and RBAC..."
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        kubectl apply -f "$PRODUCTION_DIR/namespace.yaml" --dry-run=client
-    else
-        kubectl apply -f "$PRODUCTION_DIR/namespace.yaml"
-    fi
-
-    log_success "Namespace and RBAC deployed"
-}
-
-# Generic Helm deploy function
-deploy_helm_chart() {
-    local name=$1
-    local chart=$2
-    local values_file=$3
-    local extra_args=${4:-""}
-
-    log_info "Deploying $name..."
-
-    local cmd="helm upgrade --install $name $chart \
-        --namespace $NAMESPACE \
-        --values $PRODUCTION_DIR/helm/values/$values_file \
-        --wait --timeout 10m \
-        $extra_args"
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-        cmd="$cmd --dry-run"
-    fi
-
-    eval $cmd
-
-    log_success "$name deployed"
-}
-
-# Deploy PostgreSQL HA
-deploy_postgresql() {
-    log_info "Deploying PostgreSQL HA..."
-
-    # Check if secrets exist
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! kubectl get secret postgresql-credentials -n "$NAMESPACE" &> /dev/null; then
-            log_warn "Creating PostgreSQL credentials secret..."
-            read -sp "Enter PostgreSQL admin password: " PG_PASSWORD
-            echo
-            kubectl create secret generic postgresql-credentials \
-                --namespace "$NAMESPACE" \
-                --from-literal=postgres-password="$PG_PASSWORD" \
-                --from-literal=replication-password="$PG_PASSWORD" \
-                --from-literal=password="$PG_PASSWORD"
+    # Check secrets exist
+    local required_secrets=("postgresql-secret" "redis-secret" "neo4j-secret" "minio-secret")
+    for secret in "${required_secrets[@]}"; do
+        if ! kubectl get secret ${secret} -n ${NAMESPACE} &>/dev/null; then
+            log_error "Required secret '${secret}' not found in ${NAMESPACE}"
+            log_error "Please create secrets before deploying. See secrets/infrastructure-secrets.yaml"
+            exit 1
         fi
-    fi
-
-    deploy_helm_chart "postgresql" "bitnami/postgresql-ha" "postgresql-ha.yaml" \
-        "--set global.postgresql.auth.existingSecret=postgresql-credentials"
-}
-
-# Deploy Redis Cluster
-deploy_redis() {
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! kubectl get secret redis-credentials -n "$NAMESPACE" &> /dev/null; then
-            log_warn "Creating Redis credentials secret..."
-            read -sp "Enter Redis password: " REDIS_PASSWORD
-            echo
-            kubectl create secret generic redis-credentials \
-                --namespace "$NAMESPACE" \
-                --from-literal=redis-password="$REDIS_PASSWORD"
-        fi
-    fi
-
-    deploy_helm_chart "redis" "bitnami/redis-cluster" "redis-cluster.yaml" \
-        "--set global.redis.existingSecret=redis-credentials"
-}
-
-# Deploy NATS JetStream
-deploy_nats() {
-    deploy_helm_chart "nats" "nats/nats" "nats-jetstream.yaml"
-}
-
-# Deploy MinIO Distributed
-deploy_minio() {
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! kubectl get secret minio-credentials -n "$NAMESPACE" &> /dev/null; then
-            log_warn "Creating MinIO credentials secret..."
-            read -p "Enter MinIO root user: " MINIO_USER
-            read -sp "Enter MinIO root password: " MINIO_PASSWORD
-            echo
-            kubectl create secret generic minio-credentials \
-                --namespace "$NAMESPACE" \
-                --from-literal=rootUser="$MINIO_USER" \
-                --from-literal=rootPassword="$MINIO_PASSWORD"
-        fi
-    fi
-
-    deploy_helm_chart "minio" "minio/minio" "minio-distributed.yaml" \
-        "--set existingSecret=minio-credentials"
-}
-
-# Deploy Qdrant Distributed
-deploy_qdrant() {
-    deploy_helm_chart "qdrant" "qdrant/qdrant" "qdrant-distributed.yaml"
-}
-
-# Deploy Neo4j Cluster
-deploy_neo4j() {
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! kubectl get secret neo4j-credentials -n "$NAMESPACE" &> /dev/null; then
-            log_warn "Creating Neo4j credentials secret..."
-            read -sp "Enter Neo4j password: " NEO4J_PASSWORD
-            echo
-            kubectl create secret generic neo4j-credentials \
-                --namespace "$NAMESPACE" \
-                --from-literal=NEO4J_AUTH="neo4j/$NEO4J_PASSWORD"
-        fi
-    fi
-
-    deploy_helm_chart "neo4j" "neo4j/neo4j" "neo4j-cluster.yaml" \
-        "--set neo4j.passwordFromSecret=neo4j-credentials"
-}
-
-# Deploy EMQX Cluster
-deploy_emqx() {
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if ! kubectl get secret emqx-credentials -n "$NAMESPACE" &> /dev/null; then
-            log_warn "Creating EMQX credentials secret..."
-            COOKIE=$(openssl rand -hex 32)
-            read -sp "Enter EMQX dashboard password: " EMQX_PASSWORD
-            echo
-            kubectl create secret generic emqx-credentials \
-                --namespace "$NAMESPACE" \
-                --from-literal=cookie="$COOKIE" \
-                --from-literal=dashboard-password="$EMQX_PASSWORD"
-        fi
-    fi
-
-    deploy_helm_chart "emqx" "emqx/emqx" "emqx-cluster.yaml" \
-        "--set emqxConfig.EMQX_NODE__COOKIE=\$(kubectl get secret emqx-credentials -n $NAMESPACE -o jsonpath='{.data.cookie}' | base64 -d)"
-}
-
-# Deploy all components
-deploy_all() {
-    deploy_storage
-    deploy_namespace
-
-    log_info "Waiting for namespace to be ready..."
-    sleep 5
-
-    deploy_postgresql
-    deploy_redis
-    deploy_nats
-    deploy_minio
-    deploy_qdrant
-    deploy_neo4j
-    deploy_emqx
-
-    log_success "All components deployed successfully!"
-}
-
-# Show deployment status
-show_status() {
-    log_info "Deployment Status:"
-    echo
-    kubectl get pods -n "$NAMESPACE" -o wide
-    echo
-    kubectl get pvc -n "$NAMESPACE"
-    echo
-    kubectl get svc -n "$NAMESPACE"
-}
-
-# Main entry point
-main() {
-    DRY_RUN="false"
-    COMPONENT="${1:-all}"
-
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --dry-run)
-                DRY_RUN="true"
-                log_warn "Running in dry-run mode"
-                ;;
-        esac
     done
 
-    check_prerequisites
-    add_helm_repos
+    log_info "Prerequisites check passed"
+}
 
-    case "$COMPONENT" in
+# Setup Helm repositories
+setup_helm_repos() {
+    log_step "Setting up Helm repositories..."
+
+    local repos=(
+        "bitnami https://charts.bitnami.com/bitnami"
+        "hashicorp https://helm.releases.hashicorp.com"
+        "apisix https://charts.apiseven.com"
+        "nats https://nats-io.github.io/k8s/helm/charts"
+        "qdrant https://qdrant.github.io/qdrant-helm"
+        "emqx https://repos.emqx.io/charts"
+        "minio https://charts.min.io"
+        "neo4j https://helm.neo4j.com/neo4j"
+        "kuberay https://ray-project.github.io/kuberay-helm"
+    )
+
+    for repo in "${repos[@]}"; do
+        local name=$(echo $repo | cut -d' ' -f1)
+        local url=$(echo $repo | cut -d' ' -f2)
+        if ! helm repo list | grep -q "^${name}"; then
+            helm repo add ${name} ${url}
+        fi
+    done
+
+    helm repo update
+    log_info "Helm repositories configured"
+}
+
+# Deploy etcd HA cluster
+deploy_etcd() {
+    log_step "Deploying etcd HA cluster..."
+
+    if [ -f "${MANIFESTS_DIR}/etcd.yaml" ]; then
+        kubectl apply -f "${MANIFESTS_DIR}/etcd.yaml"
+        log_info "Waiting for etcd cluster to be ready..."
+        kubectl wait --for=condition=ready pod -l app=etcd -n ${NAMESPACE} --timeout=180s || true
+
+        # Verify cluster health
+        local etcd_pod=$(kubectl get pods -n ${NAMESPACE} -l app=etcd -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$etcd_pod" ]; then
+            log_info "Checking etcd cluster health..."
+            kubectl exec -n ${NAMESPACE} ${etcd_pod} -- etcdctl endpoint health --cluster || log_warn "etcd cluster health check failed"
+        fi
+    else
+        log_error "etcd manifest not found: ${MANIFESTS_DIR}/etcd.yaml"
+        exit 1
+    fi
+
+    log_info "etcd HA cluster deployed"
+}
+
+# Deploy HA infrastructure
+deploy_infrastructure() {
+    log_info "Deploying HA infrastructure to production..."
+    confirm "This will deploy production infrastructure with HA configuration. Continue?"
+
+    setup_helm_repos
+
+    # 1. Deploy etcd first (APISIX dependency)
+    deploy_etcd
+
+    # 2. PostgreSQL HA
+    log_step "Deploying PostgreSQL HA cluster..."
+    helm upgrade --install postgresql bitnami/postgresql-ha \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/postgresql-ha.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 3. Redis Cluster
+    log_step "Deploying Redis cluster..."
+    helm upgrade --install redis bitnami/redis-cluster \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/redis-cluster.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 4. Neo4j Cluster
+    log_step "Deploying Neo4j cluster..."
+    helm upgrade --install neo4j neo4j/neo4j \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/neo4j-cluster.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 5. MinIO Distributed
+    log_step "Deploying MinIO distributed..."
+    helm upgrade --install minio minio/minio \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/minio-distributed.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 6. NATS JetStream
+    log_step "Deploying NATS JetStream cluster..."
+    helm upgrade --install nats nats/nats \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/nats-jetstream.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 7. Qdrant Distributed
+    log_step "Deploying Qdrant distributed..."
+    helm upgrade --install qdrant qdrant/qdrant \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/qdrant-distributed.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 8. EMQX Cluster
+    log_step "Deploying EMQX MQTT cluster..."
+    helm upgrade --install emqx emqx/emqx \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/emqx-cluster.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 9. Consul Cluster
+    log_step "Deploying Consul cluster..."
+    helm upgrade --install consul hashicorp/consul \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/consul.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 10. APISIX
+    log_step "Deploying APISIX..."
+    helm upgrade --install apisix apisix/apisix \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/apisix.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 11. Apply Consul-APISIX sync CronJob
+    log_step "Applying Consul-APISIX sync CronJob..."
+    if [ -f "${MANIFESTS_DIR}/consul-apisix-sync.yaml" ]; then
+        kubectl apply -f "${MANIFESTS_DIR}/consul-apisix-sync.yaml"
+    fi
+
+    log_info "Infrastructure deployment complete!"
+}
+
+# Deploy ML Platform
+deploy_mlplatform() {
+    log_info "Deploying ML Platform..."
+    confirm "This will deploy Ray, MLflow, and JupyterHub. Continue?"
+
+    setup_helm_repos
+
+    # 1. KubeRay Operator
+    log_step "Deploying KubeRay Operator..."
+    helm upgrade --install kuberay-operator kuberay/kuberay-operator \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/kuberay-operator.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # Wait for operator to be ready
+    log_info "Waiting for KubeRay operator..."
+    kubectl wait --for=condition=available deployment/kuberay-operator -n ${NAMESPACE} --timeout=120s || true
+
+    # 2. Ray Cluster
+    log_step "Deploying Ray Cluster..."
+    helm upgrade --install ray-cluster kuberay/ray-cluster \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/ray-cluster.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 3. MLflow
+    log_step "Deploying MLflow..."
+    if [ -f "${VALUES_DIR}/mlflow.yaml" ]; then
+        helm upgrade --install mlflow bitnami/mlflow \
+            -n ${NAMESPACE} \
+            -f ${VALUES_DIR}/mlflow.yaml \
+            --wait --timeout ${TIMEOUT} 2>/dev/null || {
+            log_warn "MLflow Helm chart not available, skipping..."
+        }
+    fi
+
+    # 4. JupyterHub
+    log_step "Deploying JupyterHub..."
+    if [ -f "${VALUES_DIR}/jupyterhub.yaml" ]; then
+        helm repo add jupyterhub https://jupyterhub.github.io/helm-chart/ 2>/dev/null || true
+        helm repo update
+        helm upgrade --install jupyterhub jupyterhub/jupyterhub \
+            -n ${NAMESPACE} \
+            -f ${VALUES_DIR}/jupyterhub.yaml \
+            --wait --timeout ${TIMEOUT}
+    fi
+
+    log_info "ML Platform deployment complete!"
+}
+
+# Deploy application services via ArgoCD
+deploy_services() {
+    log_info "Deploying application services via ArgoCD..."
+
+    if ! command -v argocd &>/dev/null; then
+        log_error "argocd CLI not found. Please install it or use the ArgoCD UI."
+        log_info "To install: brew install argocd"
+        exit 1
+    fi
+
+    # Check ArgoCD connection
+    if ! argocd app list &>/dev/null; then
+        log_error "Cannot connect to ArgoCD. Please login first: argocd login <server>"
+        exit 1
+    fi
+
+    # List production applications
+    local apps=$(argocd app list -o name 2>/dev/null | grep -E "production" || true)
+
+    if [ -z "$apps" ]; then
+        log_warn "No production ArgoCD applications found."
+        return
+    fi
+
+    echo -e "\n${BLUE}Production applications:${NC}"
+    echo "$apps"
+    echo ""
+
+    # Dry-run first
+    log_step "Running dry-run sync..."
+    for app in $apps; do
+        echo -e "\n${CYAN}Dry-run: ${app}${NC}"
+        argocd app diff ${app} --refresh 2>/dev/null || true
+    done
+
+    confirm "Review the changes above. Proceed with sync?"
+
+    # Actual sync
+    for app in $apps; do
+        log_step "Syncing ${app}..."
+        argocd app sync ${app} --prune --force
+    done
+
+    log_info "ArgoCD sync complete"
+}
+
+# Check status (enhanced)
+check_status() {
+    log_info "Checking production deployment status..."
+
+    echo -e "\n${BLUE}=== Namespace ===${NC}"
+    kubectl get namespace ${NAMESPACE} 2>/dev/null || echo "Namespace not found"
+
+    echo -e "\n${BLUE}=== Helm Releases ===${NC}"
+    helm list -n ${NAMESPACE}
+
+    echo -e "\n${BLUE}=== Pod Status ===${NC}"
+    kubectl get pods -n ${NAMESPACE} -o wide
+
+    echo -e "\n${BLUE}=== Services ===${NC}"
+    kubectl get svc -n ${NAMESPACE}
+
+    echo -e "\n${BLUE}=== PVCs ===${NC}"
+    kubectl get pvc -n ${NAMESPACE}
+
+    echo -e "\n${BLUE}=== Pod Disruption Budgets ===${NC}"
+    kubectl get pdb -n ${NAMESPACE} 2>/dev/null || echo "No PDBs configured"
+
+    echo -e "\n${BLUE}=== HPA Status ===${NC}"
+    kubectl get hpa -n ${NAMESPACE} 2>/dev/null || echo "No HPA configured"
+
+    echo -e "\n${BLUE}=== ArgoCD Applications ===${NC}"
+    if command -v argocd &>/dev/null; then
+        argocd app list 2>/dev/null | grep -E "production|${NAMESPACE}" || echo "No ArgoCD applications found"
+    else
+        echo "argocd CLI not installed"
+    fi
+
+    echo -e "\n${BLUE}=== Recent Events (warnings) ===${NC}"
+    kubectl get events -n ${NAMESPACE} --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | tail -10 || echo "No warning events"
+}
+
+# Rollback
+rollback() {
+    local release="$1"
+    if [[ -z "$release" ]]; then
+        log_error "Release name required"
+        echo "Usage: $0 rollback <release-name>"
+        echo ""
+        echo "Available releases:"
+        helm list -n ${NAMESPACE} --short
+        exit 1
+    fi
+
+    # Show current and previous revisions
+    echo -e "\n${BLUE}Release history for ${release}:${NC}"
+    helm history ${release} -n ${NAMESPACE} | tail -5
+
+    confirm "Rolling back ${release} in PRODUCTION. This may cause downtime. Continue?"
+
+    helm rollback ${release} -n ${NAMESPACE}
+    log_info "Rollback complete. Check status with: $0 status"
+}
+
+# Deploy all
+deploy_all() {
+    log_info "Starting full production deployment..."
+    confirm "This will deploy ALL components to PRODUCTION. Are you absolutely sure?"
+
+    check_prerequisites
+    deploy_infrastructure
+    deploy_mlplatform
+    deploy_services
+
+    log_info "Full production deployment complete!"
+    check_status
+}
+
+# Usage
+usage() {
+    echo "Usage: $0 <command>"
+    echo ""
+    echo "Commands:"
+    echo "  infrastructure    Deploy HA infrastructure (etcd, PostgreSQL, Redis, etc.)"
+    echo "  services          Deploy application services via ArgoCD"
+    echo "  mlplatform        Deploy ML platform (Ray, MLflow, JupyterHub)"
+    echo "  etcd              Deploy etcd HA cluster only"
+    echo "  all               Deploy everything (infrastructure + ML + services)"
+    echo "  status            Check deployment status"
+    echo "  rollback <name>   Rollback a Helm release"
+    echo ""
+    echo "Examples:"
+    echo "  $0 status                    # Check current status"
+    echo "  $0 infrastructure            # Deploy databases and messaging"
+    echo "  $0 mlplatform                # Deploy ML components"
+    echo "  $0 rollback postgresql       # Rollback PostgreSQL"
+    echo ""
+    echo "NOTE: Production deployments require explicit confirmation."
+    echo "      For routine deployments, use ArgoCD GitOps workflow."
+}
+
+# Main
+main() {
+    local command="${1:-}"
+    shift || true
+
+    case "${command}" in
+        infrastructure)
+            check_prerequisites
+            deploy_infrastructure
+            ;;
+        services)
+            deploy_services
+            ;;
+        mlplatform)
+            check_prerequisites
+            deploy_mlplatform
+            ;;
+        etcd)
+            check_prerequisites
+            setup_helm_repos
+            deploy_etcd
+            ;;
         all)
             deploy_all
             ;;
-        storage)
-            deploy_storage
-            ;;
-        namespace)
-            deploy_namespace
-            ;;
-        postgresql|postgres|pg)
-            deploy_postgresql
-            ;;
-        redis)
-            deploy_redis
-            ;;
-        nats)
-            deploy_nats
-            ;;
-        minio)
-            deploy_minio
-            ;;
-        qdrant)
-            deploy_qdrant
-            ;;
-        neo4j)
-            deploy_neo4j
-            ;;
-        emqx|mqtt)
-            deploy_emqx
-            ;;
         status)
-            show_status
+            check_status
+            ;;
+        rollback)
+            rollback "$@"
+            ;;
+        -h|--help)
+            usage
+            ;;
+        "")
+            usage
             ;;
         *)
-            log_error "Unknown component: $COMPONENT"
-            echo "Usage: $0 [all|storage|namespace|postgresql|redis|nats|minio|qdrant|neo4j|emqx|status] [--dry-run]"
+            log_error "Unknown command: ${command}"
+            usage
             exit 1
             ;;
     esac
-
-    if [[ "$COMPONENT" != "status" && "$DRY_RUN" != "true" ]]; then
-        show_status
-    fi
 }
 
 main "$@"

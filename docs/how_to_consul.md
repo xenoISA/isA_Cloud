@@ -24,6 +24,14 @@ Consul 是 HashiCorp 开发的分布式服务网格解决方案，在 isA Cloud 
 - **注册服务数**: 42 个服务
 - **健康检查**: TCP/HTTP 自动健康检查
 
+### Helm 部署的 Service 名称（现行）
+
+- **Server**: `consul-server`（Headless Service，无 ClusterIP）
+- **UI/API**: `consul-ui`（ClusterIP/NodePort，`port 80` → `targetPort 8500`）
+- **DNS**: `consul-dns`
+
+本地环境使用 NodePort 暴露 `consul-ui`，通过 `localhost:8500` 访问 Consul HTTP API。
+
 **组件分布**:
 ```
 ┌─────────────────────────────────────────────────────┐

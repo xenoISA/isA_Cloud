@@ -1,0 +1,173 @@
+# =============================================================================
+# etcd HA Cluster for Production Environment
+# =============================================================================
+# 3-replica etcd cluster for APISIX backend with:
+# - Pod anti-affinity for node spreading
+# - Pod Disruption Budget
+# - Enhanced resources and storage
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: isa-cloud-production
+  labels:
+    app: etcd
+    environment: production
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: 2379
+      targetPort: 2379
+    - name: peer
+      port: 2380
+      targetPort: 2380
+  selector:
+    app: etcd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd-headless
+  namespace: isa-cloud-production
+  labels:
+    app: etcd
+    environment: production
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: client
+      port: 2379
+      targetPort: 2379
+    - name: peer
+      port: 2380
+      targetPort: 2380
+  selector:
+    app: etcd
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: etcd-pdb
+  namespace: isa-cloud-production
+  labels:
+    app: etcd
+    environment: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: etcd
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+  namespace: isa-cloud-production
+  labels:
+    app: etcd
+    environment: production
+spec:
+  serviceName: etcd-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+        environment: production
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: etcd
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: etcd
+          image: gcr.io/etcd-development/etcd:v3.5.12
+          ports:
+            - containerPort: 2379
+              name: client
+            - containerPort: 2380
+              name: peer
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ETCD_NAME
+              value: "$(POD_NAME)"
+            - name: ETCD_DATA_DIR
+              value: "/etcd-data"
+            - name: ETCD_LISTEN_CLIENT_URLS
+              value: "http://0.0.0.0:2379"
+            - name: ETCD_ADVERTISE_CLIENT_URLS
+              value: "http://$(POD_NAME).etcd-headless.isa-cloud-production.svc.cluster.local:2379"
+            - name: ETCD_LISTEN_PEER_URLS
+              value: "http://0.0.0.0:2380"
+            - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+              value: "http://$(POD_NAME).etcd-headless.isa-cloud-production.svc.cluster.local:2380"
+            - name: ETCD_INITIAL_CLUSTER
+              value: "etcd-0=http://etcd-0.etcd-headless.isa-cloud-production.svc.cluster.local:2380,etcd-1=http://etcd-1.etcd-headless.isa-cloud-production.svc.cluster.local:2380,etcd-2=http://etcd-2.etcd-headless.isa-cloud-production.svc.cluster.local:2380"
+            - name: ETCD_INITIAL_CLUSTER_STATE
+              value: "new"
+            - name: ETCD_INITIAL_CLUSTER_TOKEN
+              value: "etcd-production-cluster"
+            # Performance tuning for production
+            - name: ETCD_QUOTA_BACKEND_BYTES
+              value: "8589934592"  # 8GB
+            - name: ETCD_AUTO_COMPACTION_RETENTION
+              value: "1"
+            - name: ETCD_AUTO_COMPACTION_MODE
+              value: "periodic"
+            - name: ETCD_SNAPSHOT_COUNT
+              value: "10000"
+            - name: ETCD_HEARTBEAT_INTERVAL
+              value: "100"
+            - name: ETCD_ELECTION_TIMEOUT
+              value: "1000"
+            # Enable metrics
+            - name: ETCD_LISTEN_METRICS_URLS
+              value: "http://0.0.0.0:2381"
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /etcd-data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 2379
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 2379
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: etcd-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: infotrend-block-fast
+        resources:
+          requests:
+            storage: 20Gi

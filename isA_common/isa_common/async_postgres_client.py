@@ -10,27 +10,36 @@ providing full support for all PostgreSQL operations including:
 - Connection pooling
 - Transaction management
 - Batch operations
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Connection pooling via asyncpg
-- Binary protocol for faster data transfer
-- Prepared statements for query optimization
-- Direct protocol (no gRPC gateway overhead)
 """
 
 import os
-import logging
+import json
 import asyncio
 from typing import List, Dict, Optional, Any
 
 import asyncpg
 from asyncpg import Pool, Connection
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncPostgresClient:
+async def _init_connection(conn: Connection) -> None:
+    """Initialize connection with JSON/JSONB codec for automatic dict serialization."""
+    await conn.set_type_codec(
+        'jsonb',
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema='pg_catalog'
+    )
+    await conn.set_type_codec(
+        'json',
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema='pg_catalog'
+    )
+
+
+class AsyncPostgresClient(AsyncBaseClient):
     """
     Async PostgreSQL client using native asyncpg driver.
 
@@ -38,91 +47,62 @@ class AsyncPostgresClient:
     all query operations, transactions, and high-performance connection pooling.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "PostgreSQL"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 5432
+    ENV_PREFIX = "POSTGRES"
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
         database: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        lazy_connect: bool = True,
         min_pool_size: int = 5,
         max_pool_size: int = 20,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async PostgreSQL client with native driver.
 
         Args:
-            host: PostgreSQL host (default: from POSTGRES_HOST env or 'localhost')
-            port: PostgreSQL port (default: from POSTGRES_PORT env or 5432)
-            user_id: User ID for isolation (optional)
             database: Database name (default: from POSTGRES_DB env or 'postgres')
             username: Database username (default: from POSTGRES_USER env)
             password: Database password (default: from POSTGRES_PASSWORD env)
-            lazy_connect: Delay connection until first use (default: True)
             min_pool_size: Minimum connections in pool (default: 5)
             max_pool_size: Maximum connections in pool (default: 20)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
-        self._host = host or os.getenv('POSTGRES_HOST', 'localhost')
-        self._port = port or int(os.getenv('POSTGRES_PORT', '5432'))
+        super().__init__(**kwargs)
+
         self._database = database or os.getenv('POSTGRES_DB', 'postgres')
         self._username = username or os.getenv('POSTGRES_USER', 'postgres')
         self._password = password or os.getenv('POSTGRES_PASSWORD', '')
         self._min_pool_size = min_pool_size
         self._max_pool_size = max_pool_size
 
-        self.user_id = user_id or 'default'
-
         self._pool: Optional[Pool] = None
 
-        logger.info(f"AsyncPostgresClient initialized: {self._host}:{self._port}/{self._database}")
+    async def _connect(self) -> None:
+        """Establish PostgreSQL connection pool with JSON/JSONB codec support."""
+        self._pool = await asyncpg.create_pool(
+            host=self._host,
+            port=self._port,
+            database=self._database,
+            user=self._username,
+            password=self._password,
+            min_size=self._min_pool_size,
+            max_size=self._max_pool_size,
+            command_timeout=60,
+            init=_init_connection  # Register JSON/JSONB codecs for automatic dict serialization
+        )
+        self._logger.info(f"Connected to PostgreSQL at {self._host}:{self._port}/{self._database}")
 
-    async def _ensure_connected(self):
-        """Ensure PostgreSQL connection pool is established."""
-        if self._pool is None:
-            self._pool = await asyncpg.create_pool(
-                host=self._host,
-                port=self._port,
-                database=self._database,
-                user=self._username,
-                password=self._password,
-                min_size=self._min_pool_size,
-                max_size=self._max_pool_size,
-                command_timeout=60
-            )
-            logger.info(f"Connected to PostgreSQL at {self._host}:{self._port}/{self._database}")
-
-    async def close(self):
+    async def _disconnect(self) -> None:
         """Close PostgreSQL connection pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
-        logger.info("PostgreSQL connection pool closed")
-
-    async def __aenter__(self):
-        """Async context manager entry - ensures connection pool is ready."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps pool alive for reuse.
-
-        Note: Pool is intentionally NOT closed here to allow connection reuse.
-        Call close() or shutdown() explicitly when done with the client.
-        """
-        # Don't close pool - keep it alive for reuse
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection pool. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"PostgreSQL {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check

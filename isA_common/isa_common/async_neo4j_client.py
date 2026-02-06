@@ -9,16 +9,9 @@ providing full support for all Neo4j features including:
 - Full Cypher query support (read and write)
 - Transaction management
 - Connection pooling
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Concurrent query execution
-- Memory-efficient connection pooling
-- Full Neo4j feature support (unlike gRPC gateway limitations)
 """
 
 import os
-import logging
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 
@@ -26,10 +19,10 @@ from contextlib import asynccontextmanager
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncNeo4jClient:
+class AsyncNeo4jClient(AsyncBaseClient):
     """
     Async Neo4j client using the native Neo4j Python driver.
 
@@ -37,98 +30,71 @@ class AsyncNeo4jClient:
     vector similarity search, write operations, and graph algorithms.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "Neo4j"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 7687
+    ENV_PREFIX = "NEO4J"
+    # No TENANT_SEPARATOR - Neo4j uses node properties for multi-tenancy
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
         uri: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         database: str = 'neo4j',
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async Neo4j client with native driver.
 
         Args:
-            host: Neo4j host (default: localhost)
-            port: Neo4j bolt port (default: 7687)
-            user_id: User ID for tracking (optional, for compatibility)
             uri: Full Neo4j URI (overrides host/port if provided)
             username: Neo4j username (default: from NEO4J_USER env or 'neo4j')
             password: Neo4j password (default: from NEO4J_PASSWORD env)
             database: Default database name (default: 'neo4j')
-            lazy_connect: Lazy connection (default: True)
-            **kwargs: Additional arguments for compatibility with gRPC version
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
+        super().__init__(**kwargs)
+
         # Build URI from host/port or use provided URI
         if uri:
             self._uri = uri
         else:
-            _host = host or os.getenv('NEO4J_HOST', 'localhost')
-            _port = port or int(os.getenv('NEO4J_PORT', '7687'))
-            self._uri = f"bolt://{_host}:{_port}"
+            self._uri = f"bolt://{self._host}:{self._port}"
 
         # Get credentials from env or parameters
         self._username = username or os.getenv('NEO4J_USER', 'neo4j')
         self._password = password or os.getenv('NEO4J_PASSWORD', 'neo4j')
         self._database = database
-        self._user_id = user_id  # For tracking/compatibility
 
         # Driver state
         self._driver = None
-        self._connected = False
 
-        # Connect immediately if not lazy
-        if not lazy_connect:
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(self._ensure_connected())
+    async def _connect(self) -> None:
+        """Establish Neo4j driver connection."""
+        try:
+            self._driver = AsyncGraphDatabase.driver(
+                self._uri,
+                auth=(self._username, self._password),
+                max_connection_pool_size=50,
+                connection_acquisition_timeout=30.0
+            )
+            # Verify connectivity
+            await self._driver.verify_connectivity()
+            self._logger.info(f"Connected to Neo4j at {self._uri}")
+        except AuthError as e:
+            self._logger.error(f"Neo4j authentication failed: {e}")
+            raise
+        except ServiceUnavailable as e:
+            self._logger.error(f"Neo4j service unavailable: {e}")
+            raise
 
-        logger.info(f"AsyncNeo4jClient initialized: {self._uri}")
-
-    async def _ensure_connected(self):
-        """Ensure driver is connected."""
-        if self._driver is None:
-            try:
-                self._driver = AsyncGraphDatabase.driver(
-                    self._uri,
-                    auth=(self._username, self._password),
-                    max_connection_pool_size=50,
-                    connection_acquisition_timeout=30.0
-                )
-                # Verify connectivity
-                await self._driver.verify_connectivity()
-                self._connected = True
-                logger.info(f"Connected to Neo4j at {self._uri}")
-            except AuthError as e:
-                logger.error(f"Neo4j authentication failed: {e}")
-                raise
-            except ServiceUnavailable as e:
-                logger.error(f"Neo4j service unavailable: {e}")
-                raise
-
-    async def close(self):
-        """Close the driver connection."""
+    async def _disconnect(self) -> None:
+        """Close Neo4j driver connection."""
         if self._driver:
             await self._driver.close()
             self._driver = None
-            self._connected = False
-            logger.info("Neo4j connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
 
     @asynccontextmanager
     async def session(self, database: Optional[str] = None):

@@ -1,0 +1,46 @@
+# EMQX Helm Values - STAGING
+# Chart: emqx/emqx
+# Install: helm install emqx emqx/emqx -n isa-cloud-staging -f staging/values/emqx.yaml
+
+# Single replica for staging
+replicaCount: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 10Gi
+
+# Service - ClusterIP for internal access
+service:
+  type: ClusterIP
+  mqtt: 1883
+  mqttssl: 8883
+  ws: 8083
+  wss: 8084
+  dashboard: 18083
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: staging
+
+# EMQX Configuration
+emqxConfig:
+  EMQX_ALLOW_ANONYMOUS: "false"
+  EMQX_DASHBOARD__DEFAULT_USERNAME: "admin"
+  # Password should be set via K8s secret in production
+  # For staging, we can use env vars or secrets
+
+# Authentication - reference K8s secret
+# envFrom:
+#   - secretRef:
+#       name: emqx-secret

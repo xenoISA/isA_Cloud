@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: isa-cloud-staging
+
+resources:
+  # Consul - Service Discovery (Single Node for Dev/Test)
+  - consul/configmap.yaml
+  - consul/statefulset.yaml
+  - consul/service.yaml
+  # Consul Agent - Shared agent for service registration
+  - consul/agent-configmap.yaml
+  - consul/agent-deployment.yaml
+  - consul/agent-service.yaml
+
+  # Redis - Cache and Message Queue
+  - redis/statefulset.yaml
+  - redis/service.yaml
+  - redis/configmap.yaml
+
+  # MinIO - Object Storage
+  - minio/statefulset.yaml
+  - minio/service.yaml
+  - minio/secret.yaml
+
+  # NATS - Message Streaming
+  - nats/statefulset.yaml
+  - nats/service.yaml
+
+  # Mosquitto - MQTT Broker
+  - mosquitto/deployment.yaml
+  - mosquitto/service.yaml
+
+  # PostgreSQL - Relational Database
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+  - postgres/secret.yaml
+
+  # Qdrant - Vector Database
+  - qdrant/statefulset.yaml
+  - qdrant/service.yaml
+
+  # Neo4j - Graph Database
+  - neo4j/statefulset.yaml
+  - neo4j/service.yaml
+  - neo4j/secret.yaml
+
+  # Loki - Removed (not needed for local dev)
+  # - loki/statefulset.yaml
+  # - loki/service.yaml
+
+  # Grafana - Removed (not needed for local dev)
+  # - grafana/deployment.yaml
+  # - grafana/service.yaml
+  # - grafana/secret.yaml
+
+  # APISIX - API Gateway
+  - apisix
+
+  # ML Platform - Ray Serve, MLflow, JupyterHub
+  - ml-platform
+
+commonLabels:
+  project: isa-cloud
+  managed-by: kustomize
+  tier: infrastructure
+
+commonAnnotations:
+  description: "isA Cloud Infrastructure Services - Complete Stack"
+  version: "1.0.0"

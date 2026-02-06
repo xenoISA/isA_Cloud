@@ -1,0 +1,61 @@
+# MinIO Helm Values - LOCAL (Simple)
+# Chart: minio-official/minio (Official MinIO chart)
+# Install: helm install minio minio-official/minio -n isa-cloud-local -f local/values/minio.yaml
+
+# Mode: standalone for local dev
+mode: standalone
+
+# Replicas (1 for standalone)
+replicas: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 20Gi
+
+# Root credentials
+rootUser: "minioadmin"
+rootPassword: "staging_minio_2024"
+
+# Service - NodePort for local access
+service:
+  type: NodePort
+  port: 9000
+  nodePort: 30900
+
+# Console service - NodePort
+consoleService:
+  type: NodePort
+  port: 9001
+  nodePort: 30901
+
+# Default buckets to create
+buckets:
+  - name: isa-data
+    policy: none
+    purge: false
+  - name: isa-models
+    policy: none
+    purge: false
+  - name: isa-logs
+    policy: none
+    purge: false
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# Disable metrics for local
+metrics:
+  serviceMonitor:
+    enabled: false

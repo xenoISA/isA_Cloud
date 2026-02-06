@@ -10,16 +10,9 @@ providing full support for analytical SQL operations including:
 - In-memory analytics
 - Table management
 - Data export
-
-Performance Benefits:
-- Columnar storage for fast analytics
-- Vectorized execution engine
-- Zero-copy data access
-- Direct file operations (no gRPC gateway overhead)
 """
 
 import os
-import logging
 import asyncio
 from typing import List, Dict, Optional, Any
 from pathlib import Path
@@ -27,10 +20,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncDuckDBClient:
+class AsyncDuckDBClient(AsyncBaseClient):
     """
     Async DuckDB client using native duckdb driver.
 
@@ -38,38 +31,40 @@ class AsyncDuckDBClient:
     Uses a thread pool executor for non-blocking operations.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "DuckDB"
+    DEFAULT_HOST = ""  # File-based, not network
+    DEFAULT_PORT = 0
+    ENV_PREFIX = "DUCKDB"
+    TENANT_SEPARATOR = "_"  # user_table
+
     def __init__(
         self,
         database: Optional[str] = None,
-        user_id: Optional[str] = None,
         read_only: bool = False,
         max_workers: int = 4,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async DuckDB client with native driver.
 
         Args:
             database: Database file path (default: in-memory ':memory:')
-            user_id: User ID for schema prefixing (optional)
             read_only: Open database in read-only mode (default: False)
             max_workers: Thread pool size (default: 4)
-            lazy_connect: Delay connection until first use (default: True)
+            **kwargs: Base client args (user_id, organization_id, lazy_connect)
         """
+        super().__init__(**kwargs)
+
         self._database = database or os.getenv('DUCKDB_DATABASE', ':memory:')
         self._read_only = read_only
         self._max_workers = max_workers
 
-        self.user_id = user_id or 'default'
-
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
-        logger.info(f"AsyncDuckDBClient initialized: {self._database}")
-
     def _get_schema_prefix(self) -> str:
-        """Get schema prefix for multi-tenant isolation."""
+        """Get schema prefix for multi-tenant isolation (DuckDB uses '_' separator)."""
         return f"{self.user_id}_"
 
     def _prefix_table(self, table: str) -> str:
@@ -79,14 +74,20 @@ class AsyncDuckDBClient:
             return table
         return f"{prefix}{table}"
 
-    async def _ensure_connected(self):
-        """Ensure DuckDB connection is established."""
-        if self._conn is None:
-            self._conn = duckdb.connect(
-                self._database,
-                read_only=self._read_only
-            )
-            logger.info(f"Connected to DuckDB: {self._database}")
+    async def _connect(self) -> None:
+        """Establish DuckDB connection."""
+        self._conn = duckdb.connect(
+            self._database,
+            read_only=self._read_only
+        )
+        self._logger.info(f"Connected to DuckDB: {self._database}")
+
+    async def _disconnect(self) -> None:
+        """Close DuckDB connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+        self._executor.shutdown(wait=False)
 
     async def _run_in_executor(self, func, *args, **kwargs):
         """Run blocking DuckDB operation in thread pool."""
@@ -95,32 +96,6 @@ class AsyncDuckDBClient:
             self._executor,
             lambda: func(*args, **kwargs)
         )
-
-    async def close(self):
-        """Close DuckDB connection."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-        self._executor.shutdown(wait=False)
-        logger.info("DuckDB connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"DuckDB {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check

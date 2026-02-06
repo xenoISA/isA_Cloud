@@ -1,0 +1,46 @@
+# EMQX Helm Values - LOCAL (Simple)
+# Chart: emqx/emqx
+# Install: helm install emqx emqx/emqx -n isa-cloud-local -f local/values/emqx.yaml
+
+# Single replica for local
+replicaCount: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 5Gi
+
+# Service - NodePort for local access
+service:
+  type: NodePort
+  mqtt: 1883
+  mqttssl: 8883
+  ws: 8083
+  wss: 8084
+  dashboard: 18083
+  nodePorts:
+    mqtt: 31883
+    mqttssl: 31884
+    ws: 31083
+    wss: 31084
+    dashboard: 31018
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# EMQX Configuration
+emqxConfig:
+  EMQX_ALLOW_ANONYMOUS: "true"
+  EMQX_DASHBOARD__DEFAULT_USERNAME: "admin"
+  EMQX_DASHBOARD__DEFAULT_PASSWORD: "staging_emqx_2024"

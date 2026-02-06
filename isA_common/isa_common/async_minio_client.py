@@ -10,17 +10,9 @@ providing full support for all object storage features including:
 - Presigned URLs
 - Tags and metadata
 - Concurrent operations
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Direct S3 protocol (no gRPC gateway overhead)
-- Concurrent upload/download operations
-- Memory-efficient streaming
-- Connection pooling via aioboto3
 """
 
 import os
-import logging
 from typing import List, Dict, Optional, AsyncIterator, Callable, Any
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -30,7 +22,7 @@ import aioboto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 # Constants
 DEFAULT_CHUNK_SIZE = 64 * 1024  # 64KB for streaming
@@ -39,7 +31,7 @@ MAX_PRESIGN_EXPIRY = 7 * 24 * 3600  # 7 days
 MIN_PRESIGN_EXPIRY = 60  # 1 minute
 
 
-class AsyncMinIOClient:
+class AsyncMinIOClient(AsyncBaseClient):
     """
     Async MinIO client using aioboto3 for direct S3 protocol access.
 
@@ -47,58 +39,51 @@ class AsyncMinIOClient:
     bucket management, object operations, presigned URLs, and streaming.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "MinIO"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 9000
+    ENV_PREFIX = "MINIO"
+    TENANT_SEPARATOR = "-"  # user-{user}-{bucket}
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
         endpoint_url: Optional[str] = None,
         access_key: Optional[str] = None,
         secret_key: Optional[str] = None,
         region: str = 'us-east-1',
         secure: bool = False,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility with gRPC version
+        **kwargs
     ):
         """
         Initialize async MinIO client with native S3 driver.
 
         Args:
-            host: MinIO host (default: from MINIO_HOST env or 'localhost')
-            port: MinIO port (default: from MINIO_PORT env or 9000)
-            user_id: User ID for multi-tenant bucket prefixing (optional, for compatibility)
             endpoint_url: Full MinIO endpoint URL (overrides host/port if provided)
             access_key: MinIO access key (default: from MINIO_ACCESS_KEY env)
             secret_key: MinIO secret key (default: from MINIO_SECRET_KEY env)
             region: AWS region (default: 'us-east-1')
             secure: Use HTTPS (default: False for local MinIO)
-            lazy_connect: Delay connection until first use (default: True)
-            **kwargs: Additional arguments for compatibility with gRPC version
-                - enable_compression: Ignored (handled by S3 protocol)
-                - enable_retry: Ignored (handled by botocore)
-                - consul_registry: Ignored (not needed for direct connection)
-                - service_name_override: Ignored (not needed for direct connection)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
+        super().__init__(**kwargs)
+
         # Build endpoint URL from host/port or use provided URL
         if endpoint_url:
             self._endpoint_url = endpoint_url
         else:
-            _host = host or os.getenv('MINIO_HOST', 'localhost')
-            _port = port or int(os.getenv('MINIO_PORT', '9000'))
             protocol = 'https' if secure else 'http'
-            self._endpoint_url = f"{protocol}://{_host}:{_port}"
+            self._endpoint_url = f"{protocol}://{self._host}:{self._port}"
 
         # Get credentials from env or parameters
         self._access_key = access_key or os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
         self._secret_key = secret_key or os.getenv('MINIO_SECRET_KEY', 'minioadmin')
         self._region = region
-        self._user_id = user_id  # For multi-tenant bucket prefixing (compatibility)
 
         # aioboto3 session and client state
         self._session = None
         self._s3_client = None
         self._s3_resource = None
-        self._connected = False
 
         # boto config with retry
         self._config = Config(
@@ -111,7 +96,14 @@ class AsyncMinIOClient:
             read_timeout=30
         )
 
-        logger.info(f"AsyncMinIOClient initialized: {self._endpoint_url}")
+    async def _connect(self) -> None:
+        """Create aioboto3 session."""
+        self._session = aioboto3.Session()
+        self._self._logger.info(f"Created aioboto3 session for {self._endpoint_url}")
+
+    async def _disconnect(self) -> None:
+        """Close aioboto3 session."""
+        self._session = None
 
     def _get_prefixed_bucket_name(self, bucket_name: str) -> str:
         """
@@ -125,9 +117,9 @@ class AsyncMinIOClient:
         - Only lowercase letters, numbers, hyphens
         - Must start/end with letter or number
         """
-        if self._user_id:
+        if self.user_id:
             # Sanitize user_id: replace underscores and special chars with hyphens
-            safe_user_id = self._user_id.lower().replace('_', '-').replace('|', '-')
+            safe_user_id = self.user_id.lower().replace('_', '-').replace('|', '-')
             # Remove consecutive hyphens
             while '--' in safe_user_id:
                 safe_user_id = safe_user_id.replace('--', '-')
@@ -147,12 +139,6 @@ class AsyncMinIOClient:
         while '--' in safe_bucket:
             safe_bucket = safe_bucket.replace('--', '-')
         return safe_bucket.strip('-')
-
-    async def _ensure_connected(self):
-        """Ensure aioboto3 session is created."""
-        if self._session is None:
-            self._session = aioboto3.Session()
-            logger.info(f"Created aioboto3 session for {self._endpoint_url}")
 
     async def _get_client(self):
         """Get or create S3 client context manager."""
@@ -177,30 +163,6 @@ class AsyncMinIOClient:
             region_name=self._region,
             config=self._config
         )
-
-    async def close(self):
-        """Close the client (cleanup)."""
-        self._session = None
-        self._connected = False
-        logger.info("MinIO connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"MinIO {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check
@@ -250,7 +212,7 @@ class AsyncMinIOClient:
                         CreateBucketConfiguration={'LocationConstraint': region}
                     )
 
-                logger.info(f"Created bucket: {prefixed_name}")
+                self._logger.info(f"Created bucket: {prefixed_name}")
                 return {
                     'success': True,
                     'bucket': prefixed_name,
@@ -280,7 +242,7 @@ class AsyncMinIOClient:
                     await self._empty_bucket(client, prefixed_name)
 
                 await client.delete_bucket(Bucket=prefixed_name)
-                logger.info(f"Deleted bucket: {prefixed_name}")
+                self._logger.info(f"Deleted bucket: {prefixed_name}")
                 return True
 
         except Exception as e:
@@ -300,7 +262,7 @@ class AsyncMinIOClient:
                         Delete={'Objects': delete_objects}
                     )
         except Exception as e:
-            logger.warning(f"Error emptying bucket {bucket_name}: {e}")
+            self._logger.warning(f"Error emptying bucket {bucket_name}: {e}")
 
     async def list_buckets(self, organization_id: str = 'default-org') -> List[str]:
         """List all accessible buckets."""
@@ -310,8 +272,8 @@ class AsyncMinIOClient:
                 buckets = response.get('Buckets', [])
 
                 # Filter by user prefix if user_id is set
-                if self._user_id:
-                    prefix = f"user-{self._user_id}-"
+                if self.user_id:
+                    prefix = f"user-{self.user_id}-"
                     return [
                         b['Name'].replace(prefix, '', 1)
                         for b in buckets
@@ -363,7 +325,7 @@ class AsyncMinIOClient:
 
                 return {
                     'name': bucket_name,
-                    'owner_id': self._user_id,
+                    'owner_id': self.user_id,
                     'organization_id': 'default-org',
                     'region': region,
                     'size_bytes': total_size,

@@ -306,6 +306,8 @@ class BaseEventSubscriber:
         - usage.recorded.* -> USAGE_EVENTS
         - billing.calculated -> BILLING_EVENTS
         - wallet.* -> WALLET_EVENTS
+        - *.file.> -> FILE_EVENTS (wildcard prefix uses second part)
+        - *.user.> -> USER_EVENTS
         """
         if subject.startswith('usage.'):
             return 'USAGE_EVENTS'
@@ -314,8 +316,17 @@ class BaseEventSubscriber:
         elif subject.startswith('wallet.'):
             return 'WALLET_EVENTS'
         else:
+            # Handle wildcard-prefixed subjects (e.g., *.file.>, *.user.>)
+            parts = subject.split('.')
+            if parts[0] in ('*', '>'):
+                # Use second part as stream name base
+                if len(parts) > 1 and parts[1] not in ('*', '>'):
+                    return f'{parts[1].upper()}_EVENTS'
+                else:
+                    # Fallback to generic events stream
+                    return 'EVENTS'
             # Default: uppercase first part + _EVENTS
-            first_part = subject.split('.')[0].upper()
+            first_part = parts[0].upper()
             return f'{first_part}_EVENTS'
 
     def _get_stream_subjects(self, subject: str) -> list:
@@ -335,9 +346,17 @@ class BaseEventSubscriber:
         elif subject.startswith('wallet.'):
             return ['wallet.>']
         else:
+            parts = subject.split('.')
+            # Handle wildcard-prefixed subjects (e.g., *.file.>, *.user.>)
+            if parts[0] in ('*', '>'):
+                # Use second part as stream subject base
+                if len(parts) > 1 and parts[1] not in ('*', '>'):
+                    return [f'*.{parts[1]}.>']
+                else:
+                    # Fallback to catch-all
+                    return ['>']
             # Default: first part with wildcard
-            first_part = subject.split('.')[0]
-            return [f'{first_part}.>']
+            return [f'{parts[0]}.>']
 
     async def _pull_and_process_loop(self, stream_name: str, consumer_name: str, subject: str):
         """

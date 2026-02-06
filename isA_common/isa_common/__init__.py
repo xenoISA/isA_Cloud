@@ -2,7 +2,7 @@
 """
 isa-common: Native Async Clients for isA Platform
 
-Version 0.4.0 - Direct native drivers (gRPC removed)
+Version 0.3.1 - Refactored with AsyncBaseClient
 
 Native async clients connect directly to infrastructure services:
 - AsyncPostgresClient (asyncpg) - port 5432
@@ -14,6 +14,8 @@ Native async clients connect directly to infrastructure services:
 - AsyncMinIOClient (aioboto3) - port 9000
 - AsyncDuckDBClient (duckdb) - embedded
 
+All clients extend AsyncBaseClient for consistent interface.
+
 Usage:
     from isa_common import AsyncPostgresClient, AsyncRedisClient
 
@@ -23,6 +25,12 @@ Usage:
 """
 
 from typing import Dict
+
+# =============================================================================
+# Base Client & Configuration
+# =============================================================================
+from .async_base_client import AsyncBaseClient
+from .async_client_config import ClientConfig, PostgresConfig, RedisConfig, MinIOConfig
 
 # =============================================================================
 # Native Async Clients (Direct Connections)
@@ -43,6 +51,12 @@ from .consul_client import ConsulRegistry, consul_lifespan
 # Exports
 # =============================================================================
 __all__ = [
+    # Base client & config
+    'AsyncBaseClient',
+    'ClientConfig',
+    'PostgresConfig',
+    'RedisConfig',
+    'MinIOConfig',
     # Native async clients
     'AsyncRedisClient',
     'AsyncPostgresClient',
@@ -74,4 +88,4 @@ NATIVE_PORTS: Dict[str, int] = {
     'duckdb': 0,  # Embedded, no port
 }
 
-__version__ = '0.4.0'
+__version__ = '0.3.1'

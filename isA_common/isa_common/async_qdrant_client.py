@@ -10,16 +10,9 @@ providing full support for all Qdrant operations including:
 - Vector similarity search
 - Payload filtering
 - Recommendation search
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Direct Qdrant protocol (no gRPC gateway overhead)
-- Efficient batch operations
-- Native vector search optimization
 """
 
 import os
-import logging
 import asyncio
 from typing import List, Dict, Optional, Any, Union
 
@@ -33,10 +26,10 @@ from qdrant_client.models import (
     RecommendQuery, RecommendInput
 )
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncQdrantClient:
+class AsyncQdrantClient(AsyncBaseClient):
     """
     Async Qdrant client using native qdrant-client driver.
 
@@ -44,81 +37,49 @@ class AsyncQdrantClient:
     collection management, vector search, and recommendation.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "Qdrant"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 6333
+    ENV_PREFIX = "QDRANT"
+    # No TENANT_SEPARATOR - Qdrant uses payload filtering for multi-tenancy
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
         api_key: Optional[str] = None,
         https: bool = False,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async Qdrant client with native driver.
 
         Args:
-            host: Qdrant host (default: from QDRANT_HOST env or 'localhost')
-            port: Qdrant port (default: from QDRANT_PORT env or 6333)
-            user_id: User ID (optional)
             api_key: Qdrant API key (default: from QDRANT_API_KEY env)
             https: Use HTTPS connection (default: False)
-            lazy_connect: Delay connection until first use (default: True)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
-        self._host = host or os.getenv('QDRANT_HOST', 'localhost')
-        self._port = port or int(os.getenv('QDRANT_PORT', '6333'))
+        super().__init__(**kwargs)
+
         self._api_key = api_key or os.getenv('QDRANT_API_KEY')
         self._https = https
 
-        self.user_id = user_id or 'default'
-
         self._client: Optional[QdrantAsyncClient] = None
 
-        logger.info(f"AsyncQdrantClient initialized: {self._host}:{self._port}")
+    async def _connect(self) -> None:
+        """Establish Qdrant connection."""
+        url = f"{'https' if self._https else 'http'}://{self._host}:{self._port}"
+        self._client = QdrantAsyncClient(
+            url=url,
+            api_key=self._api_key,
+            timeout=60
+        )
+        self._logger.info(f"Connected to Qdrant at {self._host}:{self._port}")
 
-    async def _ensure_connected(self):
-        """Ensure Qdrant connection is established."""
-        if self._client is None:
-            url = f"{'https' if self._https else 'http'}://{self._host}:{self._port}"
-            self._client = QdrantAsyncClient(
-                url=url,
-                api_key=self._api_key,
-                timeout=60
-            )
-            logger.info(f"Connected to Qdrant at {self._host}:{self._port}")
-
-    async def close(self):
+    async def _disconnect(self) -> None:
         """Close Qdrant connection."""
         if self._client:
             await self._client.close()
             self._client = None
-        logger.info("Qdrant connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    async def reconnect(self):
-        """Reconnect to Qdrant (for compatibility with sync_service).
-
-        With persistent connections, this just ensures the connection is ready.
-        """
-        await self._ensure_connected()
-        logger.debug("Qdrant connection verified/reconnected")
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"Qdrant {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check

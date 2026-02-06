@@ -92,3 +92,6 @@ supabase/.temp/
 deployments/aws/tasks/
 deployments/aws/services/*.env
 .env.local
+
+# Backup data (use backup_restore skills to create/restore)
+backups/
