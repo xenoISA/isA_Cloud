@@ -10,16 +10,9 @@ providing full support for all Redis operations including:
 - Distributed locks
 - Sessions management
 - Pipelining and batching
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Connection pooling via redis-py
-- Pipeline support for batch operations
-- Direct protocol (no gRPC gateway overhead)
 """
 
 import os
-import logging
 import asyncio
 import uuid
 from typing import List, Dict, Optional, AsyncIterator, Any
@@ -27,10 +20,10 @@ from typing import List, Dict, Optional, AsyncIterator, Any
 import redis.asyncio as redis
 from redis.asyncio import ConnectionPool
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncRedisClient:
+class AsyncRedisClient(AsyncBaseClient):
     """
     Async Redis client using native redis-py async driver.
 
@@ -38,68 +31,53 @@ class AsyncRedisClient:
     all data structures, pub/sub, locks, and high-performance pipelining.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "Redis"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 6379
+    ENV_PREFIX = "REDIS"
+    TENANT_SEPARATOR = ":"  # org:user:key
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None,
         password: Optional[str] = None,
         db: int = 0,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        max_connections: int = 20,
+        **kwargs
     ):
         """
         Initialize async Redis client with native driver.
 
         Args:
-            host: Redis host (default: from REDIS_HOST env or 'localhost')
-            port: Redis port (default: from REDIS_PORT env or 6379)
-            user_id: User ID for key prefixing (optional)
-            organization_id: Organization ID (optional)
             password: Redis password (default: from REDIS_PASSWORD env)
             db: Redis database number (default: 0)
-            lazy_connect: Delay connection until first use (default: True)
+            max_connections: Maximum pool connections (default: 20)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
-        self._host = host or os.getenv('REDIS_HOST', 'localhost')
-        self._port = port or int(os.getenv('REDIS_PORT', '6379'))
+        super().__init__(**kwargs)
+
         self._password = password or os.getenv('REDIS_PASSWORD')
         self._db = db
-        self.user_id = user_id or 'default'
-        self.organization_id = organization_id or 'default-org'
+        self._max_connections = max_connections
 
         self._pool: Optional[ConnectionPool] = None
         self._client: Optional[redis.Redis] = None
         self._pubsub = None
 
-        logger.info(f"AsyncRedisClient initialized: {self._host}:{self._port}")
+    async def _connect(self) -> None:
+        """Establish Redis connection."""
+        self._pool = ConnectionPool(
+            host=self._host,
+            port=self._port,
+            password=self._password,
+            db=self._db,
+            decode_responses=True,
+            max_connections=self._max_connections
+        )
+        self._client = redis.Redis(connection_pool=self._pool)
+        self._logger.info(f"Connected to Redis at {self._host}:{self._port}")
 
-    def _get_key_prefix(self) -> str:
-        """Get key prefix for multi-tenant isolation."""
-        return f"{self.organization_id}:{self.user_id}:"
-
-    def _prefix_key(self, key: str) -> str:
-        """Add prefix to key for isolation."""
-        prefix = self._get_key_prefix()
-        if key.startswith(prefix):
-            return key
-        return f"{prefix}{key}"
-
-    async def _ensure_connected(self):
-        """Ensure Redis connection is established."""
-        if self._client is None:
-            self._pool = ConnectionPool(
-                host=self._host,
-                port=self._port,
-                password=self._password,
-                db=self._db,
-                decode_responses=True,
-                max_connections=20
-            )
-            self._client = redis.Redis(connection_pool=self._pool)
-            logger.info(f"Connected to Redis at {self._host}:{self._port}")
-
-    async def close(self):
+    async def _disconnect(self) -> None:
         """Close Redis connection."""
         if self._client:
             await self._client.close()
@@ -107,25 +85,6 @@ class AsyncRedisClient:
         if self._pool:
             await self._pool.disconnect()
             self._pool = None
-        logger.info("Redis connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"Redis {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check

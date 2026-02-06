@@ -10,16 +10,9 @@ providing full support for all NATS operations including:
 - JetStream streams and consumers
 - Key-Value store
 - Object store
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Direct NATS protocol (no gRPC gateway overhead)
-- JetStream for persistence and exactly-once delivery
-- Built-in reconnection and cluster support
 """
 
 import os
-import logging
 import asyncio
 from typing import List, Dict, Optional, AsyncIterator, Any
 
@@ -29,10 +22,10 @@ from nats.js.api import StreamConfig, ConsumerConfig, DeliverPolicy, AckPolicy
 from nats.js.errors import NotFoundError
 from nats.errors import TimeoutError as NATSTimeoutError
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncNATSClient:
+class AsyncNATSClient(AsyncBaseClient):
     """
     Async NATS client using native nats-py driver.
 
@@ -40,45 +33,38 @@ class AsyncNATSClient:
     Core NATS, JetStream, KV Store, and Object Store.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "NATS"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 4222
+    ENV_PREFIX = "NATS"
+    TENANT_SEPARATOR = "."  # org.user.subject
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async NATS client with native driver.
 
         Args:
-            host: NATS host (default: from NATS_HOST env or 'localhost')
-            port: NATS port (default: from NATS_PORT env or 4222)
-            user_id: User ID for subject prefixing (optional)
-            organization_id: Organization ID (optional)
             username: NATS username (default: from NATS_USER env)
             password: NATS password (default: from NATS_PASSWORD env)
-            lazy_connect: Delay connection until first use (default: True)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
-        self._host = host or os.getenv('NATS_HOST', 'localhost')
-        self._port = port or int(os.getenv('NATS_PORT', '4222'))
+        super().__init__(**kwargs)
+
         self._username = username or os.getenv('NATS_USER')
         self._password = password or os.getenv('NATS_PASSWORD')
-
-        self.user_id = user_id or 'default'
-        self.organization_id = organization_id or 'default-org'
 
         self._nc: Optional[NATSClient] = None
         self._js = None  # JetStream context
         self._subscriptions: Dict[str, Any] = {}
 
-        logger.info(f"AsyncNATSClient initialized: {self._host}:{self._port}")
-
     def _get_subject_prefix(self) -> str:
-        """Get subject prefix for multi-tenant isolation."""
+        """Get subject prefix for multi-tenant isolation (NATS uses '.' separator)."""
         return f"{self.organization_id}.{self.user_id}."
 
     def _prefix_subject(self, subject: str) -> str:
@@ -88,51 +74,31 @@ class AsyncNATSClient:
             return subject
         return f"{prefix}{subject}"
 
-    async def _ensure_connected(self):
-        """Ensure NATS connection is established."""
-        if self._nc is None or not self._nc.is_connected:
-            server_url = f"nats://{self._host}:{self._port}"
+    async def _connect(self) -> None:
+        """Establish NATS connection."""
+        server_url = f"nats://{self._host}:{self._port}"
 
-            connect_opts = {
-                'servers': [server_url],
-                'reconnect_time_wait': 2,
-                'max_reconnect_attempts': 10,
-            }
+        connect_opts = {
+            'servers': [server_url],
+            'reconnect_time_wait': 2,
+            'max_reconnect_attempts': 10,
+        }
 
-            if self._username and self._password:
-                connect_opts['user'] = self._username
-                connect_opts['password'] = self._password
+        if self._username and self._password:
+            connect_opts['user'] = self._username
+            connect_opts['password'] = self._password
 
-            self._nc = await nats.connect(**connect_opts)
-            self._js = self._nc.jetstream()
-            logger.info(f"Connected to NATS at {self._host}:{self._port}")
+        self._nc = await nats.connect(**connect_opts)
+        self._js = self._nc.jetstream()
+        self._logger.info(f"Connected to NATS at {self._host}:{self._port}")
 
-    async def close(self):
+    async def _disconnect(self) -> None:
         """Close NATS connection."""
         if self._nc:
             await self._nc.drain()
             await self._nc.close()
             self._nc = None
             self._js = None
-        logger.info("NATS connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"NATS {operation} failed: {error}")
-        return None
 
     # ============================================
     # Health Check
@@ -413,7 +379,20 @@ class AsyncNATSClient:
                 ack_policy=AckPolicy.EXPLICIT,
             )
 
-            consumer = await self._js.add_consumer(stream_name, config)
+            try:
+                consumer = await self._js.add_consumer(stream_name, config)
+            except Exception as add_err:
+                err_str = str(add_err)
+                # If consumer exists with different config (err_code 10012), delete and recreate
+                if "10012" in err_str and "deliver policy" in err_str.lower():
+                    self._logger.warning(f"Consumer {consumer_name} config mismatch, recreating...")
+                    try:
+                        await self._js.delete_consumer(stream_name, consumer_name)
+                    except Exception:
+                        pass  # Ignore delete errors
+                    consumer = await self._js.add_consumer(stream_name, config)
+                else:
+                    raise add_err
 
             return {
                 'success': True,

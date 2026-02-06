@@ -106,7 +106,10 @@ isA_Cloud/
 
 ### CronJob 配置
 
-**文件**: `deployments/kubernetes/base/infrastructure/apisix/consul-sync-cronjob.yaml`
+**文件**:  
+- `deployments/kubernetes/local/manifests/consul-apisix-sync.yaml`  
+- `deployments/kubernetes/staging/manifests/consul-apisix-sync.yaml`  
+- `deployments/kubernetes/production/manifests/consul-apisix-sync.yaml`
 
 ```yaml
 apiVersion: batch/v1
@@ -125,9 +128,17 @@ spec:
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `CONSUL_URL` | `http://consul-agent.isa-cloud-staging.svc.cluster.local:8500` | Consul API 地址 |
-| `APISIX_ADMIN_URL` | `http://apisix-gateway.isa-cloud-staging.svc.cluster.local:9180` | APISIX Admin API 地址 |
+| `CONSUL_URL` | `http://consul-ui.isa-cloud-staging.svc.cluster.local` | Consul API 地址 |
+| `APISIX_ADMIN_URL` | `http://apisix-admin.isa-cloud-staging.svc.cluster.local:9180` | APISIX Admin API 地址 |
 | `APISIX_ADMIN_KEY` | `edd1c9f034335f136f87ad84b625c8f1` | APISIX Admin API 密钥 |
+
+### 环境映射
+
+| 环境 | Namespace | CONSUL_URL | APISIX_ADMIN_URL |
+|------|-----------|------------|------------------|
+| local/dev | `isa-cloud-staging` | `http://consul-ui.isa-cloud-staging.svc.cluster.local` | `http://apisix-admin.isa-cloud-staging.svc.cluster.local:9180` |
+| staging | `isa-cloud-staging` | `http://consul-ui.isa-cloud-staging.svc.cluster.local` | `http://apisix-admin.isa-cloud-staging.svc.cluster.local:9180` |
+| production | `isa-cloud-production` | `http://consul-ui.isa-cloud-production.svc.cluster.local` | `http://apisix-admin.isa-cloud-production.svc.cluster.local:9180` |
 
 ### 服务元数据
 
@@ -182,8 +193,8 @@ fi
 ### 初次部署
 
 ```bash
-# 1. 应用 CronJob 配置
-kubectl apply -f deployments/kubernetes/base/infrastructure/apisix/consul-sync-cronjob.yaml
+# 1. 应用 CronJob 配置（按环境）
+kubectl apply -f deployments/kubernetes/local/manifests/consul-apisix-sync.yaml
 
 # 2. 验证 CronJob 创建成功
 kubectl get cronjob consul-apisix-sync -n isa-cloud-staging

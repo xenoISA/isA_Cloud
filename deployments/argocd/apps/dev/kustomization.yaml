@@ -1,0 +1,14 @@
+# =============================================================================
+# Development Applications Kustomization
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - core-services.yaml
+  - os-services.yaml
+  - user-services-appset.yaml
+
+commonLabels:
+  managed-by: argocd
+  environment: dev

@@ -1,0 +1,23 @@
+# =============================================================================
+# Staging Applications Kustomization
+# =============================================================================
+# Lists all Application manifests for the staging environment
+# ArgoCD app-of-apps pattern uses this to discover child applications
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Core services
+  - mcp-service.yaml
+  - model-service.yaml
+  - agent-service.yaml
+  - data-service.yaml
+  # OS services
+  - os-services.yaml
+  # User microservices (ApplicationSet)
+  - user-services-appset.yaml
+
+commonLabels:
+  managed-by: argocd
+  environment: staging

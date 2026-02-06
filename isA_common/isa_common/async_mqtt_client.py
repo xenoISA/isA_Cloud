@@ -10,16 +10,9 @@ providing full support for all MQTT operations including:
 - Retained messages
 - Topic wildcards (+, #)
 - Session management
-
-Performance Benefits:
-- True async I/O without GIL blocking
-- Direct MQTT protocol (no gRPC gateway overhead)
-- Efficient message handling
-- Native MQTT v5 support
 """
 
 import os
-import logging
 import asyncio
 import json
 import uuid
@@ -28,10 +21,10 @@ from datetime import datetime
 
 import aiomqtt
 
-logger = logging.getLogger(__name__)
+from .async_base_client import AsyncBaseClient
 
 
-class AsyncMQTTClient:
+class AsyncMQTTClient(AsyncBaseClient):
     """
     Async MQTT client using native aiomqtt driver.
 
@@ -39,51 +32,43 @@ class AsyncMQTTClient:
     publish/subscribe, QoS levels, and retained messages.
     """
 
+    # Class-level configuration
+    SERVICE_NAME = "MQTT"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 1883
+    ENV_PREFIX = "MQTT"
+    TENANT_SEPARATOR = "/"  # org/user/topic
+
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        user_id: Optional[str] = None,
-        organization_id: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_id: Optional[str] = None,
-        lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs
     ):
         """
         Initialize async MQTT client with native driver.
 
         Args:
-            host: MQTT broker host (default: from MQTT_HOST env or 'localhost')
-            port: MQTT broker port (default: from MQTT_PORT env or 1883)
-            user_id: User ID (optional)
-            organization_id: Organization ID (optional)
             username: MQTT username (default: from MQTT_USER env)
             password: MQTT password (default: from MQTT_PASSWORD env)
             client_id: Client ID (default: auto-generated)
-            lazy_connect: Delay connection until first use (default: True)
+            **kwargs: Base client args (host, port, user_id, organization_id, lazy_connect)
         """
-        self._host = host or os.getenv('MQTT_HOST', 'localhost')
-        self._port = port or int(os.getenv('MQTT_PORT', '1883'))
+        super().__init__(**kwargs)
+
         self._username = username or os.getenv('MQTT_USER')
         self._password = password or os.getenv('MQTT_PASSWORD')
         self._client_id = client_id or f"isa-mqtt-{uuid.uuid4().hex[:8]}"
 
-        self.user_id = user_id or 'default'
-        self.organization_id = organization_id or 'default-org'
-
         self._client: Optional[aiomqtt.Client] = None
-        self._connected = False
         self._sessions: Dict[str, Dict] = {}
         self._devices: Dict[str, Dict] = {}
         self._subscriptions: Dict[str, Dict] = {}
         self._message_counts: Dict[str, int] = {'sent': 0, 'received': 0}
 
-        logger.info(f"AsyncMQTTClient initialized: {self._host}:{self._port}")
-
     def _get_topic_prefix(self) -> str:
-        """Get topic prefix for multi-tenant isolation."""
+        """Get topic prefix for multi-tenant isolation (MQTT uses '/' separator)."""
         return f"{self.organization_id}/{self.user_id}/"
 
     def _prefix_topic(self, topic: str) -> str:
@@ -93,35 +78,13 @@ class AsyncMQTTClient:
             return topic
         return f"{prefix}{topic}"
 
-    async def _ensure_connected(self):
-        """Ensure MQTT connection is established."""
-        # aiomqtt uses async context manager, so we track connection state
-        if not self._connected:
-            logger.info(f"MQTT client ready for {self._host}:{self._port}")
+    async def _connect(self) -> None:
+        """MQTT uses context manager for connections, just log ready state."""
+        self._logger.info(f"MQTT client ready for {self._host}:{self._port}")
 
-    async def close(self):
-        """Close MQTT connection."""
-        self._connected = False
+    async def _disconnect(self) -> None:
+        """Close MQTT connection state."""
         self._sessions.clear()
-        logger.info("MQTT connection closed")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self._ensure_connected()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit - keeps connection alive for reuse."""
-        pass
-
-    async def shutdown(self):
-        """Explicitly shutdown the connection. Call at application exit."""
-        await self.close()
-
-    def handle_error(self, error: Exception, operation: str) -> None:
-        """Handle and log errors."""
-        logger.error(f"MQTT {operation} failed: {error}")
-        return None
 
     def _get_client_config(self) -> Dict:
         """Get common client configuration."""

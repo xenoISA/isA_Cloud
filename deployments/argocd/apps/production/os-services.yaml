@@ -1,0 +1,136 @@
+# =============================================================================
+# OS Services - Production
+# =============================================================================
+# IMPORTANT: Auto-sync DISABLED. Manual sync required.
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-services-production
+  namespace: argocd
+  labels:
+    app: web-services
+    environment: production
+    tier: os
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_OS/os_services/web_services/deployment/helm/values.yaml
+        - ../../../isA_OS/os_services/web_services/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloud-os-production
+  namespace: argocd
+  labels:
+    app: cloud-os
+    environment: production
+    tier: os
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_OS/os_services/cloud_os/deployment/helm/values.yaml
+        - ../../../isA_OS/os_services/cloud_os/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: python-repl-production
+  namespace: argocd
+  labels:
+    app: python-repl
+    environment: production
+    tier: os
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_OS/os_services/python_repl/deployment/helm/values.yaml
+        - ../../../isA_OS/os_services/python_repl/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pool-manager-production
+  namespace: argocd
+  labels:
+    app: pool-manager
+    environment: production
+    tier: os
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_OS/os_services/pool_manager/deployment/helm/values.yaml
+        - ../../../isA_OS/os_services/pool_manager/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true

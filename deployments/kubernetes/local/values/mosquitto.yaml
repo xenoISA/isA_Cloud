@@ -1,0 +1,56 @@
+# Mosquitto (MQTT) Helm Values - LOCAL (Simple)
+# Chart: There's no official Mosquitto chart, using a community one or we can create a simple deployment
+# Alternative: Use EMQX for more features
+# Install: helm install mosquitto <repo>/mosquitto -n isa-cloud-local -f local/values/mosquitto.yaml
+
+# For local dev, we'll use a simple deployment approach
+# If using a community chart, adjust values accordingly
+
+# Image
+image:
+  repository: eclipse-mosquitto
+  tag: "2"
+  pullPolicy: IfNotPresent
+
+# Resources
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Service - NodePort for local access
+# Note: EMQX uses 31883 for MQTT. Use different ports if deploying both.
+service:
+  type: NodePort
+  ports:
+    mqtt:
+      port: 1883
+      nodePort: 31893  # Changed from 31883 to avoid EMQX conflict
+    websocket:
+      port: 9001
+      nodePort: 31903  # Changed from 31901
+
+# Persistence
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Configuration
+config:
+  mosquitto.conf: |
+    listener 1883
+    listener 9001
+    protocol websockets
+    allow_anonymous true
+    persistence true
+    persistence_location /mosquitto/data/
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# Note: If no community chart available, we'll create a simple deployment manifest

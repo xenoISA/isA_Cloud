@@ -1,0 +1,42 @@
+# =============================================================================
+# Agent Service - Staging
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-service-staging
+  namespace: argocd
+  labels:
+    app: agent-service
+    environment: staging
+    tier: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: main
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Agent/deployment/helm/values.yaml
+        - ../../../isA_Agent/deployment/helm/values-staging.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-staging
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m

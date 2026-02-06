@@ -1,0 +1,115 @@
+# =============================================================================
+# etcd StatefulSet for Staging Environment
+# =============================================================================
+# Single replica etcd for APISIX backend in staging.
+# Based on local/manifests/etcd.yaml with staging-specific configuration.
+# =============================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: isa-cloud-staging
+  labels:
+    app: etcd
+    environment: staging
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: 2379
+      targetPort: 2379
+    - name: peer
+      port: 2380
+      targetPort: 2380
+  selector:
+    app: etcd
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+  namespace: isa-cloud-staging
+  labels:
+    app: etcd
+    environment: staging
+spec:
+  serviceName: etcd
+  replicas: 1
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+        environment: staging
+    spec:
+      containers:
+        - name: etcd
+          image: gcr.io/etcd-development/etcd:v3.5.12
+          ports:
+            - containerPort: 2379
+              name: client
+            - containerPort: 2380
+              name: peer
+          env:
+            - name: ETCD_NAME
+              value: "etcd0"
+            - name: ETCD_DATA_DIR
+              value: "/etcd-data"
+            - name: ETCD_LISTEN_CLIENT_URLS
+              value: "http://0.0.0.0:2379"
+            - name: ETCD_ADVERTISE_CLIENT_URLS
+              value: "http://etcd.isa-cloud-staging.svc.cluster.local:2379"
+            - name: ETCD_LISTEN_PEER_URLS
+              value: "http://0.0.0.0:2380"
+            - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+              value: "http://etcd.isa-cloud-staging.svc.cluster.local:2380"
+            - name: ETCD_INITIAL_CLUSTER
+              value: "etcd0=http://etcd.isa-cloud-staging.svc.cluster.local:2380"
+            - name: ETCD_INITIAL_CLUSTER_STATE
+              value: "new"
+            - name: ETCD_INITIAL_CLUSTER_TOKEN
+              value: "etcd-staging-cluster"
+            # Performance tuning for staging
+            - name: ETCD_QUOTA_BACKEND_BYTES
+              value: "4294967296"  # 4GB
+            - name: ETCD_AUTO_COMPACTION_RETENTION
+              value: "1"
+            - name: ETCD_AUTO_COMPACTION_MODE
+              value: "periodic"
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /etcd-data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 2379
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 2379
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: etcd-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

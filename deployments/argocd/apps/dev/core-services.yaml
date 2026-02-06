@@ -1,0 +1,129 @@
+# =============================================================================
+# Core Services - Development
+# =============================================================================
+# Simplified deployment for local Kind cluster development
+# Uses NodePort services for localhost access
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mcp-service-dev
+  namespace: argocd
+  labels:
+    app: mcp-service
+    environment: dev
+    tier: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: develop
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_MCP/deployment/helm/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-service-dev
+  namespace: argocd
+  labels:
+    app: model-service
+    environment: dev
+    tier: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: develop
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Model/deployment/helm/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-service-dev
+  namespace: argocd
+  labels:
+    app: agent-service
+    environment: dev
+    tier: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: develop
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Agent/deployment/helm/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-service-dev
+  namespace: argocd
+  labels:
+    app: data-service
+    environment: dev
+    tier: core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: develop
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Data/deployment/helm/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

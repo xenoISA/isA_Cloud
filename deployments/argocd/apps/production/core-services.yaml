@@ -1,0 +1,166 @@
+# =============================================================================
+# Core Services - Production
+# =============================================================================
+# IMPORTANT: Auto-sync DISABLED. Manual sync required for all changes.
+# Uses production values with HA configuration.
+# =============================================================================
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mcp-service-production
+  namespace: argocd
+  labels:
+    app: mcp-service
+    environment: production
+    tier: core
+    critical: "true"
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_MCP/deployment/helm/values.yaml
+        - ../../../isA_MCP/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    # NO automated sync for production - manual approval required
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: model-service-production
+  namespace: argocd
+  labels:
+    app: model-service
+    environment: production
+    tier: core
+    critical: "true"
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Model/deployment/helm/values.yaml
+        - ../../../isA_Model/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-service-production
+  namespace: argocd
+  labels:
+    app: agent-service
+    environment: production
+    tier: core
+    critical: "true"
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Agent/deployment/helm/values.yaml
+        - ../../../isA_Agent/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-service-production
+  namespace: argocd
+  labels:
+    app: data-service
+    environment: production
+    tier: core
+    critical: "true"
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Data/deployment/helm/values.yaml
+        - ../../../isA_Data/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

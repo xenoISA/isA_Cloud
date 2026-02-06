@@ -1,0 +1,49 @@
+# Qdrant Helm Values - STAGING
+# Chart: qdrant/qdrant
+# Install: helm install qdrant qdrant/qdrant -n isa-cloud-staging -f staging/values/qdrant.yaml
+
+# Single replica for staging
+replicaCount: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# Persistence
+persistence:
+  size: 20Gi
+
+# Service - ClusterIP for internal access
+service:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+      checksEnabled: true
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP
+      checksEnabled: false
+    - name: p2p
+      port: 6335
+      targetPort: 6335
+      protocol: TCP
+      checksEnabled: false
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: staging
+
+# API Key from K8s secret (optional, enable for security)
+apiKey: false
+# existingApiKeySecret: "qdrant-secret"
+# existingApiKeySecretKey: "api-key"

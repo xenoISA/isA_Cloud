@@ -1,0 +1,224 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: isa-cloud-local
+
+# Node configuration
+nodes:
+  # Control plane node
+  - role: control-plane
+    kubeadmConfigPatches:
+    - |
+      kind: InitConfiguration
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: "ingress-ready=true"
+
+    # Port mappings - NodePort (30000-32767) to localhost
+    extraPortMappings:
+
+    # ============================================================
+    # DATABASE SERVICES
+    # ============================================================
+    # PostgreSQL (NodePort 30432 -> localhost:5432)
+    - containerPort: 30432
+      hostPort: 5432
+      protocol: TCP
+
+    # Redis (NodePort 30379 -> localhost:6379)
+    - containerPort: 30379
+      hostPort: 6379
+      protocol: TCP
+
+    # Neo4j HTTP (NodePort 30474 -> localhost:7474)
+    - containerPort: 30474
+      hostPort: 7474
+      protocol: TCP
+
+    # Neo4j Bolt (NodePort 30687 -> localhost:7687)
+    - containerPort: 30687
+      hostPort: 7687
+      protocol: TCP
+
+    # Qdrant HTTP (NodePort 30633 -> localhost:6333)
+    - containerPort: 30633
+      hostPort: 6333
+      protocol: TCP
+
+    # Qdrant gRPC (NodePort 30634 -> localhost:6334)
+    - containerPort: 30634
+      hostPort: 6334
+      protocol: TCP
+
+    # ============================================================
+    # OBJECT STORAGE
+    # ============================================================
+    # MinIO API (NodePort 30900 -> localhost:9000)
+    - containerPort: 30900
+      hostPort: 9000
+      protocol: TCP
+
+    # MinIO Console (NodePort 30901 -> localhost:9001)
+    - containerPort: 30901
+      hostPort: 9001
+      protocol: TCP
+
+    # ============================================================
+    # MESSAGING
+    # ============================================================
+    # NATS (NodePort 30422 -> localhost:4222)
+    - containerPort: 30422
+      hostPort: 4222
+      protocol: TCP
+
+    # NATS Monitoring (NodePort 30822 -> localhost:8222)
+    - containerPort: 30822
+      hostPort: 4223
+      protocol: TCP
+
+    # MQTT - EMQX (NodePort 31883 -> localhost:1883)
+    - containerPort: 31883
+      hostPort: 1883
+      protocol: TCP
+
+    # MQTT - Mosquitto (NodePort 31893 -> localhost:1893)
+    - containerPort: 31893
+      hostPort: 1893
+      protocol: TCP
+
+    # Mosquitto WebSocket (NodePort 31903 -> localhost:9003)
+    - containerPort: 31903
+      hostPort: 9003
+      protocol: TCP
+
+    # EMQX MQTTS (NodePort 31884 -> localhost:8883)
+    - containerPort: 31884
+      hostPort: 8883
+      protocol: TCP
+
+    # EMQX WebSocket (NodePort 31083 -> localhost:28083) - 8080-8089 reserved for app services
+    - containerPort: 31083
+      hostPort: 28083
+      protocol: TCP
+
+    # EMQX WebSocket Secure (NodePort 31084 -> localhost:28084) - 8080-8089 reserved for app services
+    - containerPort: 31084
+      hostPort: 28084
+      protocol: TCP
+
+    # EMQX Dashboard (NodePort 31018 -> localhost:18083)
+    - containerPort: 31018
+      hostPort: 18083
+      protocol: TCP
+
+    # ============================================================
+    # SERVICE DISCOVERY
+    # ============================================================
+    # Consul UI/API (NodePort 30500 -> localhost:8500)
+    - containerPort: 30500
+      hostPort: 8500
+      protocol: TCP
+
+    # Consul Server API (NodePort 30501 -> localhost:8501)
+    - containerPort: 30501
+      hostPort: 8501
+      protocol: TCP
+
+    # ============================================================
+    # API GATEWAY (APISIX)
+    # ============================================================
+    # APISIX HTTP Gateway (NodePort 30080 -> localhost:9080)
+    - containerPort: 30080
+      hostPort: 9080
+      protocol: TCP
+
+    # APISIX HTTPS Gateway (NodePort 30443 -> localhost:9443)
+    - containerPort: 30943
+      hostPort: 9443
+      protocol: TCP
+
+    # APISIX Admin API (NodePort 30180 -> localhost:9180)
+    - containerPort: 30180
+      hostPort: 9180
+      protocol: TCP
+
+    # APISIX Dashboard (NodePort 30010 -> localhost:9010)
+    - containerPort: 30010
+      hostPort: 9010
+      protocol: TCP
+
+    # etcd for APISIX (NodePort 32379 -> localhost:2379)
+    - containerPort: 32379
+      hostPort: 2379
+      protocol: TCP
+
+    # ============================================================
+    # HARBOR REGISTRY
+    # ============================================================
+    # Harbor HTTPS (NodePort 30443 -> localhost:30443)
+    - containerPort: 30443
+      hostPort: 30443
+      protocol: TCP
+
+    # Harbor HTTP (NodePort 30181 -> localhost:18081) - 8080-8089 reserved for app services
+    - containerPort: 30181
+      hostPort: 18081
+      protocol: TCP
+
+    # ============================================================
+    # OBSERVABILITY (Optional)
+    # ============================================================
+    # Grafana (NodePort 30300 -> localhost:3000)
+    - containerPort: 30300
+      hostPort: 3000
+      protocol: TCP
+
+    # Loki (NodePort 31100 -> localhost:3100)
+    - containerPort: 31100
+      hostPort: 3100
+      protocol: TCP
+
+    # ============================================================
+    # ML PLATFORM (Optional)
+    # ============================================================
+    # Ray Dashboard (NodePort 30265 -> localhost:8265)
+    - containerPort: 30265
+      hostPort: 8265
+      protocol: TCP
+
+    # MLflow (NodePort 30500 -> localhost:5050)
+    - containerPort: 30050
+      hostPort: 5050
+      protocol: TCP
+
+    # JupyterHub (NodePort 30888 -> localhost:8888)
+    - containerPort: 30888
+      hostPort: 8888
+      protocol: TCP
+
+    # ============================================================
+    # CI/CD
+    # ============================================================
+    # ArgoCD UI (NodePort 30880 -> localhost:18080) - 8080-8089 reserved for app services
+    - containerPort: 30880
+      hostPort: 18080
+      protocol: TCP
+
+  # Worker nodes (adjust based on resources)
+  - role: worker
+  - role: worker
+
+# Network configuration
+networking:
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+
+# Containerd configuration - support local registries
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
+    endpoint = ["http://localhost:5001"]
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."harbor.local:30443"]
+    endpoint = ["https://harbor.local:30443"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."harbor.local:30443".tls]
+    insecure_skip_verify = true

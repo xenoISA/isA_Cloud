@@ -1,0 +1,61 @@
+# Default values for isa-service
+# Override these per-service
+
+name: my-service
+namespace: isa-cloud-staging
+
+image:
+  registry: harbor.local:30443
+  repository: isa/my-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+port: 8080
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+# Health checks
+health:
+  path: /health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# Environment variables (from ConfigMap)
+configMapRef: ""
+
+# Extra environment variables
+env: []
+
+# Service type
+service:
+  type: ClusterIP
+
+# Consul registration
+consul:
+  enabled: true
+
+# Optional volumes
+volumes: []
+# - name: models
+#   emptyDir: {}
+
+# Optional volume mounts
+volumeMounts: []
+# - name: models
+#   mountPath: /app/models

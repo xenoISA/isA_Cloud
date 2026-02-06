@@ -1,0 +1,17 @@
+# =============================================================================
+# Production Applications Kustomization
+# =============================================================================
+# IMPORTANT: Production apps do NOT auto-sync. Manual approval required.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - core-services.yaml
+  - os-services.yaml
+  - user-services-appset.yaml
+
+commonLabels:
+  managed-by: argocd
+  environment: production
+  critical: "true"

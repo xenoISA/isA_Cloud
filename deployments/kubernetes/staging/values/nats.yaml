@@ -1,0 +1,67 @@
+# NATS Helm Values - STAGING
+# Chart: nats/nats
+# Install: helm install nats nats/nats -n isa-cloud-staging -f staging/values/nats.yaml
+
+# Configuration
+config:
+  cluster:
+    enabled: false
+
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      dir: /data
+      pvc:
+        enabled: true
+        size: 10Gi
+    memoryStore:
+      enabled: true
+      maxSize: 512Mi
+
+  monitor:
+    enabled: true
+    port: 8222
+
+  nats:
+    port: 4222
+
+# Container resources
+container:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Service - ClusterIP for internal access
+service:
+  enabled: true
+  ports:
+    nats:
+      enabled: true
+    monitor:
+      enabled: true
+  merge:
+    spec:
+      type: ClusterIP
+      ports:
+        - name: nats
+          port: 4222
+          targetPort: 4222
+        - name: monitor
+          port: 8222
+          targetPort: 8222
+
+# Pod labels
+podTemplate:
+  merge:
+    metadata:
+      labels:
+        tier: infrastructure
+        environment: staging
+
+# Single replica for staging (cost optimization)
+replicaCount: 1

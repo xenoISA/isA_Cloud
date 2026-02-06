@@ -1,0 +1,52 @@
+# Redis Helm Values - STAGING
+# Chart: bitnami/redis
+# Install: helm install redis bitnami/redis -n isa-cloud-staging -f staging/values/redis.yaml
+
+# Standalone mode (single instance for staging)
+architecture: standalone
+
+# Authentication - use existing K8s secret
+auth:
+  enabled: true
+  existingSecret: "redis-secret"
+  existingSecretPasswordKey: "redis-password"
+
+# Master configuration
+master:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  persistence:
+    enabled: true
+    size: 10Gi
+
+  # Service - ClusterIP for internal access
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+  # Configuration
+  configuration: |
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+
+  podLabels:
+    tier: infrastructure
+    environment: staging
+
+# Disable replica for staging (cost optimization)
+replica:
+  replicaCount: 0
+
+# Enable metrics for staging monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring

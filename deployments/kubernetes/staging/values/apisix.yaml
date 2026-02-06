@@ -1,0 +1,98 @@
+# APISIX Helm Values - STAGING
+# Chart: apisix/apisix
+# Install: helm install apisix apisix/apisix -n isa-cloud-staging -f staging/values/apisix.yaml
+#
+# Note: Built-in etcd is for dev/testing only. For production, use external etcd.
+# Source: https://github.com/apache/apisix-helm-chart
+
+# Service configuration (gateway)
+service:
+  type: NodePort
+  http:
+    enabled: true
+    servicePort: 80
+    containerPort: 9080
+    nodePort: 30080
+  tls:
+    servicePort: 443
+  stream:
+    enabled: false
+
+# APISIX configuration
+apisix:
+  image:
+    repository: apache/apisix
+    tag: 3.8.0-debian
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Admin API configuration
+  admin:
+    enabled: true
+    type: NodePort
+    port: 9180
+    servicePort: 9180
+    nodePort: 30180
+    credentials:
+      admin: "edd1c9f034335f136f87ad84b625c8f1"
+    allow:
+      ipList:
+        - 0.0.0.0/0
+
+  nginx:
+    configurationSnippet:
+      http: |
+        resolver 10.96.0.10 valid=30s;
+
+  discovery:
+    enabled: true
+    registry:
+      consul:
+        servers:
+          - "http://consul-ui.isa-cloud-staging.svc.cluster.local"
+        fetch_interval: 3
+        timeout:
+          connect: 2000
+          read: 2000
+          wait: 60
+        keepalive: true
+        default_weight: 1
+
+dns:
+  resolvers:
+    - 10.96.0.10
+  validity: 30
+  timeout: 5
+
+# etcd - use external etcd (deployed separately with official image)
+etcd:
+  enabled: false
+
+# External etcd configuration
+externalEtcd:
+  host:
+    - http://etcd.isa-cloud-staging.svc.cluster.local:2379
+  user: ""
+  password: ""
+
+# Dashboard - disabled for simplicity
+dashboard:
+  enabled: false
+
+# Ingress controller - disabled
+ingress-controller:
+  enabled: false
+
+# Single replica for staging
+replicaCount: 1
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: staging

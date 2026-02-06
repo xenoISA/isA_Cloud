@@ -1,0 +1,81 @@
+# Harbor Helm Values for Local Staging (Kind)
+# Chart: harbor/harbor
+# Install: helm install harbor harbor/harbor -n harbor --create-namespace -f helm-values/staging/harbor.yaml
+
+expose:
+  type: nodePort
+  tls:
+    enabled: true
+    certSource: auto
+    auto:
+      commonName: "harbor.local"
+  nodePort:
+    name: harbor
+    ports:
+      https:
+        port: 443
+        nodePort: 30443
+      http:
+        port: 80
+        nodePort: 30080
+
+externalURL: https://harbor.local:30443
+
+# Persistence - use smaller sizes for local dev
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      size: 10Gi
+    jobservice:
+      size: 1Gi
+    database:
+      size: 2Gi
+    redis:
+      size: 1Gi
+    trivy:
+      size: 2Gi
+
+# Harbor admin password
+harborAdminPassword: "Harbor12345"
+
+# Internal database (PostgreSQL)
+database:
+  type: internal
+
+# Internal Redis
+redis:
+  type: internal
+
+# Trivy vulnerability scanner
+trivy:
+  enabled: true
+
+# Disable notary for simplicity in local dev
+notary:
+  enabled: false
+
+# Resource limits for local dev (lighter footprint)
+registry:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+core:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+jobservice:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+portal:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m

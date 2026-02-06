@@ -1,0 +1,81 @@
+# =============================================================================
+# etcd Helm Values for Staging Environment
+# =============================================================================
+# Alternative to the manifest-based deployment.
+# Use with: helm upgrade --install etcd bitnami/etcd -f etcd.yaml
+# =============================================================================
+
+# Replica configuration (single node for staging)
+replicaCount: 1
+
+# Authentication (disabled for internal use with APISIX)
+auth:
+  rbac:
+    create: false
+    allowNoneAuthentication: true
+  token:
+    enabled: false
+
+# Persistence
+persistence:
+  enabled: true
+  size: 5Gi
+  # storageClass: ""  # Use default storage class
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    client: 2379
+    peer: 2380
+
+# etcd configuration
+configuration: |-
+  # Auto compaction settings
+  auto-compaction-mode: periodic
+  auto-compaction-retention: "1"
+  # Quota settings (4GB)
+  quota-backend-bytes: 4294967296
+
+# Health checks
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Pod labels
+podLabels:
+  app: etcd
+  environment: staging
+
+# Metrics (for monitoring)
+metrics:
+  enabled: true
+  podMonitor:
+    enabled: false  # Enable if using Prometheus Operator
+
+# Disaster recovery
+disasterRecovery:
+  enabled: false
+
+# Snapshot configuration
+autoSnapshot:
+  enabled: false
