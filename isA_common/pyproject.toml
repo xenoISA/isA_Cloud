@@ -20,6 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
 ]
+# Dependencies use minimum versions (>=) since this is a library that should
+# be compatible with consumers' dependency versions. For reproducible builds,
+# see requirements.txt which pins exact versions (==).
 dependencies = [
     "grpcio>=1.50.0",
     "grpcio-tools>=1.50.0",
