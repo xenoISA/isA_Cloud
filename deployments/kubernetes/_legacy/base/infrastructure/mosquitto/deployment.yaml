@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: isa-cloud-staging
+  labels:
+    app: mosquitto
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mosquitto
+  template:
+    metadata:
+      labels:
+        app: mosquitto
+        tier: infrastructure
+    spec:
+      containers:
+      - name: mosquitto
+        image: staging-isa-mosquitto:amd64
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: mqtt
+          containerPort: 1883
+          protocol: TCP
+        - name: websocket
+          containerPort: 9001
+          protocol: TCP
+
+        env:
+        - name: MQTT_PORT
+          value: "1883"
+        - name: MQTT_WS_PORT
+          value: "9001"
+        - name: CONSUL_ENABLED
+          value: "false"
+        - name: CONSUL_HOST
+          value: "consul"
+        - name: SERVICE_NAME
+          value: "mqtt-service"
+
+        volumeMounts:
+        - name: data
+          mountPath: /mosquitto/data
+        - name: logs
+          mountPath: /mosquitto/log
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 256m
+            memory: 512Mi
+
+        livenessProbe:
+          tcpSocket:
+            port: 1883
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+
+        readinessProbe:
+          tcpSocket:
+            port: 1883
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}

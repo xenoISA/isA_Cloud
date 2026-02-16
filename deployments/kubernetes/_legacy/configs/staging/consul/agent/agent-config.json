@@ -1,0 +1,25 @@
+{
+  "datacenter": "staging",
+  "node_name": "staging-shared-agent",
+  "data_dir": "/consul/data",
+  "client_addr": "0.0.0.0",
+  "bind_addr": "0.0.0.0",
+  "retry_join": ["staging-consul"],
+  "enable_script_checks": true,
+  "enable_local_script_checks": true,
+  "log_level": "INFO",
+  "performance": {
+    "raft_multiplier": 1
+  },
+  "telemetry": {
+    "prometheus_retention_time": "60s",
+    "disable_hostname": false
+  },
+  "ports": {
+    "http": 8500,
+    "grpc": 8502,
+    "dns": 8600,
+    "serf_lan": 8301,
+    "serf_wan": 8302
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "datacenter": "staging",
+  "data_dir": "/consul/data",
+  "client_addr": "0.0.0.0",
+  "ui_config": {
+    "enabled": true
+  },
+  "server": true,
+  "bootstrap_expect": 1,
+  "dns_config": {
+    "enable_truncate": true,
+    "only_passing": true,
+    "allow_stale": true,
+    "max_stale": "87600h"
+  },
+  "log_level": "INFO",
+  "disable_anonymous_signature": true,
+  "disable_update_check": true
+}

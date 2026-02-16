@@ -1,0 +1,207 @@
+# CI Template for Python Services
+#
+# 这个文件是模板，需要复制到对应的仓库：
+# - isA_Agent/.github/workflows/ci.yaml
+# - isA_MCP/.github/workflows/ci.yaml
+# - isA_Model/.github/workflows/ci.yaml
+# - isA_user/.github/workflows/ci.yaml
+#
+# 使用时需要修改：
+# 1. SERVICE_NAME: 改为对应的服务名 (agent, mcp, model, user)
+# 2. PYTHON_VERSION: 根据需要调整 Python 版本
+# 3. 测试命令: 根据项目结构调整
+
+name: CI - Build and Push Service
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+    paths:
+      - '**/*.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/ci.yaml'
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  # ⚠️ 修改这里：改为你的服务名 (agent, mcp, model, user)
+  SERVICE_NAME: agent
+  # ⚠️ 修改这里：改为你的 ECR 仓库名
+  ECR_REPOSITORY: isa-agent
+  # ⚠️ 修改这里：改为你的 GitOps 仓库
+  GITOPS_REPO: your-org/isA_Cloud
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════
+  # Lint 和测试
+  # ═══════════════════════════════════════════════════════════
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 black isort mypy
+
+      - name: Format check with black
+        run: black --check --diff .
+        continue-on-error: true
+
+      - name: Import sorting check with isort
+        run: isort --check-only --diff .
+        continue-on-error: true
+
+      - name: Lint with flake8
+        run: |
+          # 停止构建如果有 Python 语法错误或未定义的名称
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # 退出码为 0，将所有错误视为警告
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+      - name: Type checking with mypy
+        run: mypy . --ignore-missing-imports
+        continue-on-error: true
+
+      - name: Run tests with pytest
+        run: |
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
+        continue-on-error: false
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: ${{ env.SERVICE_NAME }}-coverage
+
+  # ═══════════════════════════════════════════════════════════
+  # 构建和推送 Docker 镜像
+  # ═══════════════════════════════════════════════════════════
+  build-and-push:
+    needs: lint-and-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+
+          # 生成标签
+          TAGS="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          TAGS="${TAGS},${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+          TAGS="${TAGS},${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}"
+
+          # 如果是 tag，添加版本号
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            TAGS="${TAGS},${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${VERSION}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "image=${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=${{ env.SERVICE_NAME }}
+          cache-to: type=gha,mode=max,scope=${{ env.SERVICE_NAME }}
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Create image summary
+        run: |
+          echo "### ✅ Docker Image Built Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service**: \`${{ env.SERVICE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ steps.meta.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "**SHA**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════
+  # 触发 GitOps 仓库更新
+  # ═══════════════════════════════════════════════════════════
+  trigger-gitops:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger GitOps repository update
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITOPS_PAT }}
+          repository: ${{ env.GITOPS_REPO }}
+          event-type: update-${{ env.SERVICE_NAME }}-image
+          client-payload: |
+            {
+              "service": "${{ env.SERVICE_NAME }}",
+              "image": "${{ needs.build-and-push.outputs.image }}",
+              "sha": "${{ github.sha }}",
+              "ref": "${{ github.ref_name }}",
+              "actor": "${{ github.actor }}",
+              "repo": "${{ github.repository }}"
+            }
+
+      - name: Create GitOps trigger summary
+        run: |
+          echo "### 🔔 GitOps Update Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Sent update notification to \`${{ env.GITOPS_REPO }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD will automatically deploy this change to EKS cluster." >> $GITHUB_STEP_SUMMARY

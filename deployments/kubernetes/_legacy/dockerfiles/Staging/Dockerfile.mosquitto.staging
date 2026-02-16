@@ -1,0 +1,76 @@
+FROM eclipse-mosquitto:2.0
+
+# 支持 Consul 服务发现的 MQTT Broker Dockerfile
+# 文件名: deployments/dockerfiles/Staging/Dockerfile.mosquitto.staging
+
+# 安装 curl 用于服务注册
+USER root
+RUN apk add --no-cache curl bash
+
+# 复制配置文件
+COPY deployments/configs/staging/mosquitto.conf /mosquitto/config/mosquitto.conf
+
+# 环境变量
+ENV MQTT_PORT=1883
+ENV MQTT_WS_PORT=9001
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=mqtt-service
+ENV SERVICE_TAGS=messaging,iot,mqtt
+
+# 启动脚本
+COPY <<'EOF' /usr/local/bin/start-mosquitto.sh
+#!/bin/bash
+set -e
+
+echo "Starting MQTT Broker (Mosquitto)..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+
+# 启动 Mosquitto
+/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf &
+MOSQUITTO_PID=$!
+
+# 如果启用 Consul，注册服务
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for Mosquitto to be ready..."
+    sleep 5
+    
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+    
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${MQTT_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\"],
+        \"Meta\": {
+            \"mqtt_port\": \"${MQTT_PORT}\",
+            \"websocket_port\": \"${MQTT_WS_PORT}\"
+        },
+        \"Check\": {
+            \"TCP\": \"${HOSTNAME}:${MQTT_PORT}\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register with Consul (will retry)"
+    
+    echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
+fi
+
+# 等待 Mosquitto 进程
+wait $MOSQUITTO_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-mosquitto.sh
+
+USER mosquitto
+
+EXPOSE 1883 9001
+
+CMD ["/usr/local/bin/start-mosquitto.sh"]
+
+
+

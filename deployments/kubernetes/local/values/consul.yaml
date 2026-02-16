@@ -1,0 +1,97 @@
+# Consul Helm Values - LOCAL (Simple)
+# Chart: hashicorp/consul
+# Install: helm install consul hashicorp/consul -n isa-cloud-local -f local/values/consul.yaml
+
+global:
+  name: consul
+  datacenter: local
+
+  # Disable TLS for local dev
+  tls:
+    enabled: false
+
+  # Gossip encryption (disabled for local)
+  gossipEncryption:
+    autoGenerate: false
+
+# =============================================================================
+# SERVER (Consul Server)
+# =============================================================================
+server:
+  enabled: true
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  storage: 5Gi
+  storageClass: null
+
+  # Expose server via ClusterIP (UI handles external access)
+  exposeService:
+    enabled: true
+    type: NodePort
+    nodePort:
+      http: 30501
+
+# =============================================================================
+# CLIENT AGENT (Shared agent for service registration)
+# =============================================================================
+client:
+  enabled: true
+
+  # Run as Deployment (1 replica) instead of DaemonSet for local
+  # Note: HashiCorp chart runs client as DaemonSet by default
+  # For local dev with Kind, DaemonSet is fine (one per node)
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Expose client agent service for application registration
+  exposeGossipPorts: true
+
+# =============================================================================
+# UI
+# =============================================================================
+ui:
+  enabled: true
+  service:
+    enabled: true
+    type: NodePort
+    nodePort:
+      http: 30500
+
+# =============================================================================
+# CONNECT (Service Mesh) - Disabled for local
+# =============================================================================
+connectInject:
+  enabled: false
+
+# =============================================================================
+# OTHER FEATURES - Disabled for local
+# =============================================================================
+meshGateway:
+  enabled: false
+
+ingressGateways:
+  enabled: false
+
+terminatingGateways:
+  enabled: false
+
+dns:
+  enabled: true
+
+# Sync K8s services to Consul (optional)
+syncCatalog:
+  enabled: false

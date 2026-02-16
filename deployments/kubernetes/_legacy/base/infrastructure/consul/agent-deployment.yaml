@@ -1,0 +1,94 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consul-agent
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-agent
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consul-agent
+  template:
+    metadata:
+      labels:
+        app: consul-agent
+        tier: infrastructure
+    spec:
+      containers:
+        - name: consul-agent
+          image: hashicorp/consul:latest
+          imagePullPolicy: IfNotPresent
+          
+          command:
+            - "consul"
+            - "agent"
+            - "-config-file=/consul/config/agent-config.json"
+            - "-config-file=/consul/config/grpc-services.json"
+            - "-client=0.0.0.0"
+            - "-bind=0.0.0.0"
+          
+          ports:
+            - name: http
+              containerPort: 8500
+              protocol: TCP
+            - name: grpc
+              containerPort: 8502
+              protocol: TCP
+            - name: dns-tcp
+              containerPort: 8600
+              protocol: TCP
+            - name: dns-udp
+              containerPort: 8600
+              protocol: UDP
+            - name: serf-lan
+              containerPort: 8301
+              protocol: TCP
+            - name: serf-wan
+              containerPort: 8302
+              protocol: TCP
+          
+          volumeMounts:
+            - name: config
+              mountPath: /consul/config
+              readOnly: true
+            - name: data
+              mountPath: /consul/data
+          
+          livenessProbe:
+            exec:
+              command:
+                - consul
+                - members
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            exec:
+              command:
+                - consul
+                - members
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      
+      volumes:
+        - name: config
+          configMap:
+            name: consul-agent-config
+        - name: data
+          emptyDir: {}

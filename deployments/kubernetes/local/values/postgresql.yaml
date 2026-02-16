@@ -1,0 +1,56 @@
+# PostgreSQL Helm Values - LOCAL STAGING (Simple)
+# Chart: bitnami/postgresql
+# Install: helm install postgresql bitnami/postgresql -n isa-cloud-local -f helm-values/staging/postgresql.yaml
+
+# Simple standalone architecture for local dev
+architecture: standalone
+
+# Authentication
+auth:
+  postgresPassword: "staging_postgres_2024"
+  database: "isa_platform"
+
+# Primary instance
+primary:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  persistence:
+    enabled: true
+    size: 20Gi
+
+  # Basic performance tuning for local dev
+  configuration: |
+    listen_addresses = '*'
+    max_connections = 100
+    shared_buffers = 128MB
+    effective_cache_size = 512MB
+    work_mem = 4MB
+
+  # Init scripts (extensions, etc.)
+  initdb:
+    scripts:
+      00-extensions.sql: |
+        CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+        CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+  podLabels:
+    tier: infrastructure
+    environment: staging
+
+  # Service - NodePort for local access (must be under primary)
+  service:
+    type: NodePort
+    ports:
+      postgresql: 5432
+    nodePorts:
+      postgresql: 30432  # NodePort must be 30000-32767
+
+# Disable metrics for lighter footprint
+metrics:
+  enabled: false

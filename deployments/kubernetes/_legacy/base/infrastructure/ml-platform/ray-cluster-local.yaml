@@ -1,0 +1,106 @@
+# Ray Cluster for Local Development (Kind)
+# Head node only, no GPU workers
+# For production with GPU, use ray-cluster-prod.yaml
+---
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: isa-ray-local
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: ray-cluster
+    app.kubernetes.io/component: ml-platform
+    environment: local
+spec:
+  rayVersion: '2.9.0'
+  enableInTreeAutoscaling: false  # Disabled for local dev
+
+  # Head node configuration
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+      block: 'true'
+    serviceType: ClusterIP
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: ray-head
+          ray-cluster: isa-ray-local
+      spec:
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.9.0-py311
+            imagePullPolicy: IfNotPresent
+            ports:
+              - containerPort: 6379  # GCS server
+                name: gcs-server
+              - containerPort: 8265  # Dashboard
+                name: dashboard
+              - containerPort: 10001 # Client
+                name: client
+              - containerPort: 8000  # Serve
+                name: serve
+            resources:
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+            env:
+              - name: RAY_DISABLE_MEMORY_MONITOR
+                value: "1"
+            volumeMounts:
+              - name: ray-logs
+                mountPath: /tmp/ray
+        volumes:
+          - name: ray-logs
+            emptyDir: {}
+
+  # No worker nodes for local development
+  # Workers are only needed for distributed workloads
+  workerGroupSpecs: []
+---
+# Service for Ray Dashboard
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-dashboard
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: ray-dashboard
+    app.kubernetes.io/component: ml-platform
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8265
+      targetPort: 8265
+      name: dashboard
+    - port: 10001
+      targetPort: 10001
+      name: client
+    - port: 8000
+      targetPort: 8000
+      name: serve
+  selector:
+    ray-cluster: isa-ray-local
+    ray.io/node-type: head
+---
+# Service for Ray GCS (internal)
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-head-svc
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/name: ray-head
+    app.kubernetes.io/component: ml-platform
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: gcs
+  selector:
+    ray-cluster: isa-ray-local
+    ray.io/node-type: head

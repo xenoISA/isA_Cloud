@@ -1,0 +1,35 @@
+# DuckDB SDK 客户端配置
+# DuckDB SDK Client Configuration
+#
+# 文件名: configs/sdk/duckdb.yaml
+# 用途: 开发者配置 DuckDB SDK 客户端
+
+# 数据库配置
+database_path: ":memory:"                  # ":memory:" 表示内存数据库，或指定文件路径
+memory_limit: "2GB"                        # 内存限制
+threads: 4                                 # 并发线程数
+
+# Consul 服务发现配置
+use_consul: false                          # 是否使用 Consul 发现服务
+service_name: "duckdb-service"             # Consul 中的服务名
+
+# 连接池配置
+max_open_conns: 10                        # 最大打开连接数
+max_idle_conns: 5                         # 最大空闲连接数
+conn_max_life: "1h"                       # 连接最大生命周期
+
+# 自动加载的扩展
+extensions:
+  - httpfs                                # S3/MinIO 支持
+  - parquet                               # Parquet 格式支持
+  - json                                  # JSON 支持
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_DUCKDB_DATABASE_PATH
+#   ISA_CLOUD_DUCKDB_MEMORY_LIMIT
+
+
+

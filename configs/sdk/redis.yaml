@@ -1,0 +1,56 @@
+# Redis SDK 客户端配置
+# Redis SDK Client Configuration
+#
+# 文件名: configs/sdk/redis.yaml
+# 用途: 开发者配置 Redis SDK 客户端
+
+# 基础配置
+host: "localhost"                              # Redis 主机地址
+port: 6379                                     # Redis 端口
+password: ""                                   # 密码（可选）
+database: 0                                    # 数据库编号（0-15）
+
+# Consul 服务发现配置
+use_consul: false                              # 是否使用 Consul 服务发现
+service_name: "redis-service"                  # Consul 服务名（use_consul=true 时需要）
+
+# 连接池配置
+max_idle: 10                                   # 最大空闲连接数
+max_active: 100                                # 最大活跃连接数
+idle_timeout: "5m"                             # 空闲连接超时
+connect_timeout: "5s"                          # 连接超时
+read_timeout: "3s"                             # 读取超时
+write_timeout: "3s"                            # 写入超时
+
+# 集群模式配置
+cluster_enabled: false                         # 是否启用集群模式
+cluster_nodes:                                 # 集群节点列表（cluster_enabled=true 时需要）
+  - "redis-1:6379"
+  - "redis-2:6379"
+  - "redis-3:6379"
+
+# Sentinel 模式配置
+sentinel_enabled: false                        # 是否启用 Sentinel 模式
+sentinel_master_name: "mymaster"               # Sentinel 主节点名称
+sentinel_nodes:                                # Sentinel 节点列表
+  - "sentinel-1:26379"
+  - "sentinel-2:26379"
+  - "sentinel-3:26379"
+
+# TLS 配置
+tls_enabled: false                             # 是否启用 TLS
+tls_cert: ""                                   # 证书文件路径
+tls_key: ""                                    # 密钥文件路径
+tls_ca: ""                                     # CA 证书路径
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_REDIS_HOST
+#   ISA_CLOUD_REDIS_PORT
+#   ISA_CLOUD_REDIS_PASSWORD
+#   ISA_CLOUD_REDIS_DATABASE
+
+
+

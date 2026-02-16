@@ -1,0 +1,194 @@
+# JupyterHub - Helm Chart Values
+# Chart: jupyterhub/jupyterhub
+# Docs: https://z2jh.jupyter.org/en/stable/
+
+# Hub configuration
+hub:
+  # Pod resources
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+  # Database (PostgreSQL backend)
+  db:
+    type: postgres
+    url: "postgresql://jupyterhub:password@postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local:5432/jupyterhub"
+    # Use existingSecret in production
+
+  # Extra configuration
+  config:
+    JupyterHub:
+      admin_access: true
+      authenticator_class: nativeauthenticator.NativeAuthenticator
+    NativeAuthenticator:
+      minimum_password_length: 8
+      check_common_password: true
+      enable_signup: false
+      ask_email_on_signup: true
+    Authenticator:
+      admin_users:
+        - admin
+
+  # Network policy
+  networkPolicy:
+    enabled: true
+
+  # Pod anti-affinity
+  podAntiAffinityPreset: soft
+
+# Proxy configuration
+proxy:
+  service:
+    type: ClusterIP
+
+  chp:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+
+  networkPolicy:
+    enabled: true
+
+# Single-user server configuration
+singleuser:
+  # Default image (CPU)
+  image:
+    name: jupyter/scipy-notebook
+    tag: python-3.11
+    pullPolicy: IfNotPresent
+
+  # Profile list - users can choose their environment
+  profileList:
+    - display_name: "Data Science (CPU)"
+      description: "Python 3.11 with scientific computing libraries"
+      default: true
+      kubespawner_override:
+        image: jupyter/scipy-notebook:python-3.11
+        cpu_guarantee: 0.5
+        cpu_limit: 2
+        mem_guarantee: 1G
+        mem_limit: 4G
+
+    - display_name: "ML/DL (GPU)"
+      description: "Python 3.11 with PyTorch, TensorFlow, GPU support"
+      kubespawner_override:
+        image: jupyter/pytorch-notebook:cuda12-python-3.11
+        cpu_guarantee: 2
+        cpu_limit: 8
+        mem_guarantee: 8G
+        mem_limit: 32G
+        extra_resource_limits:
+          nvidia.com/gpu: "1"
+        extra_resource_guarantees:
+          nvidia.com/gpu: "1"
+        node_selector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Equal"
+            value: "present"
+            effect: "NoSchedule"
+
+    - display_name: "Ray + Python"
+      description: "Python 3.11 with Ray for distributed computing"
+      kubespawner_override:
+        image: rayproject/ray-ml:2.37.0-py311
+        cpu_guarantee: 1
+        cpu_limit: 4
+        mem_guarantee: 2G
+        mem_limit: 8G
+        environment:
+          RAY_ADDRESS: "ray://ray-head-svc.isa-cloud-production.svc.cluster.local:10001"
+
+  # Default resources
+  cpu:
+    guarantee: 0.5
+    limit: 2
+  memory:
+    guarantee: 1G
+    limit: 4G
+
+  # Storage
+  storage:
+    type: dynamic
+    capacity: 20Gi
+    storageClass: infotrend-block
+    homeMountPath: /home/jovyan
+
+  # Extra environment variables
+  extraEnv:
+    MLFLOW_TRACKING_URI: "http://mlflow.mlflow.svc.cluster.local:5000"
+    S3_ENDPOINT_URL: "http://minio.isa-cloud-production.svc.cluster.local:9000"
+
+  # Network policy
+  networkPolicy:
+    enabled: true
+    egress:
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 169.254.169.254/32  # Block metadata service
+
+  # Lifecycle hooks
+  lifecycleHooks:
+    postStart:
+      exec:
+        command:
+          - "sh"
+          - "-c"
+          - |
+            pip install --quiet mlflow ray[default] boto3
+
+  # Default URL
+  defaultUrl: "/lab"
+
+  # Timeout settings
+  startTimeout: 300
+
+# Scheduling configuration
+scheduling:
+  userScheduler:
+    enabled: true
+    replicas: 2
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"
+
+  podPriority:
+    enabled: true
+
+  userPlaceholder:
+    enabled: true
+    replicas: 2
+
+# Culling - shut down idle servers
+cull:
+  enabled: true
+  timeout: 3600      # 1 hour
+  every: 300         # Check every 5 minutes
+  maxAge: 86400      # Max 24 hours
+
+# RBAC
+rbac:
+  enabled: true
+
+# Ingress (optional - expose via APISIX instead)
+ingress:
+  enabled: false
+
+# Debugging
+debug:
+  enabled: false

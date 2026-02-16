@@ -1,0 +1,61 @@
+# Gitleaks configuration for isA Cloud
+# Documentation: https://github.com/gitleaks/gitleaks
+
+title = "isA Cloud Gitleaks Configuration"
+
+# Use the default rules as a base
+[extend]
+useDefault = true
+
+# Allow specific paths that contain example/placeholder values
+[allowlist]
+description = "Allowlist for files with placeholder values"
+paths = [
+    '''\.env\.example$''',
+    '''\.env\.[a-z]+\.example$''',
+    '''README\.md$''',
+    '''docs/.*\.md$''',
+]
+
+# Allow specific regexes that are known placeholders
+regexes = [
+    '''CHANGE_ME.*''',
+    '''<your-.*>''',
+    '''YOUR_.*_HERE''',
+    '''PLACEHOLDER.*''',
+]
+
+# Custom rules for additional secret patterns
+[[rules]]
+id = "supabase-anon-key"
+description = "Supabase Anonymous Key"
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+tags = ["key", "supabase"]
+
+[[rules]]
+id = "supabase-service-role-key"
+description = "Supabase Service Role Key"
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+tags = ["key", "supabase", "service"]
+
+[[rules]]
+id = "pypi-api-token"
+description = "PyPI API Token"
+regex = '''pypi-[A-Za-z0-9_-]{50,}'''
+tags = ["key", "pypi"]
+
+[[rules]]
+id = "mcp-api-key"
+description = "MCP API Key"
+regex = '''mcp_[A-Za-z0-9_-]{30,}'''
+tags = ["key", "mcp"]
+
+[[rules]]
+id = "postgres-password-in-url"
+description = "PostgreSQL Password in Connection URL"
+regex = '''postgres(ql)?://[^:]+:([^@]+)@[^/]+'''
+tags = ["database", "postgres"]
+
+# Entropy settings - detect high-entropy strings that might be secrets
+[rules.entropy]
+enabled = true

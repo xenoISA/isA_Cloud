@@ -1,0 +1,216 @@
+name: CI - Build Go Microservices
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'deployments/dockerfiles/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+
+env:
+  AWS_REGION: us-east-1
+  GO_VERSION: '1.23'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════
+  # 检测哪些服务被修改了
+  # ═══════════════════════════════════════════════════════════
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.set-services.outputs.services }}
+      has_changes: ${{ steps.set-services.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed services
+        id: set-services
+        run: |
+          # 获取所有 cmd 目录下的服务
+          ALL_SERVICES=$(ls cmd/ | grep -E '.*-service$' | sed 's/-service$//')
+
+          # 检测变化的服务
+          CHANGED_SERVICES=""
+
+          for SERVICE in $ALL_SERVICES; do
+            if git diff --name-only HEAD^ HEAD | grep -q "cmd/${SERVICE}-service/\|internal/\|pkg/"; then
+              CHANGED_SERVICES="$CHANGED_SERVICES $SERVICE"
+            fi
+          done
+
+          # 如果是新分支或第一次提交，构建所有服务
+          if [ -z "$CHANGED_SERVICES" ] && [ "${{ github.event_name }}" == "push" ]; then
+            CHANGED_SERVICES="$ALL_SERVICES"
+          fi
+
+          # 转换为 JSON 数组
+          SERVICES_JSON=$(echo $CHANGED_SERVICES | tr ' ' '\n' | jq -R . | jq -s .)
+
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+
+          if [ "$SERVICES_JSON" != "[]" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📦 Changed services: $CHANGED_SERVICES"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No service changes detected"
+          fi
+
+  # ═══════════════════════════════════════════════════════════
+  # Lint 和测试
+  # ═══════════════════════════════════════════════════════════
+  lint-and-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout=5m ./...
+
+      - name: Run tests
+        run: |
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.txt
+          flags: unittests
+
+  # ═══════════════════════════════════════════════════════════
+  # 构建和推送 Docker 镜像
+  # ═══════════════════════════════════════════════════════════
+  build-and-push:
+    needs: [detect-changes, lint-and-test]
+    if: |
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          SERVICE="${{ matrix.service }}"
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          REPO_NAME="isa-cloud/${SERVICE}"
+
+          # 生成标签
+          TAGS="${ECR_REGISTRY}/${REPO_NAME}:${{ github.sha }}"
+          TAGS="${TAGS},${ECR_REGISTRY}/${REPO_NAME}:latest"
+          TAGS="${TAGS},${ECR_REGISTRY}/${REPO_NAME}:${{ github.ref_name }}"
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "repo=${REPO_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/dockerfiles/Dockerfile.${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ github.sha }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.meta.outputs.repo }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+
+      - name: Create build summary
+        run: |
+          SERVICE="${{ matrix.service }}"
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ steps.meta.outputs.repo }}:${{ github.sha }}"
+
+          echo "### ✅ Built: ${SERVICE}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${IMAGE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════
+  # 汇总报告
+  # ═══════════════════════════════════════════════════════════
+  build-summary:
+    needs: [detect-changes, build-and-push]
+    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 🚀 Go Microservices CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Services built**: ${{ needs.detect-changes.outputs.services }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.build-and-push.result }}" == "success" ]; then
+            echo "✅ All services built and pushed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some services failed to build" >> $GITHUB_STEP_SUMMARY
+          fi

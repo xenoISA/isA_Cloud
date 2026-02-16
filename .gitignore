@@ -1,0 +1,111 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go workspace file
+go.work
+
+# Environment files with secrets
+# Generic .env patterns (most common secret exposure vector)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Specific paths
+.env.local
+.env.production
+.env.staging
+deployments/envs/*/.env
+deployments/envs/*/.env.*
+!deployments/envs/*/.env.example
+!deployments/envs/*/.env.*.example
+
+# Kubernetes deployment environments
+deployments/kubernetes/**/.env
+deployments/kubernetes/**/.env.*
+!deployments/kubernetes/**/.env.example
+!deployments/kubernetes/**/.env.*.example
+
+# Log files
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+temp.md
+*.tmp
+*.temp
+
+# Docker volumes
+volumes/
+
+# Secrets and credentials
+secrets/
+credentials/
+*.pem
+*.key
+*.crt
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+
+# Python (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+isA_common/.env
+isA_common/dist/
+
+# Supabase
+.branches/
+.temp/
+supabase/.branches/
+supabase/.temp/
+
+# AWS deployment files with secrets
+deployments/aws/tasks/
+deployments/aws/services/*.env
+.env.local
+
+# Backup data (use backup_restore skills to create/restore)
+backups/

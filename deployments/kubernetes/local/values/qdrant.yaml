@@ -1,0 +1,49 @@
+# Qdrant Helm Values - LOCAL (Simple)
+# Chart: qdrant/qdrant
+# Install: helm install qdrant qdrant/qdrant -n isa-cloud-local -f local/values/qdrant.yaml
+
+# Single replica for local
+replicaCount: 1
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+# Persistence
+persistence:
+  size: 10Gi
+
+# Service - NodePort for local access
+service:
+  type: NodePort
+  ports:
+    - name: http
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+      checksEnabled: true
+      nodePort: 30633
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP
+      checksEnabled: false
+      nodePort: 30634
+    - name: p2p
+      port: 6335
+      targetPort: 6335
+      protocol: TCP
+      checksEnabled: false
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# API Key (empty for local)
+apiKey: false

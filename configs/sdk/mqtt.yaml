@@ -1,0 +1,49 @@
+# MQTT SDK 客户端配置
+# MQTT SDK Client Configuration
+#
+# 文件名: configs/sdk/mqtt.yaml
+# 用途: 开发者配置 MQTT SDK 客户端
+
+# 基础配置
+broker_url: "tcp://localhost:1883"         # MQTT Broker 地址
+client_id: "isa-cloud-client"              # 客户端 ID（必须唯一）
+use_consul: false                          # 是否使用 Consul 服务发现
+service_name: "mqtt-service"               # Consul 服务名（use_consul=true 时需要）
+
+# 认证配置
+username: ""                               # MQTT 用户名（可选）
+password: ""                               # MQTT 密码（可选）
+
+# 连接配置
+keep_alive: "60s"                          # 心跳间隔
+ping_timeout: "10s"                        # Ping 超时
+clean_session: true                        # 是否清除会话
+auto_reconnect: true                       # 是否自动重连
+
+# QoS 配置
+qos: 1                                     # 默认 QoS（0=最多一次, 1=至少一次, 2=恰好一次）
+
+# TLS 配置
+tls_enabled: false                         # 是否启用 TLS
+tls_cert: ""                               # 证书文件路径（tls_enabled=true 时需要）
+tls_key: ""                                # 密钥文件路径（tls_enabled=true 时需要）
+tls_ca: ""                                 # CA 证书路径（tls_enabled=true 时需要）
+
+# 遗嘱消息配置
+will_enabled: false                        # 是否启用遗嘱消息
+will_topic: "devices/client/status"        # 遗嘱主题
+will_payload: "offline"                    # 遗嘱内容
+will_qos: 1                                # 遗嘱 QoS
+will_retain: true                          # 遗嘱保留
+
+# ========================================
+# 环境变量支持
+# ========================================
+# 可以通过环境变量覆盖配置：
+#   ISA_CLOUD_MQTT_BROKER_URL
+#   ISA_CLOUD_MQTT_CLIENT_ID
+#   ISA_CLOUD_MQTT_USERNAME
+#   ISA_CLOUD_MQTT_PASSWORD
+
+
+

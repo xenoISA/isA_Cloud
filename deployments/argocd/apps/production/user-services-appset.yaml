@@ -1,0 +1,125 @@
+# =============================================================================
+# User Microservices - Production (ApplicationSet)
+# =============================================================================
+# IMPORTANT: Auto-sync DISABLED for production safety.
+# All 31 user microservices require manual sync approval.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: user-services-production
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - name: auth
+            port: "8201"
+          - name: account
+            port: "8202"
+          - name: profile
+            port: "8203"
+          - name: preference
+            port: "8204"
+          - name: notification
+            port: "8205"
+          - name: subscription
+            port: "8206"
+          - name: payment
+            port: "8207"
+          - name: billing
+            port: "8208"
+          - name: invoice
+            port: "8209"
+          - name: usage
+            port: "8210"
+          - name: quota
+            port: "8211"
+          - name: rate-limit
+            port: "8212"
+          - name: api-key
+            port: "8213"
+          - name: oauth
+            port: "8214"
+          - name: sso
+            port: "8215"
+          - name: mfa
+            port: "8216"
+          - name: session
+            port: "8217"
+          - name: audit
+            port: "8218"
+          - name: activity
+            port: "8219"
+          - name: analytics
+            port: "8220"
+          - name: report
+            port: "8221"
+          - name: export
+            port: "8222"
+          - name: import
+            port: "8223"
+          - name: webhook
+            port: "8224"
+          - name: integration
+            port: "8225"
+          - name: team
+            port: "8226"
+          - name: organization
+            port: "8227"
+          - name: role
+            port: "8228"
+          - name: permission
+            port: "8229"
+          - name: invitation
+            port: "8249"
+          - name: membership
+            port: "8250"
+
+  template:
+    metadata:
+      name: 'user-{{name}}-production'
+      namespace: argocd
+      labels:
+        app: 'user-{{name}}'
+        environment: production
+        tier: user
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/your-org/isA_Cloud.git
+        targetRevision: production
+        path: deployments/charts/isa-service
+        helm:
+          valueFiles:
+            - ../../../isA_user/deployment/helm/values.yaml
+            - ../../../isA_user/deployment/helm/values-production.yaml
+          parameters:
+            - name: name
+              value: 'user-{{name}}'
+            - name: port
+              value: '{{port}}'
+            - name: image.repository
+              value: 'isa/user-{{name}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: isa-cloud-production
+
+      # NO automated sync for production
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m

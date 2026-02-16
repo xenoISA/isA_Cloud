@@ -1,0 +1,76 @@
+# KubeRay Operator - Helm Chart Values
+# Chart: kuberay/kuberay-operator
+# Docs: https://github.com/ray-project/kuberay/tree/master/helm-chart/kuberay-operator
+
+# Operator configuration
+image:
+  repository: quay.io/kuberay/operator
+  tag: v1.2.2
+  pullPolicy: IfNotPresent
+
+# Operator replica count
+replicaCount: 1
+
+# Pod resources
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# Service account
+serviceAccount:
+  create: true
+  name: kuberay-operator
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Logging configuration
+logging:
+  level: info
+
+# Leader election
+leaderElection:
+  enabled: true
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: ray-system
+    labels:
+      release: prometheus
+
+# Node selector (optional - run on control plane nodes)
+# nodeSelector:
+#   node-role.kubernetes.io/control-plane: ""
+
+# Tolerations (optional)
+# tolerations:
+#   - key: "node-role.kubernetes.io/control-plane"
+#     operator: "Exists"
+#     effect: "NoSchedule"
+
+# Pod anti-affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kuberay-operator
+          topologyKey: kubernetes.io/hostname
+
+# Watch namespaces (empty = all namespaces)
+watchNamespace: ""
+
+# Batch scheduler integration (optional)
+# batchScheduler:
+#   enabled: false
+#   name: volcano

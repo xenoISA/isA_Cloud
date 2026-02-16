@@ -1,0 +1,168 @@
+# NATS JetStream - Official Chart Values
+# Chart: nats/nats
+# Docs: https://github.com/nats-io/k8s/tree/main/helm/charts/nats
+
+# Global configuration
+global:
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+
+# NATS container configuration
+config:
+  cluster:
+    enabled: true
+    replicas: 3
+    name: isa-nats-cluster
+
+  jetstream:
+    enabled: true
+
+    # JetStream storage
+    fileStore:
+      enabled: true
+      dir: /data/jetstream
+      pvc:
+        enabled: true
+        size: 50Gi
+        storageClassName: infotrend-block
+
+    # Memory store (for ephemeral streams)
+    memoryStore:
+      enabled: true
+      maxSize: 1Gi
+
+    # Domain configuration
+    domain: isa
+
+    # Limits
+    maxMemory: 1Gi
+    maxFile: 50Gi
+
+  # Monitoring
+  monitor:
+    enabled: true
+    port: 4223
+
+  # Logging
+  logging:
+    debug: false
+    trace: false
+    logtime: true
+    connectErrorReports: 1
+    reconnectErrorReports: 1
+
+# Container configuration
+container:
+  image:
+    repository: nats
+    tag: "2.10.22-alpine"
+    pullPolicy: IfNotPresent
+
+  # Resources
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+  # Security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+
+# Pod configuration
+podTemplate:
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: nats
+
+  # Pod anti-affinity
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+          topologyKey: kubernetes.io/hostname
+
+# Service configuration
+service:
+  enabled: true
+  ports:
+    nats:
+      enabled: true
+      port: 4222
+    cluster:
+      enabled: true
+      port: 6222
+    monitor:
+      enabled: true
+      port: 4223
+    leafnodes:
+      enabled: false
+    websocket:
+      enabled: false
+
+# Headless service for cluster discovery
+headlessService:
+  enabled: true
+
+# NATS Box (debug/admin container)
+natsBox:
+  enabled: true
+  container:
+    image:
+      repository: natsio/nats-box
+      tag: "0.14.3"
+
+# Exporter configuration
+exporter:
+  enabled: true
+  image:
+    repository: natsio/prometheus-nats-exporter
+    tag: "0.15.0"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Probes
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  enabled: true
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30

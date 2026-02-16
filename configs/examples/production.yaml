@@ -1,0 +1,79 @@
+# 生产环境配置示例
+# Production Environment Configuration
+#
+# 文件名: configs/examples/production.yaml
+# 用途: 生产环境的完整 SDK 配置示例
+
+# ====================================
+# 日志服务 (Logging)
+# ====================================
+loki:
+  url: "https://loki.example.com"
+  tenant_id: "production"
+  username: "loki_user"
+  password: "${LOKI_PASSWORD}"            # 从环境变量读取密码
+  batch_size: 500                         # 生产环境大批量
+  batch_wait: "5s"
+  timeout: "30s"
+  max_retries: 5
+  retry_wait: "2s"
+  static_labels:
+    environment: "production"
+    cluster: "us-west-2"
+    app: "isa-cloud"
+
+# ====================================
+# 消息服务 (Messaging)
+# ====================================
+mqtt:
+  broker_url: "ssl://mqtt.example.com:8883"
+  client_id: "isa-cloud-prod-${POD_NAME}" # Kubernetes Pod 名称
+  username: "mqtt_user"
+  password: "${MQTT_PASSWORD}"
+  qos: 2                                  # 生产环境使用最高 QoS
+  keep_alive: "120s"
+  auto_reconnect: true
+  
+  # TLS 配置
+  tls_enabled: true
+  tls_cert: "/etc/certs/client.crt"
+  tls_key: "/etc/certs/client.key"
+  tls_ca: "/etc/certs/ca.crt"
+  
+  # 遗嘱消息
+  will_enabled: true
+  will_topic: "devices/${POD_NAME}/status"
+  will_payload: "offline"
+  will_qos: 2
+  will_retain: true
+
+# ====================================
+# 存储服务 (Storage)
+# ====================================
+minio:
+  endpoint: "minio.example.com:9000"
+  access_key: "${MINIO_ACCESS_KEY}"
+  secret_key: "${MINIO_SECRET_KEY}"
+  use_ssl: true
+  region: "us-west-2"
+  connect_timeout: "60s"
+  request_timeout: "10m"
+  max_retries: 5
+
+# ====================================
+# 分析服务 (Analytics)
+# ====================================
+duckdb:
+  database_path: "/data/analytics.duckdb" # 持久化存储
+  memory_limit: "4GB"
+  threads: 8
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_life: "2h"
+  extensions:
+    - httpfs
+    - parquet
+    - json
+
+
+

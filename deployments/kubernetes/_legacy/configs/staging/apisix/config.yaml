@@ -1,0 +1,52 @@
+# Apache APISIX Configuration for Staging Environment
+# Based on official apache/apisix-docker example
+
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  enable_control: true
+  control:
+    ip: "0.0.0.0"
+    port: 9092
+  # DNS resolver for service discovery
+  dns_resolver:
+    - "127.0.0.11"  # Docker DNS resolver
+  dns_resolver_valid: 30
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  admin:
+    allow_admin:
+      - 0.0.0.0/0
+    admin_key:
+      - name: "admin"
+        key: edd1c9f034335f136f87ad84b625c8f1
+        role: admin
+  # etcd configuration - MUST be under deployment!
+  etcd:
+    host:
+      - "http://staging-etcd:2379"
+    prefix: "/apisix"
+    timeout: 30
+
+# Consul service discovery
+discovery:
+  consul:
+    servers:
+      - "http://staging-consul:8500"
+    fetch_interval: 3
+    timeout:
+      connect: 2000
+      read: 2000
+      wait: 60
+    keepalive: true
+    default_weight: 1
+
+# Prometheus metrics
+plugin_attr:
+  prometheus:
+    export_addr:
+      ip: "0.0.0.0"
+      port: 9091

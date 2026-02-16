@@ -1,0 +1,20 @@
+{
+  "serviceName": "isa-loki-staging",
+  "cluster": "isa-staging-cluster",
+  "taskDefinition": "isa-loki-staging:1",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "subnet-bab922df"
+      ],
+      "securityGroups": [
+        "sg-d2ed8db4"
+      ],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "loadBalancers": [],
+  "serviceRegistries": []
+}

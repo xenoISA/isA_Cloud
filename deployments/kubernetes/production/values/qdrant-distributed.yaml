@@ -1,0 +1,178 @@
+# Qdrant Distributed - Official Chart Values
+# Chart: qdrant/qdrant
+# Docs: https://github.com/qdrant/qdrant-helm
+
+# Replica count for distributed deployment
+replicaCount: 3
+
+# Image configuration
+image:
+  repository: qdrant/qdrant
+  tag: "v1.12.0"
+  pullPolicy: IfNotPresent
+
+# Pod resources
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "2Gi"
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+
+# Persistence configuration
+persistence:
+  enabled: true
+  storageClass: "infotrend-block-fast"
+  size: 100Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Qdrant configuration
+config:
+  cluster:
+    enabled: true
+    p2p:
+      port: 6335
+    consensus:
+      tick_period_ms: 100
+
+  storage:
+    # Storage paths
+    storage_path: /qdrant/storage
+    snapshots_path: /qdrant/snapshots
+
+    # Performance settings
+    performance:
+      max_search_threads: 0       # 0 = auto (number of CPU cores)
+      max_optimization_threads: 2
+
+    # Optimizers
+    optimizers:
+      deleted_threshold: 0.2
+      vacuum_min_vector_number: 1000
+      default_segment_number: 4
+      max_segment_size_kb: null
+      memmap_threshold_kb: 50000
+      indexing_threshold_kb: 20000
+      flush_interval_sec: 5
+      max_optimization_threads: 2
+
+    # Write-ahead log
+    wal:
+      wal_capacity_mb: 32
+      wal_segments_ahead: 0
+
+    # Quantization for memory efficiency
+    quantization: null            # Enable if needed: scalar, product, binary
+
+  service:
+    max_request_size_mb: 32
+    host: "0.0.0.0"
+    http_port: 6333
+    grpc_port: 6334
+    enable_tls: false             # Enable in production with proper certs
+
+  # Collection defaults
+  collection:
+    vectors:
+      on_disk: false              # Keep vectors in RAM for performance
+    replication_factor: 2         # Replicate data across 2 nodes
+    write_consistency_factor: 1   # Majority write required
+    shard_number: 3               # Distribute data across 3 shards
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    http: 6333
+    grpc: 6334
+    p2p: 6335
+
+# Pod anti-affinity (spread across nodes)
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: qdrant
+        topologyKey: kubernetes.io/hostname
+
+# Topology spread constraints
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: qdrant
+
+# Health probes
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /readyz
+    port: 6333
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /readyz
+    port: 6333
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Metrics (Prometheus)
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: isa-cloud-production
+    labels:
+      release: prometheus
+
+# Security context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 2000
+  fsGroup: 2000
+  runAsNonRoot: true
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Environment variables
+env:
+  - name: QDRANT__CLUSTER__ENABLED
+    value: "true"
+  - name: QDRANT__LOG_LEVEL
+    value: "INFO"
+
+# Sidecar for snapshots to S3/MinIO (optional)
+# sidecars:
+#   - name: snapshot-sync
+#     image: amazon/aws-cli:latest
+#     command: ["/bin/sh", "-c"]
+#     args:
+#       - |
+#         while true; do
+#           aws s3 sync /qdrant/snapshots s3://isa-backups/qdrant/ --endpoint-url http://minio:9000
+#           sleep 3600
+#         done
+#     volumeMounts:
+#       - name: qdrant-storage
+#         mountPath: /qdrant

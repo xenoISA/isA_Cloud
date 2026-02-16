@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-dashboard-config
+  labels:
+    app: apisix-dashboard
+    component: api-gateway-ui
+data:
+  conf.yaml: |
+    conf:
+      listen:
+        host: 0.0.0.0
+        port: 9000
+      etcd:
+        endpoints:
+          - http://etcd:2379
+        prefix: /apisix
+      log:
+        error_log:
+          level: warn
+          file_path: /usr/local/apisix-dashboard/logs/error.log
+        access_log:
+          file_path: /usr/local/apisix-dashboard/logs/access.log
+      security:
+        content_security_policy: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      authentication:
+        secret: edd1c9f034335f136f87ad84b625c8f1
+        expire_time: 3600
+        users:
+          - username: admin
+            password: admin  # Change in production
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apisix-dashboard
+  labels:
+    app: apisix-dashboard
+    component: api-gateway-ui
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: http
+  selector:
+    app: apisix-dashboard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apisix-dashboard
+  labels:
+    app: apisix-dashboard
+    component: api-gateway-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apisix-dashboard
+  template:
+    metadata:
+      labels:
+        app: apisix-dashboard
+    spec:
+      containers:
+        - name: apisix-dashboard
+          image: apache/apisix-dashboard:3.0.1-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9000
+              name: http
+              protocol: TCP
+          volumeMounts:
+            - name: dashboard-config
+              mountPath: /usr/local/apisix-dashboard/conf/conf.yaml
+              subPath: conf.yaml
+              readOnly: true
+          env:
+            - name: TZ
+              value: "UTC"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: dashboard-config
+          configMap:
+            name: apisix-dashboard-config

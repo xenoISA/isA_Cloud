@@ -1,0 +1,71 @@
+FROM grafana/loki:2.9.0
+
+# 支持 Consul 服务发现的 Loki Dockerfile
+# 文件名: deployments/dockerfiles/Staging/Dockerfile.loki.staging
+
+# 安装 curl 用于服务注册
+USER root
+RUN apk add --no-cache curl
+
+# 复制配置文件
+COPY deployments/configs/staging/loki-config.yml /etc/loki/loki-config.yml
+
+# 环境变量
+ENV LOKI_PORT=3100
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=loki-service
+ENV SERVICE_TAGS=logging,observability
+
+# 启动脚本
+COPY <<'EOF' /usr/local/bin/start-loki.sh
+#!/bin/sh
+set -e
+
+echo "Starting Loki service..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+
+# 启动 Loki
+/usr/bin/loki -config.file=/etc/loki/loki-config.yml &
+LOKI_PID=$!
+
+# 如果启用 Consul，注册服务
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for Loki to be ready..."
+    sleep 5
+    
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+    
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${LOKI_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\"],
+        \"Check\": {
+            \"HTTP\": \"http://${HOSTNAME}:${LOKI_PORT}/ready\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register with Consul (will retry)"
+    
+    echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
+fi
+
+# 等待 Loki 进程
+wait $LOKI_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-loki.sh
+
+USER loki
+
+EXPOSE 3100
+
+ENTRYPOINT ["/usr/local/bin/start-loki.sh"]
+
+
+

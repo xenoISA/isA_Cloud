@@ -1,0 +1,197 @@
+# Ray Cluster - Production Configuration
+# Chart: kuberay/ray-cluster
+# Docs: https://github.com/ray-project/kuberay/tree/master/helm-chart/ray-cluster
+
+# Cluster name
+clusterName: isa-ray-cluster
+
+image:
+  repository: rayproject/ray-ml
+  tag: 2.37.0-py311-cu121
+  pullPolicy: IfNotPresent
+
+# Head node configuration
+head:
+  # Ray version
+  rayVersion: "2.37.0"
+
+  # Resources for head node
+  resources:
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "16Gi"
+
+  # Ray start parameters
+  rayStartParams:
+    dashboard-host: "0.0.0.0"
+    block: "true"
+
+  # Service account
+  serviceAccountName: ray-head
+
+  # Node selector
+  # nodeSelector:
+  #   node-role.kubernetes.io/ray-head: "true"
+
+  # Tolerations
+  # tolerations: []
+
+  # Volumes
+  volumes:
+    - name: ray-logs
+      emptyDir: {}
+
+  volumeMounts:
+    - name: ray-logs
+      mountPath: /tmp/ray
+
+  # Environment variables
+  envVars:
+    - name: MLFLOW_TRACKING_URI
+      value: "http://mlflow.mlflow.svc.cluster.local:5000"
+    - name: AWS_ENDPOINT_URL
+      value: "http://minio.isa-cloud-production.svc.cluster.local:9000"
+
+  # Annotations
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+
+  # Labels
+  labels:
+    app.kubernetes.io/name: ray-head
+    app.kubernetes.io/component: head
+
+# Worker groups
+worker:
+  # CPU workers (general compute)
+  groupName: cpu-worker
+  replicas: 2
+  minReplicas: 1
+  maxReplicas: 10
+
+  rayVersion: "2.37.0"
+
+  resources:
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+    limits:
+      cpu: "8"
+      memory: "16Gi"
+
+  rayStartParams:
+    block: "true"
+
+  volumes:
+    - name: ray-logs
+      emptyDir: {}
+
+  volumeMounts:
+    - name: ray-logs
+      mountPath: /tmp/ray
+
+  envVars:
+    - name: MLFLOW_TRACKING_URI
+      value: "http://mlflow.mlflow.svc.cluster.local:5000"
+
+  labels:
+    app.kubernetes.io/name: ray-worker
+    app.kubernetes.io/component: worker
+    ray.io/worker-type: cpu
+
+# Additional worker groups
+additionalWorkerGroups:
+  # GPU workers (LLM inference)
+  - groupName: gpu-worker
+    replicas: 1
+    minReplicas: 0
+    maxReplicas: 4
+
+    rayVersion: "2.37.0"
+
+    resources:
+      requests:
+        cpu: "8"
+        memory: "32Gi"
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "16"
+        memory: "64Gi"
+        nvidia.com/gpu: "1"
+
+    rayStartParams:
+      block: "true"
+      num-gpus: "1"
+
+    nodeSelector:
+      nvidia.com/gpu.present: "true"
+
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+
+    volumes:
+      - name: ray-logs
+        emptyDir: {}
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+
+    volumeMounts:
+      - name: ray-logs
+        mountPath: /tmp/ray
+      - name: shm
+        mountPath: /dev/shm
+
+    envVars:
+      - name: MLFLOW_TRACKING_URI
+        value: "http://mlflow.mlflow.svc.cluster.local:5000"
+      - name: CUDA_VISIBLE_DEVICES
+        value: "0"
+
+    labels:
+      app.kubernetes.io/name: ray-worker
+      app.kubernetes.io/component: worker
+      ray.io/worker-type: gpu
+
+# Autoscaler configuration
+autoscaling:
+  enabled: true
+  idleTimeoutSeconds: 300
+  upscalingMode: Default
+
+# Service configuration
+service:
+  type: ClusterIP
+
+# Head service ports
+headService:
+  ports:
+    - name: dashboard
+      port: 8265
+      targetPort: 8265
+    - name: client
+      port: 10001
+      targetPort: 10001
+    - name: gcs
+      port: 6379
+      targetPort: 6379
+    - name: serve
+      port: 8000
+      targetPort: 8000
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: isa-cloud-production
+    labels:
+      release: prometheus

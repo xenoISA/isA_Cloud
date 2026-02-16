@@ -1,0 +1,74 @@
+FROM postgres:16-alpine
+
+# PostgreSQL Dockerfile with Consul service discovery support
+# File: deployments/dockerfiles/Staging/Dockerfile.postgres.staging
+
+# Install curl for Consul registration
+RUN apk add --no-cache curl bash
+
+# Environment variables
+ENV POSTGRES_PORT=5432
+ENV POSTGRES_DB=postgres
+ENV POSTGRES_USER=postgres
+ENV POSTGRES_PASSWORD=postgres
+ENV CONSUL_ENABLED=false
+ENV CONSUL_HOST=consul
+ENV CONSUL_PORT=8500
+ENV SERVICE_NAME=postgres-db
+ENV SERVICE_TAGS=database,postgresql,sql
+
+# Create init script directory
+RUN mkdir -p /docker-entrypoint-initdb.d
+
+# Startup script
+COPY <<'EOF' /usr/local/bin/start-postgres.sh
+#!/bin/bash
+set -e
+
+echo "Starting PostgreSQL service..."
+echo "CONSUL_ENABLED: ${CONSUL_ENABLED}"
+echo "SERVICE_NAME: ${SERVICE_NAME}"
+echo "Database: ${POSTGRES_DB}"
+
+# Start PostgreSQL (using official image entry point)
+docker-entrypoint.sh postgres &
+POSTGRES_PID=$!
+
+# If Consul is enabled, register service
+if [ "${CONSUL_ENABLED}" = "true" ]; then
+    echo "Waiting for PostgreSQL to be ready..."
+    sleep 10
+
+    echo "Registering service to Consul..."
+    HOSTNAME=$(hostname)
+
+    # Register PostgreSQL service
+    curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
+        \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
+        \"Name\": \"${SERVICE_NAME}\",
+        \"Address\": \"${HOSTNAME}\",
+        \"Port\": ${POSTGRES_PORT},
+        \"Tags\": [\"$(echo ${SERVICE_TAGS} | tr ',' '\",\"')\"],
+        \"Meta\": {
+            \"database\": \"${POSTGRES_DB}\",
+            \"version\": \"16\"
+        },
+        \"Check\": {
+            \"TCP\": \"${HOSTNAME}:${POSTGRES_PORT}\",
+            \"Interval\": \"10s\",
+            \"Timeout\": \"5s\"
+        }
+    }" || echo "Failed to register with Consul (will retry)"
+
+    echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
+fi
+
+# Wait for PostgreSQL process
+wait $POSTGRES_PID
+EOF
+
+RUN chmod +x /usr/local/bin/start-postgres.sh
+
+EXPOSE 5432
+
+CMD ["/usr/local/bin/start-postgres.sh"]

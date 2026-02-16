@@ -1,0 +1,79 @@
+# Pre-commit configuration for isA Cloud
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+# Documentation: https://pre-commit.com/
+
+repos:
+  # ============================================
+  # Secret Detection - CRITICAL SECURITY CHECK
+  # ============================================
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: gitleaks - Detect hardcoded secrets
+        description: Detect hardcoded secrets using Gitleaks
+        entry: gitleaks protect --verbose --redact --staged
+        language: system
+        pass_filenames: false
+
+  # ============================================
+  # General File Checks
+  # ============================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+      - id: end-of-file-fixer
+        name: Ensure files end with newline
+      - id: check-yaml
+        name: Check YAML syntax
+        args: ['--unsafe']  # Allow custom tags in K8s manifests
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: detect-private-key
+        name: Detect private keys
+      - id: check-case-conflict
+        name: Check for case conflicts
+
+  # ============================================
+  # Python Specific (if applicable)
+  # ============================================
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        name: Format Python code with Black
+        language_version: python3
+        files: \.py$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: Sort Python imports
+        args: ["--profile", "black"]
+        files: \.py$
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+        name: Lint Python code with Flake8
+        args: ['--max-line-length=120', '--ignore=E501,W503,E203']
+        files: \.py$
+
+# ============================================
+# CI Configuration
+# ============================================
+# For CI/CD, you can also run gitleaks as a standalone step:
+#   gitleaks detect --source . --verbose --report-format json --report-path gitleaks-report.json
+#
+# To scan git history for previously committed secrets:
+#   gitleaks detect --source . --verbose --log-opts="--all"
