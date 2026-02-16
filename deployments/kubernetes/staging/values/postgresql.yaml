@@ -1,13 +1,36 @@
 # PostgreSQL Helm Values - LOCAL STAGING (Simple)
 # Chart: bitnami/postgresql
 # Install: helm install postgresql bitnami/postgresql -n isa-cloud-staging -f helm-values/staging/postgresql.yaml
+#
+# ============================================
+# IMPORTANT: Password Security
+# ============================================
+# DO NOT commit real passwords to version control!
+#
+# For production deployments, use one of these approaches:
+# 1. Helm --set flag at deploy time:
+#    helm install postgresql bitnami/postgresql \
+#      --set auth.postgresPassword="YOUR_ACTUAL_PASSWORD" \
+#      -n isa-cloud-staging -f postgresql.yaml
+#
+# 2. External secrets with Bitnami chart:
+#    auth:
+#      existingSecret: postgres-external-secret
+#      secretKeys:
+#        adminPasswordKey: password
+#
+# 3. HashiCorp Vault with Vault Agent Injector
+#
+# 4. AWS Secrets Manager with External Secrets Operator
+# ============================================
 
 # Simple standalone architecture for local dev
 architecture: standalone
 
 # Authentication
+# CHANGE_ME: Use --set or existingSecret in production
 auth:
-  postgresPassword: "staging_postgres_2024"
+  postgresPassword: "CHANGE_ME_USE_EXTERNAL_SECRETS"
   database: "isa_platform"
 
 # Primary instance
