@@ -13,6 +13,7 @@ providing full support for all PostgreSQL operations including:
 """
 
 import os
+import re
 import json
 import asyncio
 from typing import List, Dict, Optional, Any
@@ -21,6 +22,38 @@ import asyncpg
 from asyncpg import Pool, Connection
 
 from .async_base_client import AsyncBaseClient
+
+
+# Security: Regex pattern for validating SQL identifiers (schema, table, column names)
+# Prevents SQL injection when identifiers must be interpolated (DDL statements don't support parameterization)
+_SAFE_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _validate_identifier(name: str, identifier_type: str = "identifier") -> str:
+    """
+    Validate a SQL identifier (schema, table, column name) to prevent SQL injection.
+
+    Args:
+        name: The identifier to validate
+        identifier_type: Type of identifier for error messages (e.g., "schema", "table")
+
+    Returns:
+        The validated identifier
+
+    Raises:
+        ValueError: If the identifier contains invalid characters
+    """
+    if not name:
+        raise ValueError(f"Invalid {identifier_type}: cannot be empty")
+    if not _SAFE_IDENTIFIER_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid {identifier_type} '{name}': must start with a letter or underscore, "
+            "and contain only letters, numbers, and underscores"
+        )
+    # Additional length check to prevent extremely long identifiers
+    if len(name) > 63:  # PostgreSQL identifier length limit
+        raise ValueError(f"Invalid {identifier_type} '{name}': exceeds maximum length of 63 characters")
+    return name
 
 
 async def _init_connection(conn: Connection) -> None:
@@ -154,9 +187,10 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Set search path for schema
+                # Set search path for schema (validate to prevent SQL injection)
                 if schema != 'public':
-                    await conn.execute(f'SET search_path TO {schema}, public')
+                    validated_schema = _validate_identifier(schema, "schema")
+                    await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                 if params:
                     rows = await conn.fetch(sql, *params)
@@ -184,8 +218,10 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
+                # Validate schema to prevent SQL injection
                 if schema != 'public':
-                    await conn.execute(f'SET search_path TO {schema}, public')
+                    validated_schema = _validate_identifier(schema, "schema")
+                    await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                 if params:
                     row = await conn.fetchrow(sql, *params)
@@ -215,8 +251,10 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
+                # Validate schema to prevent SQL injection
                 if schema != 'public':
-                    await conn.execute(f'SET search_path TO {schema}, public')
+                    validated_schema = _validate_identifier(schema, "schema")
+                    await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                 if params:
                     result = await conn.execute(sql, *params)
@@ -251,8 +289,10 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Validate schema to prevent SQL injection
                     if schema != 'public':
-                        await conn.execute(f'SET search_path TO {schema}, public')
+                        validated_schema = _validate_identifier(schema, "schema")
+                        await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                     for op in operations:
                         sql = op.get('sql', '')
@@ -368,8 +408,10 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
+                # Validate schema to prevent SQL injection
                 if schema != 'public':
-                    await conn.execute(f'SET search_path TO {schema}, public')
+                    validated_schema = _validate_identifier(schema, "schema")
+                    await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                 # Get columns from first row
                 columns = list(rows[0].keys())
@@ -518,8 +560,10 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Validate schema to prevent SQL injection
                     if schema != 'public':
-                        await conn.execute(f'SET search_path TO {schema}, public')
+                        validated_schema = _validate_identifier(schema, "schema")
+                        await conn.execute(f'SET search_path TO {validated_schema}, public')
 
                     for op in operations:
                         sql = op.get('sql', '')

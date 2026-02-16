@@ -13,6 +13,7 @@ providing full support for analytical SQL operations including:
 """
 
 import os
+import re
 import asyncio
 from typing import List, Dict, Optional, Any
 from pathlib import Path
@@ -21,6 +22,38 @@ from concurrent.futures import ThreadPoolExecutor
 import duckdb
 
 from .async_base_client import AsyncBaseClient
+
+
+# Security: Regex pattern for validating SQL identifiers (schema, table, column names)
+# Prevents SQL injection when identifiers must be interpolated (DDL statements don't support parameterization)
+_SAFE_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _validate_identifier(name: str, identifier_type: str = "identifier") -> str:
+    """
+    Validate a SQL identifier (schema, table, column name) to prevent SQL injection.
+
+    Args:
+        name: The identifier to validate
+        identifier_type: Type of identifier for error messages (e.g., "schema", "table")
+
+    Returns:
+        The validated identifier
+
+    Raises:
+        ValueError: If the identifier contains invalid characters
+    """
+    if not name:
+        raise ValueError(f"Invalid {identifier_type}: cannot be empty")
+    if not _SAFE_IDENTIFIER_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid {identifier_type} '{name}': must start with a letter or underscore, "
+            "and contain only letters, numbers, and underscores"
+        )
+    # Additional length check to prevent extremely long identifiers
+    if len(name) > 128:  # DuckDB identifier length limit
+        raise ValueError(f"Invalid {identifier_type} '{name}': exceeds maximum length of 128 characters")
+    return name
 
 
 class AsyncDuckDBClient(AsyncBaseClient):
@@ -323,9 +356,14 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table, "table name")
+
             def _table_exists():
+                # Use parameterized query for the WHERE clause
                 result = self._conn.execute(
-                    f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table}'"
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+                    [validated_table]
                 )
                 return result.fetchone()[0] > 0
 
@@ -350,9 +388,19 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name and column names to prevent SQL injection
+            validated_table = _validate_identifier(table_name, "table name")
+            validated_columns = []
+            for col, dtype in schema.items():
+                validated_col = _validate_identifier(col, "column name")
+                # Validate data type (basic whitelist of SQL types)
+                validated_dtype = _validate_identifier(dtype.split('(')[0].split()[0], "data type")
+                # Preserve original dtype if it passes basic validation
+                validated_columns.append(f"{validated_col} {dtype}")
+
             def _create_table():
-                columns = ', '.join([f"{col} {dtype}" for col, dtype in schema.items()])
-                self._conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns})")
+                columns = ', '.join(validated_columns)
+                self._conn.execute(f"CREATE TABLE IF NOT EXISTS {validated_table} ({columns})")
                 return True
 
             return await self._run_in_executor(_create_table)
@@ -377,10 +425,13 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table_name, "table name")
+
             def _drop_table():
                 if_clause = "IF EXISTS " if if_exists else ""
                 cascade_clause = " CASCADE" if cascade else ""
-                self._conn.execute(f"DROP TABLE {if_clause}{table_name}{cascade_clause}")
+                self._conn.execute(f"DROP TABLE {if_clause}{validated_table}{cascade_clause}")
                 return True
 
             return await self._run_in_executor(_drop_table)
@@ -402,8 +453,11 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table_name, "table name")
+
             def _get_schema():
-                result = self._conn.execute(f"DESCRIBE {table_name}")
+                result = self._conn.execute(f"DESCRIBE {validated_table}")
                 columns = []
                 for row in result.fetchall():
                     columns.append({
@@ -411,7 +465,7 @@ class AsyncDuckDBClient(AsyncBaseClient):
                         'data_type': row[1],
                         'nullable': row[2] == 'YES' if len(row) > 2 else True
                     })
-                return {'table_name': table_name, 'columns': columns}
+                return {'table_name': validated_table, 'columns': columns}
 
             return await self._run_in_executor(_get_schema)
 
@@ -433,13 +487,16 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table_name, "table name")
+
             def _get_stats():
                 # Get row count
-                count_result = self._conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count_result = self._conn.execute(f"SELECT COUNT(*) FROM {validated_table}")
                 row_count = count_result.fetchone()[0]
 
                 stats = {
-                    'table_name': table_name,
+                    'table_name': validated_table,
                     'row_count': row_count,
                     'size_bytes': 0,  # DuckDB doesn't expose this directly
                     'column_stats': []
@@ -447,18 +504,20 @@ class AsyncDuckDBClient(AsyncBaseClient):
 
                 if include_columns:
                     # Get column info
-                    desc_result = self._conn.execute(f"DESCRIBE {table_name}")
+                    desc_result = self._conn.execute(f"DESCRIBE {validated_table}")
                     for row in desc_result.fetchall():
                         col_name = row[0]
+                        # Validate column name (comes from DESCRIBE, should be safe, but validate anyway)
+                        validated_col = _validate_identifier(col_name, "column name")
                         # Get distinct count
                         distinct_result = self._conn.execute(
-                            f"SELECT COUNT(DISTINCT {col_name}) FROM {table_name}"
+                            f"SELECT COUNT(DISTINCT {validated_col}) FROM {validated_table}"
                         )
                         distinct_count = distinct_result.fetchone()[0]
 
                         # Get null count
                         null_result = self._conn.execute(
-                            f"SELECT COUNT(*) FROM {table_name} WHERE {col_name} IS NULL"
+                            f"SELECT COUNT(*) FROM {validated_table} WHERE {validated_col} IS NULL"
                         )
                         null_count = null_result.fetchone()[0]
 
@@ -615,16 +674,20 @@ class AsyncDuckDBClient(AsyncBaseClient):
 
             await self._ensure_connected()
 
+            # Validate table name and column names to prevent SQL injection
+            validated_table = _validate_identifier(table, "table name")
+            columns = list(rows[0].keys())
+            validated_columns = [_validate_identifier(col, "column name") for col in columns]
+
             def _insert_many():
-                columns = list(rows[0].keys())
-                cols_str = ', '.join(columns)
-                placeholders = ', '.join(['?' for _ in columns])
+                cols_str = ', '.join(validated_columns)
+                placeholders = ', '.join(['?' for _ in validated_columns])
 
                 count = 0
                 for row in rows:
                     values = [row.get(col) for col in columns]
                     self._conn.execute(
-                        f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})",
+                        f"INSERT INTO {validated_table} ({cols_str}) VALUES ({placeholders})",
                         values
                     )
                     count += 1
@@ -656,29 +719,44 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            def _aggregate():
-                # Build aggregation expressions
-                agg_exprs = []
-                for agg in aggregations:
-                    func = agg.get('function', 'COUNT').upper()
-                    col = agg.get('column', '*')
-                    alias = agg.get('alias', f"{func}_{col}")
-                    agg_exprs.append(f"{func}({col}) AS {alias}")
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table, "table name")
 
-                agg_str = ', '.join(agg_exprs)
+            # Validate aggregation components
+            validated_agg_exprs = []
+            for agg in aggregations:
+                func = agg.get('function', 'COUNT').upper()
+                # Whitelist of allowed aggregate functions
+                allowed_funcs = {'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'STDDEV', 'VARIANCE'}
+                if func not in allowed_funcs:
+                    raise ValueError(f"Invalid aggregate function: {func}")
+                col = agg.get('column', '*')
+                if col != '*':
+                    col = _validate_identifier(col, "column name")
+                alias = agg.get('alias', f"{func}_{col}")
+                alias = _validate_identifier(alias, "alias")
+                validated_agg_exprs.append(f"{func}({col}) AS {alias}")
+
+            # Validate group_by columns
+            validated_group_by = None
+            if group_by:
+                validated_group_by = [_validate_identifier(col, "group by column") for col in group_by]
+
+            def _aggregate():
+                agg_str = ', '.join(validated_agg_exprs)
 
                 # Build SQL
                 sql = f"SELECT {agg_str}"
-                if group_by:
-                    sql = f"SELECT {', '.join(group_by)}, {agg_str}"
+                if validated_group_by:
+                    sql = f"SELECT {', '.join(validated_group_by)}, {agg_str}"
 
-                sql += f" FROM {table}"
+                sql += f" FROM {validated_table}"
 
                 if where:
                     sql += f" WHERE {where}"
 
-                if group_by:
-                    sql += f" GROUP BY {', '.join(group_by)}"
+                if validated_group_by:
+                    sql += f" GROUP BY {', '.join(validated_group_by)}"
 
                 result = self._conn.execute(sql)
                 columns = [desc[0] for desc in result.description]
@@ -703,8 +781,11 @@ class AsyncDuckDBClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
+            # Validate table name to prevent SQL injection
+            validated_table = _validate_identifier(table, "table name")
+
             def _count():
-                sql = f"SELECT COUNT(*) FROM {table}"
+                sql = f"SELECT COUNT(*) FROM {validated_table}"
                 if where:
                     sql += f" WHERE {where}"
                 result = self._conn.execute(sql)
