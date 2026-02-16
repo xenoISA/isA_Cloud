@@ -1,0 +1,151 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_call:
+    # Allow this workflow to be called by other workflows
+    inputs:
+      python_path:
+        description: 'Path to Python code'
+        required: false
+        type: string
+        default: '.'
+      go_path:
+        description: 'Path to Go code'
+        required: false
+        type: string
+        default: '.'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════
+  # Secrets Scanning
+  # ═══════════════════════════════════════════════════════════
+  secrets-scan:
+    name: Secrets Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better detection
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_NOTIFY_USER_LIST: '@${{ github.actor }}'
+
+  # ═══════════════════════════════════════════════════════════
+  # Python Security Scanning
+  # ═══════════════════════════════════════════════════════════
+  python-security:
+    name: Python Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install security tools
+        run: |
+          pip install pip-audit bandit[toml]
+
+      - name: Run pip-audit (dependency vulnerabilities)
+        run: |
+          echo "## 🔍 Checking isA_common dependencies" >> $GITHUB_STEP_SUMMARY
+          pip-audit -r isA_common/requirements.txt --format json --output pip-audit-results.json || true
+          pip-audit -r isA_common/requirements.txt --format markdown >> $GITHUB_STEP_SUMMARY || true
+        continue-on-error: true
+
+      - name: Run bandit (SAST)
+        run: |
+          echo "## 🔍 Running Bandit SAST" >> $GITHUB_STEP_SUMMARY
+          bandit -r isA_common/ -f json -o bandit-results.json || true
+          bandit -r isA_common/ -f txt >> $GITHUB_STEP_SUMMARY || true
+        continue-on-error: true
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-security-results
+          path: |
+            pip-audit-results.json
+            bandit-results.json
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════
+  # Go Security Scanning
+  # ═══════════════════════════════════════════════════════════
+  go-security:
+    name: Go Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install security tools
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run govulncheck (dependency vulnerabilities)
+        run: |
+          echo "## 🔍 Running govulncheck" >> $GITHUB_STEP_SUMMARY
+          govulncheck ./... 2>&1 | tee govulncheck-results.txt >> $GITHUB_STEP_SUMMARY || true
+        continue-on-error: true
+
+      - name: Run gosec (SAST)
+        run: |
+          echo "## 🔍 Running gosec SAST" >> $GITHUB_STEP_SUMMARY
+          gosec -fmt json -out gosec-results.json ./... || true
+          gosec ./... >> $GITHUB_STEP_SUMMARY || true
+        continue-on-error: true
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-security-results
+          path: |
+            govulncheck-results.txt
+            gosec-results.json
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════
+  # Security Summary
+  # ═══════════════════════════════════════════════════════════
+  security-summary:
+    name: Security Summary
+    needs: [secrets-scan, python-security, go-security]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# 🔒 Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets (gitleaks) | ${{ needs.secrets-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Python Security | ${{ needs.python-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Go Security | ${{ needs.go-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY

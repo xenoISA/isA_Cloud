@@ -1,0 +1,542 @@
+# NetworkPolicies for isa-cloud-staging namespace
+# Implements default-deny and explicit allow-list policies for service-to-service communication
+---
+# Default deny all ingress and egress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow DNS resolution for all pods (required for service discovery)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Allow backend services to access PostgreSQL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# Allow backend services to access Redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# Allow services to access Consul
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consul-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: consul
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+        - podSelector:
+            matchLabels:
+              app: apisix
+      ports:
+        - protocol: TCP
+          port: 8500
+        - protocol: TCP
+          port: 8300
+        - protocol: TCP
+          port: 8301
+        - protocol: UDP
+          port: 8301
+
+---
+# Allow services to access NATS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nats-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: nats
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 4222
+        - protocol: TCP
+          port: 6222
+        - protocol: TCP
+          port: 8222
+
+---
+# Allow services to access Neo4j
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-neo4j-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: neo4j
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 7474
+        - protocol: TCP
+          port: 7687
+
+---
+# Allow services to access MinIO
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-minio-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+
+---
+# Allow services to access Qdrant
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-qdrant-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: qdrant
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 6333
+        - protocol: TCP
+          port: 6334
+
+---
+# Allow services to access etcd
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-etcd-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: etcd
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: apisix
+        - podSelector:
+            matchLabels:
+              tier: infrastructure
+      ports:
+        - protocol: TCP
+          port: 2379
+        - protocol: TCP
+          port: 2380
+
+---
+# Allow APISIX gateway to access backend services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apisix-to-backends
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: apisix
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9090
+        # gRPC ports range 50051-50063
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 50052
+        - protocol: TCP
+          port: 50053
+        - protocol: TCP
+          port: 50054
+        - protocol: TCP
+          port: 50055
+        - protocol: TCP
+          port: 50056
+        - protocol: TCP
+          port: 50057
+        - protocol: TCP
+          port: 50058
+        - protocol: TCP
+          port: 50059
+        - protocol: TCP
+          port: 50060
+        - protocol: TCP
+          port: 50061
+        - protocol: TCP
+          port: 50062
+        - protocol: TCP
+          port: 50063
+
+---
+# Allow backend services to communicate with infrastructure
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-egress-to-infrastructure
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+  policyTypes:
+    - Egress
+  egress:
+    # PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Consul
+    - to:
+        - podSelector:
+            matchLabels:
+              app: consul
+      ports:
+        - protocol: TCP
+          port: 8500
+        - protocol: TCP
+          port: 8300
+        - protocol: TCP
+          port: 8301
+    # NATS
+    - to:
+        - podSelector:
+            matchLabels:
+              app: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+        - protocol: TCP
+          port: 6222
+        - protocol: TCP
+          port: 8222
+    # Neo4j
+    - to:
+        - podSelector:
+            matchLabels:
+              app: neo4j
+      ports:
+        - protocol: TCP
+          port: 7474
+        - protocol: TCP
+          port: 7687
+    # MinIO
+    - to:
+        - podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+    # Qdrant
+    - to:
+        - podSelector:
+            matchLabels:
+              app: qdrant
+      ports:
+        - protocol: TCP
+          port: 6333
+        - protocol: TCP
+          port: 6334
+    # etcd
+    - to:
+        - podSelector:
+            matchLabels:
+              app: etcd
+      ports:
+        - protocol: TCP
+          port: 2379
+        - protocol: TCP
+          port: 2380
+
+---
+# Allow APISIX egress to backend services and infrastructure
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apisix-egress
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: apisix
+  policyTypes:
+    - Egress
+  egress:
+    # To backend services
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 50052
+        - protocol: TCP
+          port: 50053
+        - protocol: TCP
+          port: 50054
+        - protocol: TCP
+          port: 50055
+        - protocol: TCP
+          port: 50056
+        - protocol: TCP
+          port: 50057
+        - protocol: TCP
+          port: 50058
+        - protocol: TCP
+          port: 50059
+        - protocol: TCP
+          port: 50060
+        - protocol: TCP
+          port: 50061
+        - protocol: TCP
+          port: 50062
+        - protocol: TCP
+          port: 50063
+    # To etcd (for configuration)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: etcd
+      ports:
+        - protocol: TCP
+          port: 2379
+    # To Consul (for service discovery)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: consul
+      ports:
+        - protocol: TCP
+          port: 8500
+
+---
+# Allow external ingress to APISIX gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-to-apisix
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: apisix
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 9443
