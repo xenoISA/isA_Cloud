@@ -1,3 +1,10 @@
+# ============================================================================
+# DEPRECATED - DO NOT USE FOR NEW DEPLOYMENTS
+# ============================================================================
+# This configuration is kept for historical reference only.
+# Deprecated as of: February 2025
+# ============================================================================
+
 # Docker Compose configuration for Apache APISIX API Gateway (Staging)
 # This replaces the previous NGINX + Go Gateway setup
 #

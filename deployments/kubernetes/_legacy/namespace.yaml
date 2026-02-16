@@ -1,3 +1,11 @@
+# ============================================================================
+# DEPRECATED - DO NOT USE FOR NEW DEPLOYMENTS
+# ============================================================================
+# This configuration is kept for historical reference only.
+# For current configurations, see: deployments/kubernetes/{local,staging,production}/
+# Deprecated as of: February 2025
+# ============================================================================
+
 # Production Namespace and RBAC Configuration
 ---
 apiVersion: v1
