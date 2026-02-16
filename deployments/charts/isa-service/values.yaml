@@ -22,6 +22,36 @@ resources:
     memory: "512Mi"
     cpu: "500m"
 
+# ============================================
+# Security Context Configuration
+# ============================================
+# Pod-level security context (applies to all containers in the pod)
+# These are secure defaults following Kubernetes security best practices
+podSecurityContext:
+  # Run as non-root user (UID 1000)
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  # Set filesystem group for volume mounts
+  fsGroup: 1000
+  # Ensure volume permissions are set correctly
+  fsGroupChangePolicy: "OnRootMismatch"
+
+# Container-level security context
+# These settings apply to the main application container
+securityContext:
+  # Prevent privilege escalation (e.g., via setuid binaries)
+  allowPrivilegeEscalation: false
+  # Use read-only root filesystem (requires writable volumes for temp/logs)
+  readOnlyRootFilesystem: true
+  # Drop all Linux capabilities (principle of least privilege)
+  capabilities:
+    drop:
+      - ALL
+  # Run as non-root (redundant with pod context but explicit is better)
+  runAsNonRoot: true
+  runAsUser: 1000
+
 # Autoscaling
 autoscaling:
   enabled: true
@@ -54,8 +84,18 @@ consul:
 volumes: []
 # - name: models
 #   emptyDir: {}
+# Note: If using readOnlyRootFilesystem: true, you may need to add:
+# - name: tmp
+#   emptyDir: {}
+# - name: cache
+#   emptyDir: {}
 
 # Optional volume mounts
 volumeMounts: []
 # - name: models
 #   mountPath: /app/models
+# Note: If using readOnlyRootFilesystem: true, you may need to add:
+# - name: tmp
+#   mountPath: /tmp
+# - name: cache
+#   mountPath: /app/.cache
