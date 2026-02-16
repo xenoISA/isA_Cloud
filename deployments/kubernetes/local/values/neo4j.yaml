@@ -1,13 +1,27 @@
 # Neo4j Helm Values - LOCAL (Simple)
 # Chart: neo4j/neo4j
 # Install: helm install neo4j neo4j/neo4j -n isa-cloud-local -f local/values/neo4j.yaml
+#
+# ============================================
+# IMPORTANT: Password Security
+# ============================================
+# DO NOT commit real passwords to version control!
+#
+# For deployments, use one of these approaches:
+# 1. Helm --set flag at deploy time:
+#    helm install neo4j neo4j/neo4j \
+#      --set neo4j.password="YOUR_ACTUAL_PASSWORD" \
+#      -n isa-cloud-local -f local/values/neo4j.yaml
+#
+# 2. External secrets management
+# ============================================
 
 neo4j:
   # Name
   name: neo4j
 
-  # Password
-  password: "staging_neo4j_2024"
+  # Password - CHANGE_ME: Use --set or external secrets in production
+  password: "CHANGE_ME_USE_EXTERNAL_SECRETS"
 
   # Edition (community is free)
   edition: community
@@ -38,12 +52,16 @@ services:
       type: NodePort
       # Required for Kind multi-node: route traffic across nodes
       externalTrafficPolicy: Cluster
-      ports:
-        - name: http
-          port: 7474
-          targetPort: 7474
-          nodePort: 30474
-        - name: bolt
-          port: 7687
-          targetPort: 7687
-          nodePort: 30687
+    ports:
+      http:
+        enabled: true
+        port: 7474
+        targetPort: 7474
+        nodePort: 30474
+      https:
+        enabled: false
+      bolt:
+        enabled: true
+        port: 7687
+        targetPort: 7687
+        nodePort: 30687
