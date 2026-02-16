@@ -67,11 +67,16 @@ data:
         fi
 
         # Build plugins
+        # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+        # For local development, localhost is acceptable but still explicit
+        # WARNING: Wildcard (*) with credentials is dangerous and allows any site to make authenticated requests
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
         local plugins=$(jq -n \
             --arg rate_limit "$rate_limit" \
+            --arg cors_origins "$cors_origins" \
             '{
                 "cors": {
-                    "allow_origins": "*",
+                    "allow_origins": $cors_origins,
                     "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
                     "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                     "expose_headers": "X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
@@ -157,9 +162,11 @@ data:
 
         print_info "Syncing health route: $route_name ($health_uri -> $service_name:/health)"
 
-        local plugins=$(jq -n '{
+        # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
+        local plugins=$(jq -n --arg cors_origins "$cors_origins" '{
             "cors": {
-                "allow_origins": "*",
+                "allow_origins": $cors_origins,
                 "allow_methods": "GET,OPTIONS,HEAD",
                 "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                 "expose_headers": "X-Request-ID",
@@ -328,6 +335,10 @@ spec:
                   value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
                 - name: APISIX_ADMIN_KEY
                   value: "edd1c9f034335f136f87ad84b625c8f1"
+                # SECURITY: Configure allowed CORS origins (comma-separated)
+                # For local development, localhost origins are acceptable
+                # - name: CORS_ALLOWED_ORIGINS
+                #   value: "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
               resources:
                 requests:
                   cpu: 50m
