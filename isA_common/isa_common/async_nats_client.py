@@ -20,7 +20,14 @@ import nats
 from nats.aio.client import Client as NATSClient
 from nats.js.api import StreamConfig, ConsumerConfig, DeliverPolicy, AckPolicy
 from nats.js.errors import NotFoundError
-from nats.errors import TimeoutError as NATSTimeoutError
+from nats.errors import (
+    TimeoutError as NATSTimeoutError,
+    ConnectionClosedError,
+    ConnectionReconnectingError,
+    ConnectionDrainingError,
+    StaleConnectionError,
+    NoServersError,
+)
 
 from .async_base_client import AsyncBaseClient
 
@@ -62,6 +69,7 @@ class AsyncNATSClient(AsyncBaseClient):
         self._nc: Optional[NATSClient] = None
         self._js = None  # JetStream context
         self._subscriptions: Dict[str, Any] = {}
+        self._reconnect_lock = asyncio.Lock()
 
     def _get_subject_prefix(self) -> str:
         """Get subject prefix for multi-tenant isolation (NATS uses '.' separator)."""
@@ -74,14 +82,99 @@ class AsyncNATSClient(AsyncBaseClient):
             return subject
         return f"{prefix}{subject}"
 
+    def _connection_healthy(self) -> bool:
+        """Check if the underlying NATS connection can be used safely."""
+        return (
+            self._nc is not None
+            and bool(getattr(self._nc, "is_connected", False))
+            and not bool(getattr(self._nc, "is_closed", False))
+            and self._js is not None
+        )
+
+    def _is_connection_error(self, error: Exception) -> bool:
+        """Detect recoverable NATS connection errors that need reconnect."""
+        if isinstance(
+            error,
+            (
+                ConnectionClosedError,
+                ConnectionReconnectingError,
+                ConnectionDrainingError,
+                StaleConnectionError,
+                NoServersError,
+            ),
+        ):
+            return True
+
+        error_text = str(error).lower()
+        reconnect_markers = (
+            "connection closed",
+            "nats connection closed",
+            "unexpected eof",
+            "stale connection",
+            "disconnected",
+            "reconnecting",
+            "no servers available",
+        )
+        return any(marker in error_text for marker in reconnect_markers)
+
+    async def _recover_connection(self, operation: str, error: Exception) -> None:
+        """Force reconnect after connection-level failures."""
+        self._logger.warning(f"NATS {operation} hit connection error, forcing reconnect: {error}")
+        async with self._reconnect_lock:
+            if self._connection_healthy():
+                return
+            try:
+                await self._disconnect()
+            except Exception as disconnect_error:
+                self._logger.debug(f"NATS disconnect during recovery failed: {disconnect_error}")
+            await self._connect()
+            self._connected = True
+
+    async def _ensure_connected(self) -> None:
+        """Ensure NATS connection is healthy; reconnect when stale/closed."""
+        if self._connection_healthy():
+            return
+
+        async with self._reconnect_lock:
+            if self._connection_healthy():
+                return
+            if self._nc is not None:
+                try:
+                    await self._disconnect()
+                except Exception as disconnect_error:
+                    self._logger.debug(f"NATS pre-connect cleanup failed: {disconnect_error}")
+            await self._connect()
+            self._connected = True
+
     async def _connect(self) -> None:
         """Establish NATS connection."""
         server_url = f"nats://{self._host}:{self._port}"
 
+        async def _on_disconnected():
+            if self._connected:
+                self._logger.warning("NATS disconnected")
+            self._connected = False
+
+        async def _on_reconnected():
+            self._connected = True
+            self._logger.info("NATS reconnected")
+
+        async def _on_closed():
+            self._connected = False
+            self._logger.warning("NATS connection closed")
+
+        async def _on_error(error):
+            self._logger.warning(f"NATS async error: {error}")
+
         connect_opts = {
             'servers': [server_url],
+            'allow_reconnect': True,
             'reconnect_time_wait': 2,
-            'max_reconnect_attempts': 10,
+            'max_reconnect_attempts': -1,
+            'disconnected_cb': _on_disconnected,
+            'reconnected_cb': _on_reconnected,
+            'closed_cb': _on_closed,
+            'error_cb': _on_error,
         }
 
         if self._username and self._password:
@@ -90,15 +183,30 @@ class AsyncNATSClient(AsyncBaseClient):
 
         self._nc = await nats.connect(**connect_opts)
         self._js = self._nc.jetstream()
+        self._connected = True
         self._logger.info(f"Connected to NATS at {self._host}:{self._port}")
 
     async def _disconnect(self) -> None:
         """Close NATS connection."""
         if self._nc:
-            await self._nc.drain()
-            await self._nc.close()
+            try:
+                if getattr(self._nc, "is_connected", False):
+                    await self._nc.drain()
+            except Exception as drain_error:
+                self._logger.debug(f"NATS drain skipped: {drain_error}")
+            try:
+                await self._nc.close()
+            except Exception as close_error:
+                self._logger.debug(f"NATS close skipped: {close_error}")
             self._nc = None
             self._js = None
+        self._connected = False
+
+    async def close(self) -> None:
+        """Close NATS connection even if state flag is stale."""
+        if self._nc is not None or self._connected:
+            await self._disconnect()
+            self._logger.info(f"{self.SERVICE_NAME} connection closed")
 
     # ============================================
     # Health Check
@@ -108,14 +216,14 @@ class AsyncNATSClient(AsyncBaseClient):
         """Check NATS service health."""
         try:
             await self._ensure_connected()
-
+            healthy = self._connection_healthy()
             jetstream_enabled = self._js is not None
 
             return {
-                'healthy': self._nc.is_connected,
-                'nats_status': 'connected' if self._nc.is_connected else 'disconnected',
+                'healthy': healthy,
+                'nats_status': 'connected' if healthy else 'disconnected',
                 'jetstream_enabled': jetstream_enabled,
-                'connections': 1 if self._nc.is_connected else 0,
+                'connections': 1 if healthy else 0,
                 'message': 'NATS server is reachable'
             }
 
@@ -158,6 +266,18 @@ class AsyncNATSClient(AsyncBaseClient):
             return {'success': True, 'message': f'Published to {subject}'}
 
         except Exception as e:
+            if self._is_connection_error(e):
+                try:
+                    await self._recover_connection("publish", e)
+                    await self._nc.publish(
+                        subject,
+                        data,
+                        reply=reply_to if reply_to else None,
+                        headers=headers
+                    )
+                    return {'success': True, 'message': f'Published to {subject}'}
+                except Exception as retry_error:
+                    return self.handle_error(retry_error, "publish (retry)")
             return self.handle_error(e, "publish")
 
     async def publish_batch(self, messages: List[Dict]) -> Optional[Dict]:
@@ -244,9 +364,23 @@ class AsyncNATSClient(AsyncBaseClient):
             }
 
         except NATSTimeoutError:
-            logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
+            self._logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
             return None
         except Exception as e:
+            if self._is_connection_error(e):
+                try:
+                    await self._recover_connection("request", e)
+                    response = await self._nc.request(subject, data, timeout=timeout_seconds)
+                    return {
+                        'success': True,
+                        'data': response.data,
+                        'subject': response.subject
+                    }
+                except NATSTimeoutError:
+                    self._logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
+                    return None
+                except Exception as retry_error:
+                    return self.handle_error(retry_error, "request (retry)")
             return self.handle_error(e, "request")
 
     # ============================================
@@ -424,12 +558,26 @@ class AsyncNATSClient(AsyncBaseClient):
                         'sequence': msg.metadata.sequence.stream,
                         'num_delivered': msg.metadata.num_delivered
                     })
+                    # Auto-ack after fetch so durable consumers can advance.
+                    # Event handlers are idempotent and should tolerate at-least-once delivery.
+                    try:
+                        await msg.ack()
+                    except Exception as ack_error:
+                        self._logger.warning(f"Failed to ack message {msg.subject}: {ack_error}")
             except NATSTimeoutError:
                 pass  # No messages available
+            except Exception as fetch_error:
+                if self._is_connection_error(fetch_error):
+                    await self._recover_connection("pull_messages fetch", fetch_error)
+                    return []
+                raise
 
             return messages
 
         except Exception as e:
+            if self._is_connection_error(e):
+                await self._recover_connection("pull_messages", e)
+                return []
             return self.handle_error(e, "pull messages") or []
 
     async def ack_message(self, stream_name: str, consumer_name: str, sequence: int) -> Optional[Dict]:
