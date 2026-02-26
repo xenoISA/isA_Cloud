@@ -424,6 +424,12 @@ class AsyncNATSClient(AsyncBaseClient):
                         'sequence': msg.metadata.sequence.stream,
                         'num_delivered': msg.metadata.num_delivered
                     })
+                    # Auto-ack after fetch so durable consumers can advance.
+                    # Event handlers are idempotent and should tolerate at-least-once delivery.
+                    try:
+                        await msg.ack()
+                    except Exception as ack_error:
+                        self._logger.warning(f"Failed to ack message {msg.subject}: {ack_error}")
             except NATSTimeoutError:
                 pass  # No messages available
 
