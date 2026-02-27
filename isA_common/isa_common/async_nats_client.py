@@ -13,6 +13,7 @@ providing full support for all NATS operations including:
 """
 
 import os
+import time
 import asyncio
 from typing import List, Dict, Optional, AsyncIterator, Any
 
@@ -71,6 +72,13 @@ class AsyncNATSClient(AsyncBaseClient):
         self._subscriptions: Dict[str, Any] = {}
         self._reconnect_lock = asyncio.Lock()
 
+        # Reconnect observability
+        self._reconnect_count: int = 0
+        self._last_reconnect_ts: float = 0.0
+        self._consecutive_errors: int = 0
+        self._total_messages_pulled: int = 0
+        self._total_ack_failures: int = 0
+
     def _get_subject_prefix(self) -> str:
         """Get subject prefix for multi-tenant isolation (NATS uses '.' separator)."""
         return f"{self.organization_id}.{self.user_id}."
@@ -119,9 +127,14 @@ class AsyncNATSClient(AsyncBaseClient):
 
     async def _recover_connection(self, operation: str, error: Exception) -> None:
         """Force reconnect after connection-level failures."""
-        self._logger.warning(f"NATS {operation} hit connection error, forcing reconnect: {error}")
+        self._consecutive_errors += 1
+        self._logger.warning(
+            f"NATS {operation} hit connection error, forcing reconnect: {error} "
+            f"(consecutive_errors={self._consecutive_errors})"
+        )
         async with self._reconnect_lock:
             if self._connection_healthy():
+                self._consecutive_errors = 0
                 return
             try:
                 await self._disconnect()
@@ -129,6 +142,9 @@ class AsyncNATSClient(AsyncBaseClient):
                 self._logger.debug(f"NATS disconnect during recovery failed: {disconnect_error}")
             await self._connect()
             self._connected = True
+            self._reconnect_count += 1
+            self._last_reconnect_ts = time.monotonic()
+            self._consecutive_errors = 0
 
     async def _ensure_connected(self) -> None:
         """Ensure NATS connection is healthy; reconnect when stale/closed."""
@@ -152,19 +168,32 @@ class AsyncNATSClient(AsyncBaseClient):
 
         async def _on_disconnected():
             if self._connected:
-                self._logger.warning("NATS disconnected")
+                self._consecutive_errors += 1
+                self._logger.warning(
+                    f"NATS disconnected (reconnects={self._reconnect_count}, "
+                    f"consecutive_errors={self._consecutive_errors})"
+                )
             self._connected = False
 
         async def _on_reconnected():
             self._connected = True
-            self._logger.info("NATS reconnected")
+            self._reconnect_count += 1
+            self._last_reconnect_ts = time.monotonic()
+            self._consecutive_errors = 0
+            self._logger.info(
+                f"NATS reconnected (total_reconnects={self._reconnect_count})"
+            )
 
         async def _on_closed():
             self._connected = False
             self._logger.warning("NATS connection closed")
 
         async def _on_error(error):
-            self._logger.warning(f"NATS async error: {error}")
+            self._consecutive_errors += 1
+            self._logger.warning(
+                f"NATS async error: {error} "
+                f"(consecutive_errors={self._consecutive_errors})"
+            )
 
         connect_opts = {
             'servers': [server_url],
@@ -224,6 +253,10 @@ class AsyncNATSClient(AsyncBaseClient):
                 'nats_status': 'connected' if healthy else 'disconnected',
                 'jetstream_enabled': jetstream_enabled,
                 'connections': 1 if healthy else 0,
+                'reconnect_count': self._reconnect_count,
+                'consecutive_errors': self._consecutive_errors,
+                'total_messages_pulled': self._total_messages_pulled,
+                'total_ack_failures': self._total_ack_failures,
                 'message': 'NATS server is reachable'
             }
 
@@ -558,12 +591,17 @@ class AsyncNATSClient(AsyncBaseClient):
                         'sequence': msg.metadata.sequence.stream,
                         'num_delivered': msg.metadata.num_delivered
                     })
+                    self._total_messages_pulled += 1
                     # Auto-ack after fetch so durable consumers can advance.
                     # Event handlers are idempotent and should tolerate at-least-once delivery.
                     try:
                         await msg.ack()
                     except Exception as ack_error:
-                        self._logger.warning(f"Failed to ack message {msg.subject}: {ack_error}")
+                        self._total_ack_failures += 1
+                        self._logger.warning(
+                            f"Failed to ack message {msg.subject}: {ack_error} "
+                            f"(total_ack_failures={self._total_ack_failures})"
+                        )
             except NATSTimeoutError:
                 pass  # No messages available
             except Exception as fetch_error:
