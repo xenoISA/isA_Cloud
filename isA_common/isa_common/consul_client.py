@@ -11,9 +11,19 @@ import socket
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
+import ipaddress
+
 import consul
 
 logger = logging.getLogger(__name__)
+
+
+def _is_loopback(host: str) -> bool:
+    """Return True if *host* is a loopback address (127.x.x.x, ::1, localhost)."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
 
 
 class ConsulRegistry:
@@ -55,20 +65,37 @@ class ConsulRegistry:
 
         # Only set these if we're registering (have service_name and service_port)
         if service_name and service_port is not None:
-            # Handle 0.0.0.0 which is invalid for Consul service registration
-            # Priority: 1. Explicit service_host, 2. HOSTNAME env var, 3. socket.gethostname()
-            # In Docker, HOSTNAME is set to the container name which is DNS resolvable
+            # Resolve the address that Consul advertises to APISIX / other consumers.
+            # Loopback (127.x.x.x / ::1) and unspecified (0.0.0.0) are never
+            # routable from a gateway context, so we skip them and fall through
+            # to hostname-based detection.
             import os
 
-            if service_host and service_host != "0.0.0.0":
+            def _usable(addr: str | None) -> bool:
+                return bool(addr) and addr != "0.0.0.0" and not _is_loopback(addr)
+
+            if _usable(service_host):
                 self.service_host = service_host
             else:
                 # Priority: SERVICE_HOST (K8s Service DNS) > HOSTNAME (Docker container name) > hostname
-                # In K8s: SERVICE_HOST = "service.namespace.svc.cluster.local" (resolvable by Consul)
-                # In Docker: SERVICE_HOST not set, falls back to HOSTNAME (container name, also resolvable)
-                self.service_host = os.getenv("SERVICE_HOST") or os.getenv(
-                    "HOSTNAME", socket.gethostname()
+                env_host = os.getenv("SERVICE_HOST")
+                if _usable(env_host):
+                    self.service_host = env_host
+                else:
+                    self.service_host = os.getenv(
+                        "HOSTNAME", socket.gethostname()
+                    )
+
+            # Final guard: warn if the resolved address is still loopback
+            if _is_loopback(self.service_host):
+                logger.warning(
+                    f"Consul will register {service_name} at loopback address "
+                    f"'{self.service_host}'. This is unreachable from APISIX/gateway "
+                    f"context and will cause 502 errors. Set SERVICE_HOST to a "
+                    f"routable address (container hostname, K8s service DNS, or "
+                    f"host-reachable IP)."
                 )
+
             self.service_id = f"{service_name}-{self.service_host}-{service_port}"
         else:
             import os
