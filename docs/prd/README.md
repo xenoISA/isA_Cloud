@@ -1,12 +1,12 @@
 # isA Cloud Platform - Product Requirements Document
 
-> User Stories and Acceptance Criteria for Infrastructure gRPC Services
+> User Stories and Acceptance Criteria for Infrastructure Services
 
 ---
 
 ## Overview
 
-This document defines the product requirements for isA Cloud's infrastructure services layer, organized by service and epic.
+This document defines the product requirements for isA Cloud's infrastructure services layer, provided through the **isa_common** Python SDK. Each service is accessed via native async clients connecting directly to backend services on their native ports.
 
 ---
 
@@ -15,8 +15,8 @@ This document defines the product requirements for isA Cloud's infrastructure se
 ### E1-US1: Key-Value Operations
 
 **As a** backend developer
-**I want** to store and retrieve key-value pairs via gRPC
-**So that** I can cache data without managing Redis connections directly
+**I want** to store and retrieve key-value pairs via the async Redis client
+**So that** I can cache data with automatic multi-tenant isolation
 
 #### Acceptance Criteria
 
@@ -64,8 +64,8 @@ This document defines the product requirements for isA Cloud's infrastructure se
 ### E2-US1: Query Execution
 
 **As a** backend developer
-**I want** to execute SQL queries via gRPC
-**So that** I can access the database without connection management
+**I want** to execute SQL queries via the async PostgreSQL client
+**So that** I can access the database with automatic connection pooling
 
 #### Acceptance Criteria
 
@@ -271,7 +271,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-2.1 | gRPC metrics exported (latency, errors) | Partial |
+| AC-2.1 | Client metrics exported (latency, errors) | Partial |
 | AC-2.2 | Distributed tracing with trace IDs | Planned |
 | AC-2.3 | Dashboard in Grafana | Done |
 
@@ -299,5 +299,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 1.0.0
-**Last Updated**: 2025-12-11
+**Version**: 2.0.0
+**Last Updated**: 2026-02-28

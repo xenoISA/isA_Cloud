@@ -1,12 +1,12 @@
 # isA Cloud Platform - Technical Design
 
-> Architecture and Design Documentation for Infrastructure gRPC Services
+> Architecture and Design Documentation for the isa_common Infrastructure SDK
 
 ---
 
 ## Overview
 
-This document describes the technical architecture of isA Cloud's infrastructure services layer, providing a unified gRPC interface to various backend systems.
+This document describes the technical architecture of isA Cloud's infrastructure layer. The platform provides **native async Python clients** that connect directly to backend services, plus Kubernetes deployment and service discovery infrastructure.
 
 ---
 
@@ -18,18 +18,18 @@ This document describes the technical architecture of isA Cloud's infrastructure
 │                    (Agent, MCP, Model, User Services)                       │
 └─────────────────────────────────────┬───────────────────────────────────────┘
                                       │
-                                      │ gRPC (protobuf)
+                                      │ import isa_common
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           API Gateway (APISIX)                               │
-│                    - Routing, Rate Limiting, Auth                           │
+│                        isa_common Python SDK                                 │
+│              Native async clients (asyncpg, redis-py, nats-py, etc.)       │
 └─────────────────────────────────────┬───────────────────────────────────────┘
                                       │
                     ┌─────────────────┼─────────────────┐
                     ▼                 ▼                 ▼
 ┌───────────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│    Redis Service      │ │  Postgres Service │ │   NATS Service    │
-│    (Port 50055)       │ │   (Port 50061)    │ │   (Port 50056)    │
+│   AsyncRedisClient    │ │ AsyncPostgresClient│ │  AsyncNATSClient  │
+│    (Port 6379)        │ │   (Port 5432)     │ │   (Port 4222)     │
 └───────────┬───────────┘ └─────────┬─────────┘ └─────────┬─────────┘
             │                       │                     │
             ▼                       ▼                     ▼
@@ -39,93 +39,90 @@ This document describes the technical architecture of isA Cloud's infrastructure
 └───────────────────────┘ └───────────────────┘ └───────────────────┘
 ```
 
+Clients connect **directly** to backend services on their native ports. There is no intermediate gRPC or proxy layer.
+
 ---
 
-## Service Architecture
+## Client Architecture
 
-Each gRPC service follows Clean Architecture:
+All async clients extend `AsyncBaseClient` and follow a consistent pattern:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      gRPC Handler Layer                          │
-│              (Request validation, Response mapping)              │
+│                      AsyncBaseClient                              │
+│         (Abstract base: connect, disconnect, health_check)       │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │
+                                │ extends
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Service Layer                              │
-│           (Business logic, Multi-tenancy, Audit)                │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Repository Layer                             │
-│              (Data access abstraction)                          │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Infrastructure Layer                           │
-│            (Redis client, PG driver, NATS client)               │
+│                    Concrete Client                                │
+│         (AsyncRedisClient, AsyncPostgresClient, etc.)            │
+│                                                                   │
+│   _connect()       → Establish native driver connection          │
+│   _disconnect()    → Close connection + pool cleanup             │
+│   health_check()   → Backend health + connection stats           │
+│   _prefix_key()    → Multi-tenant key isolation                  │
+│   Domain methods   → Service-specific operations                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Key Design Patterns
+
+1. **Lazy Connection**: Clients connect on first use (`_ensure_connected()`)
+2. **Async Context Manager**: `async with client:` for lifecycle management
+3. **Multi-Tenancy**: All keys/subjects auto-prefixed with `{org_id}{separator}{user_id}`
+4. **Error Handling**: Standardized `handle_error(error, operation)` logging
+5. **Configuration**: Environment variable defaults (`{PREFIX}_HOST`, `{PREFIX}_PORT`)
 
 ---
 
 ## Component Design
 
-### Redis Service
+### Redis Client
 
 ```
-cmd/redis-service/
-├── main.go                 # Entry point, DI setup
-└── server/
-    ├── server.go           # gRPC handler implementation
-    └── auth.go             # Authentication logic
+isA_common/isa_common/async_redis_client.py (790 lines)
 
-Internal Flow:
+Data Flow:
 ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Client  │────▶│  Auth    │────▶│ Isolate  │────▶│  Redis   │
-│ Request  │     │ Validate │     │   Key    │     │  Client  │
+│  Client  │────▶│ Prefix   │────▶│  redis-py │────▶│  Redis   │
+│  Call    │     │   Key    │     │  (async)  │     │  :6379   │
 └──────────┘     └──────────┘     └──────────┘     └──────────┘
-                                        │
-                                        ▼
-                                 ┌──────────┐
-                                 │  Audit   │
-                                 │   Log    │
-                                 └──────────┘
+
+Tenant separator: ":" → org_id:user_id:key
+Native driver: redis.asyncio
+Features: strings, hashes, lists, sets, sorted sets, pub/sub, locks, sessions
 ```
 
-### PostgreSQL Service
+### PostgreSQL Client
 
 ```
-cmd/postgres-service/
-├── main.go
-└── server/
-    ├── server.go           # Query execution
-    └── utils.go            # Result mapping
+isA_common/isa_common/async_postgres_client.py (657 lines)
 
 Query Flow:
 ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Query   │────▶│ Validate │────▶│ Execute  │────▶│  Return  │
-│ Request  │     │  & Auth  │     │   SQL    │     │   JSON   │
+│  Query   │────▶│ Validate │────▶│  asyncpg  │────▶│ Postgres │
+│ Request  │     │  Params  │     │  (pool)   │     │  :5432   │
 └──────────┘     └──────────┘     └──────────┘     └──────────┘
+
+Native driver: asyncpg
+Features: query, execute, transactions, connection pooling, JSON/JSONB codecs
 ```
 
-### NATS Service
+### NATS Client
 
 ```
-cmd/nats-service/
-├── main.go
-└── server/
-    ├── server.go           # Pub/Sub, JetStream, KV
-    └── auth.go             # Publisher/Subscriber auth
+isA_common/isa_common/async_nats_client.py (869 lines)
 
 JetStream Flow:
 ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
 │ Publish  │────▶│  Stream  │────▶│ Consumer │────▶│ Deliver  │
 │ Message  │     │  Store   │     │  Pull    │     │ to Sub   │
 └──────────┘     └──────────┘     └──────────┘     └──────────┘
+
+Tenant separator: "." → org_id.user_id.subject
+Native driver: nats-py
+Features: pub/sub, JetStream, KV store, object store, reconnection with observability
 ```
 
 ---
@@ -137,19 +134,14 @@ JetStream Flow:
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant R as Redis Service
-    participant A as Auth Service
+    participant R as AsyncRedisClient
     participant Redis as Redis Backend
-    participant L as Loki
 
-    C->>R: Get(user_id, org_id, key)
-    R->>A: ValidateUser(user_id)
-    A-->>R: OK
-    R->>R: IsolateKey(org_id, user_id, key)
-    R->>Redis: GET isolated_key
+    C->>R: get("session:token")
+    R->>R: _prefix_key("session:token") → "org:user:session:token"
+    R->>Redis: GET org:user:session:token
     Redis-->>R: value (or nil)
-    R->>L: LogAudit(Get, key, status)
-    R-->>C: GetResponse(value)
+    R-->>C: value
 ```
 
 ### Event Publish (NATS)
@@ -157,17 +149,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant P as Publisher
-    participant N as NATS Service
-    participant JS as JetStream
+    participant N as AsyncNATSClient
+    participant JS as JetStream (NATS)
     participant S as Subscriber
-    participant L as Loki
 
-    P->>N: Publish(subject, data)
-    N->>N: ValidatePublisher
-    N->>JS: Publish to Stream
+    P->>N: publish("billing.usage.recorded.gpt-4", data)
+    N->>JS: Publish to stream
     JS-->>N: Ack (sequence)
-    N->>L: LogAudit(Publish, subject)
-    N-->>P: PublishResponse(sequence)
+    N-->>P: {"success": true}
 
     Note over JS,S: Async delivery
     JS->>S: Deliver message
@@ -179,16 +168,13 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant M as MinIO Service
+    participant M as AsyncMinIOClient
     participant MinIO as MinIO Backend
-    participant L as Loki
 
-    C->>M: GetPresignedURL(bucket, key, PUT)
-    M->>M: ValidatePermissions
-    M->>MinIO: GeneratePresignedURL
-    MinIO-->>M: Presigned URL
-    M->>L: LogAudit(PresignedURL, key)
-    M-->>C: URL (expires in 15m)
+    C->>M: generate_presigned_url(bucket, key)
+    M->>MinIO: Create presigned PUT URL
+    MinIO-->>M: Presigned URL (expires 1h)
+    M-->>C: URL
 
     Note over C,MinIO: Direct upload
     C->>MinIO: PUT object (via presigned URL)
@@ -201,15 +187,21 @@ sequenceDiagram
 
 ### Key Isolation Pattern
 
-```go
-// All keys are prefixed with org_id:user_id
-func (s *Server) isolateKey(userID, orgID, key string) string {
-    return fmt.Sprintf("%s:%s:%s", orgID, userID, key)
-}
+```python
+# All keys are prefixed with org_id + user_id via AsyncBaseClient._prefix_key()
+# Each client uses a service-appropriate separator
 
-// Example transformations:
-// Input:  key="session:token"
-// Output: key="org-001:user-123:session:token"
+# Redis (separator: ":")
+"session:token" → "org-001:user-123:session:token"
+
+# NATS (separator: ".")
+"orders.created" → "org-001.user-123.orders.created"
+
+# MQTT (separator: "/")
+"devices/sensor1" → "org-001/user-123/devices/sensor1"
+
+# MinIO (separator: "-")
+"uploads" → "user-user-123-uploads"
 ```
 
 ### Database Isolation (PostgreSQL)
@@ -219,21 +211,6 @@ func (s *Server) isolateKey(userID, orgID, key string) string {
 SELECT * FROM users
 WHERE organization_id = $1
 AND id = $2;
-
--- Schema per org (future)
-SET search_path TO org_001;
-```
-
-### Bucket Isolation (MinIO)
-
-```
-Bucket naming convention:
-{org_id}-{bucket_name}
-
-Example:
-org-001-uploads
-org-001-exports
-org-002-uploads
 ```
 
 ---
@@ -242,75 +219,46 @@ org-002-uploads
 
 ### Consul Registration
 
-```go
-// Each service registers with Consul on startup
-registration := &consul.AgentServiceRegistration{
-    ID:      fmt.Sprintf("%s-%s", serviceName, hostname),
-    Name:    serviceName,
-    Port:    grpcPort,
-    Tags:    []string{"grpc", "infrastructure"},
-    Check: &consul.AgentServiceCheck{
-        GRPC:     fmt.Sprintf("%s:%d", hostname, grpcPort),
-        Interval: "10s",
-        Timeout:  "5s",
-    },
-}
-```
+```python
+# isa_common provides ConsulRegistry for service registration
+from isa_common import ConsulRegistry, consul_lifespan
 
-### Service Mesh
+# FastAPI integration via lifespan
+app = FastAPI(lifespan=consul_lifespan(
+    app, service_name="my-service", service_port=8080
+))
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                           Consul                                 │
-│                    (Service Registry)                           │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-            ┌───────────────┼───────────────┐
-            ▼               ▼               ▼
-    ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-    │ redis-grpc    │ │ postgres-grpc │ │ nats-grpc     │
-    │ 10.244.1.24   │ │ 10.244.2.27   │ │ 10.244.1.28   │
-    └───────────────┘ └───────────────┘ └───────────────┘
+# Or manual registration
+registry = ConsulRegistry(service_name="my-service", service_port=8080)
+await registry.register()
+
+# Service discovery with load balancing
+endpoint = await registry.get_service_endpoint(
+    "auth-service", strategy="health_weighted"
+)
 ```
 
 ---
 
 ## Error Handling
 
-### gRPC Status Codes
+### Standard Error Pattern
 
-| Scenario | gRPC Code | Description |
-|----------|-----------|-------------|
-| Invalid input | `InvalidArgument` | Missing/malformed fields |
-| Auth failure | `PermissionDenied` | Invalid user/token |
-| Not found | `NotFound` | Resource doesn't exist |
-| Already exists | `AlreadyExists` | Duplicate resource |
-| Backend error | `Internal` | Database/cache error |
-| Timeout | `DeadlineExceeded` | Operation timed out |
-| Unavailable | `Unavailable` | Backend unreachable |
-
-### Error Response Pattern
-
-```go
-// Consistent error responses
-func (s *Server) handleError(err error, operation string) error {
-    // Log error
-    s.logger.Error("operation failed",
-        "operation", operation,
-        "error", err,
-    )
-
-    // Map to gRPC status
-    switch {
-    case errors.Is(err, ErrNotFound):
-        return status.Error(codes.NotFound, "resource not found")
-    case errors.Is(err, ErrPermissionDenied):
-        return status.Error(codes.PermissionDenied, "access denied")
-    default:
-        return status.Error(codes.Internal, "internal error")
-    }
-}
+```python
+# All clients use AsyncBaseClient.handle_error()
+def handle_error(self, error: Exception, operation: str):
+    self._logger.error(f"{self.SERVICE_NAME} {operation} failed: {error}")
 ```
+
+### Common Exceptions
+
+| Scenario | Exception | Description |
+|----------|-----------|-------------|
+| Connection failed | `ConnectionError` | Backend unreachable |
+| Timeout | `TimeoutError` | Operation timed out |
+| Not found | `KeyError` / custom | Resource doesn't exist |
+| Auth failure | `PermissionError` | Invalid credentials |
+| Backend error | `RuntimeError` | Internal backend error |
 
 ---
 
@@ -319,71 +267,41 @@ func (s *Server) handleError(err error, operation string) error {
 ### Environment Variables
 
 ```bash
-# Common
-SERVICE_NAME=redis-grpc-service
-GRPC_PORT=50055
+# Each client reads from env with a service-specific prefix
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=secret
+POSTGRES_DB=mydb
+
+NATS_HOST=localhost
+NATS_PORT=4222
 
 # Consul
-ISA_CLOUD_CONSUL_ENABLED=true
-ISA_CLOUD_CONSUL_HOST=consul.isa-cloud-staging.svc.cluster.local
-ISA_CLOUD_CONSUL_PORT=8500
-
-# Loki (Audit)
-LOKI_URL=http://loki.isa-cloud-staging.svc.cluster.local:3100
-
-# Service-specific
-ISA_CLOUD_REDIS_HOST=redis.isa-cloud-staging.svc.cluster.local
-ISA_CLOUD_REDIS_PORT=6379
+CONSUL_HOST=localhost
+CONSUL_PORT=8500
 ```
 
----
+### Native Ports
 
-## Deployment
+```python
+from isa_common import NATIVE_PORTS
 
-### Kubernetes Resources
-
-```yaml
-# Each service deployed as:
-- Deployment (1-2 replicas for staging)
-- Service (ClusterIP, gRPC port)
-- ConfigMap (environment config)
-- Secret (credentials, if needed)
+# NATIVE_PORTS = {
+#     'postgres': 5432,
+#     'redis': 6379,
+#     'neo4j': 7687,
+#     'nats': 4222,
+#     'qdrant': 6333,
+#     'mqtt': 1883,
+#     'minio': 9000,
+#     'consul': 8500,
+#     'duckdb': 0,  # Embedded
+# }
 ```
-
-### Resource Allocation (Staging)
-
-| Service | CPU Request | Memory Request | Replicas |
-|---------|-------------|----------------|----------|
-| redis-grpc | 100m | 256Mi | 1 |
-| postgres-grpc | 100m | 256Mi | 1 |
-| nats-grpc | 100m | 256Mi | 1 |
-| minio-grpc | 100m | 256Mi | 1 |
-| qdrant-grpc | 100m | 256Mi | 1 |
-| loki-grpc | 100m | 256Mi | 1 |
-
----
-
-## Security
-
-### Authentication Flow
-
-```
-┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Client  │────▶│ Gateway  │────▶│ Service  │
-│          │     │ (Auth)   │     │          │
-└──────────┘     └──────────┘     └──────────┘
-     │                │                │
-     │  JWT Token     │  Validated     │
-     │  in metadata   │  user context  │
-     └────────────────┴────────────────┘
-```
-
-### Data Protection
-
-- All keys/data isolated by organization
-- Audit logs for all operations
-- No cross-tenant data access
-- Secrets in Kubernetes Secrets
 
 ---
 
@@ -392,9 +310,8 @@ ISA_CLOUD_REDIS_PORT=6379
 - [Domain](../domain/README.md) - Business Context
 - [PRD](../prd/README.md) - Product Requirements
 - [CDD Guide](../cdd_guide.md) - Contract-Driven Development
-- [Go Dev Guide](../GO_MICROSERVICE_DEVELOPMENT_GUIDE.md) - Implementation Guide
 
 ---
 
-**Version**: 1.0.0
-**Last Updated**: 2025-12-11
+**Version**: 2.0.0
+**Last Updated**: 2026-02-28

@@ -1,12 +1,12 @@
 # isA Cloud Platform - Domain Context
 
-> Business Domain Documentation for Infrastructure gRPC Services
+> Business Domain Documentation for Infrastructure Services
 
 ---
 
 ## Overview
 
-isA Cloud provides a unified **gRPC service layer** that abstracts infrastructure components (databases, caches, message queues, storage) behind consistent, multi-tenant, audited APIs.
+isA Cloud provides a unified **Python SDK (isa_common)** that abstracts infrastructure components (databases, caches, message queues, storage) behind consistent, multi-tenant async client APIs. Clients connect directly to backends on their native ports.
 
 ---
 
@@ -97,8 +97,9 @@ All services implement **organization-level isolation**:
 
 ```
 ┌──────────────────┐     ┌──────────────────┐
-│  gRPC Request    │────▶│  Auth Interceptor │
-└──────────────────┘     └────────┬─────────┘
+│  Client Request  │────▶│  API Gateway     │
+└──────────────────┘     │  (APISIX)        │
+                         └────────┬─────────┘
                                   │
                     ┌─────────────┼─────────────┐
                     ▼             ▼             ▼
@@ -204,16 +205,19 @@ Every operation is logged to Loki:
             │  Service    │ │  Service    │ │  Service    │
             └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
                    │               │               │
+                   │    import isa_common Python SDK │
+                   │               │               │
      ┌─────────────┴───────────────┴───────────────┴─────────────┐
-     │                    gRPC Service Layer                      │
+     │              isa_common (Native Async Clients)             │
+     │     Direct connections to backends on native ports         │
      ├─────────┬─────────┬─────────┬─────────┬─────────┬─────────┤
      │ Redis   │Postgres │  NATS   │  MinIO  │ Qdrant  │  Loki   │
-     │ Service │ Service │ Service │ Service │ Service │ Service │
+     │ Client  │ Client  │ Client  │ Client  │ Client  │(direct) │
      └────┬────┴────┬────┴────┬────┴────┬────┴────┬────┴────┬────┘
           │         │         │         │         │         │
      ┌────▼────┐┌───▼───┐┌────▼────┐┌───▼───┐┌────▼────┐┌───▼───┐
      │  Redis  ││Postgres││  NATS   ││ MinIO ││ Qdrant  ││ Loki  │
-     │(Backend)││(Backend)│(Backend)││(Backend)│(Backend)││(Backend)│
+     │  :6379  ││ :5432  ││  :4222  ││ :9000 ││  :6333  ││ :3100 │
      └─────────┘└────────┘└─────────┘└────────┘└─────────┘└────────┘
 ```
 
@@ -223,8 +227,8 @@ Every operation is logged to Loki:
 
 | Term | Definition |
 |------|------------|
-| **gRPC** | High-performance RPC framework using Protocol Buffers |
-| **Proto** | Protocol Buffer definition file (.proto) |
+| **isa_common** | Python library providing native async infrastructure clients |
+| **AsyncBaseClient** | Abstract base class all infrastructure clients extend |
 | **Multi-tenant** | Single deployment serving multiple isolated organizations |
 | **JetStream** | NATS persistent streaming feature |
 | **Presigned URL** | Time-limited URL for direct object storage access |
@@ -241,5 +245,5 @@ Every operation is logged to Loki:
 
 ---
 
-**Version**: 1.0.0
-**Last Updated**: 2025-12-11
+**Version**: 2.0.0
+**Last Updated**: 2026-02-28
