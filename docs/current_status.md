@@ -1,160 +1,137 @@
-# isA_Cloud (Go gRPC Services) - CDD Progress Tracker
+# isA_Cloud (Python Async Clients) - Implementation Status
 
 ## Overview
 
-Go gRPC infrastructure services providing backend infrastructure access (Redis, PostgreSQL, NATS, MQTT, MinIO, Neo4j, Qdrant, DuckDB).
+Native async Python clients providing direct infrastructure access (Redis, PostgreSQL, NATS, MQTT, MinIO, Neo4j, Qdrant, DuckDB).
 
 **Reference Documents**:
-- `docs/cdd_guide.md` - CDD methodology for Go services
-- `tests/contracts/shared_system_contract.md` - System contract (HOW to test)
-- `docs/GO_MICROSERVICE_DEVELOPMENT_GUIDE.md` - Implementation guide
+- `isA_common/isa_common/async_base_client.py` - Base client interface
+- `tests/contracts/shared_system_contract.md` - System contract (test methodology)
+- Logic contracts in `tests/contracts/{service}/logic_contract.md`
+
+> **Note**: The Go gRPC layer was removed in January 2026 (commits 3386a37, db7e4a1, ed150e2). All infrastructure access now uses direct Python async clients via native drivers.
 
 ---
 
-## Progress Summary
+## Client Implementation Status
 
-| Category | Complete | Partial | Missing |
-|----------|----------|---------|---------|
-| Logic Contracts | 8/8 | 0 | 0 |
-| Fixtures (Go) | 8/8 | 0 | 0 |
-| Unit Golden Tests | 8/8 | 0 | 0 |
-| Integration Golden Tests | 8/8 | 0 | 0 |
-| API Tests | 8/8 | 0 | 0 |
-| Smoke Tests (E2E) | 8/8 | 0 | 0 |
-| System Contract | 1/1 | 0 | 0 |
+| Client | Lines | Methods | Status | Notes |
+|--------|-------|---------|--------|-------|
+| **AsyncRedisClient** | 790 | 53 | Complete | Full: strings, hashes, sets, pub/sub, locks |
+| **AsyncPostgresClient** | 657 | 19 | Complete | Full: queries, transactions, pooling, builder |
+| **AsyncNATSClient** | 869 | 33 | Complete | Full: pub/sub, JetStream, KV, reconnect stats |
+| **AsyncMinIOClient** | 948 | 35 | Complete | Full: buckets, objects, presigned URLs, streaming |
+| **AsyncQdrantClient** | 764 | 25 | Complete | Full: collections, vectors, search, recommend |
+| **AsyncDuckDBClient** | 905 | 27 | Complete | Full: queries, Parquet/CSV I/O, analytics |
+| **AsyncMQTTClient** | 676 | 29 | Complete | Full: pub/sub, QoS, device management |
+| **AsyncNeo4jClient** | 1686 | 37 | Partial | Connection lifecycle done; some query methods incomplete |
 
-**Last Updated**: 2025-12-17
+### Local-Mode Alternatives (for desktop/ICP mode)
 
----
-
-## Test Layer Targets (per CDD Guide)
-
-| Layer | Build Tag | Dependencies | Status |
-|-------|-----------|--------------|--------|
-| Unit | `//go:build unit` | None (mocked) | 8/8 services |
-| Component | `//go:build component` | Mocked infra | 0/8 services |
-| Integration | `//go:build integration` | Real DB/Cache | 8/8 services |
-| E2E/Smoke | Bash scripts | Running services | 8/8 services |
+| Client | Replaces | Lines | Status |
+|--------|----------|-------|--------|
+| **AsyncSQLiteClient** | AsyncPostgresClient | 669 | Complete |
+| **AsyncLocalStorageClient** | AsyncMinIOClient | 683 | Complete |
+| **AsyncChromaClient** | AsyncQdrantClient | 736 | Complete |
+| **AsyncMemoryClient** | AsyncRedisClient | 671 | Complete |
 
 ---
 
-## Detailed Service Status
+## Test Coverage
 
-| Service | Logic Contract | Fixtures | Unit | Integration | API | Smoke | Status |
-|---------|:--------------:|:--------:|:----:|:-----------:|:---:|:-----:|:------:|
-| **redis** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **postgres** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **nats** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **mqtt** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **minio** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **neo4j** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **qdrant** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **duckdb** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Layer | Count | Status |
+|-------|-------|--------|
+| Unit (mocked) | 7 | Needs expansion — only NATS reconnect |
+| Component (golden) | 15 | Base client + channel health TDD |
+| Integration (live services) | 144 | Excellent — 15-19 per client |
+| E2E/Smoke | 12 | Billing pipeline + health checks |
 
----
+### Test Files by Service
 
-## Directory Structure
-
-```
-isA_Cloud/
-├── tests/
-│   ├── contracts/
-│   │   ├── README.md
-│   │   ├── shared_system_contract.md    # System Contract
-│   │   ├── redis/
-│   │   │   ├── logic_contract.md        # Logic Contract
-│   │   │   └── fixtures.go              # Test Factories
-│   │   ├── postgres/
-│   │   ├── nats/
-│   │   ├── mqtt/
-│   │   ├── minio/
-│   │   ├── neo4j/
-│   │   ├── qdrant/
-│   │   └── duckdb/
-│   │
-│   ├── unit/golden/                     # Unit Tests
-│   │   ├── redis_test.go
-│   │   ├── postgres_test.go
-│   │   └── ...
-│   │
-│   ├── integration/golden/              # Integration Tests
-│   │   ├── redis_integration_test.go
-│   │   ├── postgres_integration_test.go
-│   │   └── ...
-│   │
-│   ├── api/golden/                      # API Tests (all 8 services)
-│   │   ├── redis_api_test.go
-│   │   ├── postgres_api_test.go
-│   │   ├── nats_api_test.go
-│   │   ├── mqtt_api_test.go
-│   │   ├── minio_api_test.go
-│   │   ├── neo4j_api_test.go
-│   │   ├── qdrant_api_test.go
-│   │   └── duckdb_api_test.go
-│   │
-│   └── smoke/                           # E2E Smoke Tests
-│       ├── run_all_smoke_tests.sh
-│       ├── redis_e2e.sh
-│       ├── postgres_e2e.sh
-│       └── ...
-```
+| Service | Test File | Functions | Type |
+|---------|-----------|-----------|------|
+| Redis | `tests/redis/test_async_redis.py` | 18 | Integration |
+| PostgreSQL | `tests/postgres/test_async_postgres.py` | 15 | Integration |
+| NATS | `tests/nats/test_async_nats.py` | 15 | Integration |
+| NATS | `tests/nats/test_async_nats_reconnect.py` | 7 | Unit (mocked) |
+| MQTT | `tests/mqtt/test_async_mqtt.py` | 19 | Integration |
+| MinIO | `tests/minio/test_async_minio.py` | 19 | Integration |
+| Qdrant | `tests/qdrant/test_async_qdrant.py` | 18 | Integration |
+| Neo4j | `tests/neo4j/test_async_neo4j.py` | 18 | Integration |
+| DuckDB | `tests/duck/test_async_duckdb.py` | 15 | Integration |
+| Billing pipeline | `tests/smoke/test_billing_pipeline.py` | 9 | E2E smoke |
+| Base client | `tests/component/golden/` | 15 | Component |
 
 ---
 
-## Legend
+## Event System Status
 
-| Symbol | Meaning |
-|--------|---------|
-| ✅ | Complete and verified |
-| ⚠️ | Partially complete |
-| ❌ | Missing |
+| Component | Status |
+|-----------|--------|
+| `BaseEvent` / `EventMetadata` | Complete |
+| `BaseEventPublisher` | Complete |
+| `BaseEventSubscriber` (with retry/idempotency) | Complete |
+| `BillingEventPublisher` | Complete |
+| Billing events (Usage, Calculated, Deducted, Insufficient, Error) | Complete |
 
 ---
 
-## Next Priority
+## Logic Contracts
 
-1. **Component Tests** - Add component layer tests with mocked infrastructure
-2. **TDD Tests** - Add TDD tests for bug fixes and new features
-3. **Contract Test Coverage** - Expand test scenarios per logic contracts
+All 8 contracts exist in `tests/contracts/`:
+
+| Service | Contract | BR/EC/ER IDs | Tests Mapped |
+|---------|----------|--------------|--------------|
+| Redis | `redis/logic_contract.md` | Yes | No |
+| PostgreSQL | `postgres/logic_contract.md` | Yes | No |
+| NATS | `nats/logic_contract.md` | Yes | No |
+| MQTT | `mqtt/logic_contract.md` | Yes | No |
+| MinIO | `minio/logic_contract.md` | Yes | No |
+| Neo4j | `neo4j/logic_contract.md` | Yes | No |
+| Qdrant | `qdrant/logic_contract.md` | Yes | No |
+| DuckDB | `duckdb/logic_contract.md` | Yes | No |
 
 ---
 
 ## Running Tests
 
 ```bash
-# Run unit tests only
-go test -tags=unit ./tests/unit/...
+cd isA_common/tests
 
-# Run integration tests (requires port-forward)
-go test -tags=integration ./tests/integration/...
+# Run all tests (integration tests auto-skip if services unavailable)
+python -m pytest -v
 
-# Run API tests (requires port-forward)
-go test -v -tags=api ./tests/api/golden/... -timeout 300s
+# Run specific client tests
+python -m pytest redis/ -v
+python -m pytest nats/ -v
+python -m pytest smoke/ -m smoke -v
 
-# Run API health checks only
-go test -v -tags=api ./tests/api/golden/... -run "HealthCheck"
-
-# Run specific service API tests
-go test -v -tags=api ./tests/api/golden/... -run "TestRedis"
-go test -v -tags=api ./tests/api/golden/... -run "TestQdrant"
-
-# Run all smoke tests
-./tests/smoke/run_all_smoke_tests.sh
-
-# Run specific service smoke test
-./tests/smoke/redis_e2e.sh
+# Run unit tests only (no infrastructure needed)
+python -m pytest nats/test_async_nats_reconnect.py -v
+python -m pytest component/ -v
 ```
 
-## API Test Port Configuration
+## Native Port Configuration
 
-| Service | gRPC Port | Environment Variable |
-|---------|-----------|---------------------|
-| MinIO | 50051 | MINIO_GRPC_ADDR |
-| DuckDB | 50052 | DUCKDB_GRPC_ADDR |
-| MQTT | 50053 | MQTT_GRPC_ADDR |
-| Loki | 50054 | LOKI_GRPC_ADDR |
-| Redis | 50055 | REDIS_GRPC_ADDR |
-| NATS | 50056 | NATS_GRPC_ADDR |
-| PostgreSQL | 50061 | POSTGRES_GRPC_ADDR |
-| Qdrant | 50062 | QDRANT_GRPC_ADDR |
-| Neo4j | 50063 | NEO4J_GRPC_ADDR |
+| Service | Port | Environment Variable |
+|---------|------|---------------------|
+| PostgreSQL | 5432 | POSTGRES_HOST / POSTGRES_PORT |
+| Redis | 6379 | REDIS_HOST / REDIS_PORT |
+| Neo4j | 7687 | NEO4J_HOST / NEO4J_PORT |
+| NATS | 4222 | NATS_HOST / NATS_PORT |
+| MinIO | 9000 | MINIO_HOST / MINIO_PORT |
+| Qdrant | 6333 | QDRANT_HOST / QDRANT_PORT |
+| MQTT | 1883 | MQTT_HOST / MQTT_PORT |
+| DuckDB | embedded | (no port) |
+
+---
+
+## Next Priority
+
+1. **Fix AsyncNeo4jClient** — Implement remaining query/write methods
+2. **Add unit tests** — Mocked tests for all 8 clients (fix inverted pyramid)
+3. **Map contract IDs** — Link test functions to BR/EC/ER IDs in logic contracts
+
+---
+
+**Last Updated**: 2026-02-28
