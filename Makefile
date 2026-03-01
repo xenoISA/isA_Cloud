@@ -30,7 +30,7 @@ test: ## Run all tests (integration tests skip if services unavailable)
 
 test-unit: ## Run unit tests only (no infrastructure needed)
 	@echo "Running unit tests..."
-	@cd $(SDK_DIR) && $(PYTEST) tests/nats/test_async_nats_reconnect.py tests/component/ -v
+	@cd $(SDK_DIR) && $(PYTEST) tests/unit/ tests/nats/test_async_nats_reconnect.py tests/component/ -v
 	@echo "Done"
 
 test-smoke: ## Run billing pipeline smoke tests
