@@ -239,20 +239,27 @@ async with AsyncNATSClient(host="localhost", port=4222) as nats:
 | **kind** | 0.20+ | `brew install kind` |
 | **Python** | 3.12+ | `brew install python` |
 
+### Local Infrastructure (Docker Compose)
+
+```bash
+docker compose up -d             # Start all 11 infrastructure services
+docker compose ps                # Check status
+make health                      # Quick health check
+```
+
 ### Install isa_common
 
 ```bash
-cd isA_common
-pip install -e ".[dev]"
+make install                     # Or: cd isA_common && pip install -e ".[dev]"
 ```
 
 ### Run Tests
 
 ```bash
-cd isA_common/tests
-python -m pytest -v                          # All tests
-python -m pytest redis/ -v                   # Redis client tests
-python -m pytest smoke/ -m smoke -v          # Billing pipeline smoke tests
+make test                                    # All tests
+make test-unit                               # Unit tests only (no infra needed)
+make test-service s=redis                    # Single service tests
+make test-smoke                              # Billing pipeline smoke tests
 ```
 
 ### Local Kubernetes Deployment (KIND)
