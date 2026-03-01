@@ -27,6 +27,32 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncNeo4jClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/neo4j/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':                [],
+    'test_run_cypher':                  ['BR-004'],
+    'test_cypher_with_params':          ['BR-004'],
+    'test_create_node':                 ['BR-002'],
+    'test_get_node':                    ['BR-002'],
+    'test_update_node':                 ['BR-002'],
+    'test_create_second_node':          ['BR-002'],
+    'test_create_relationship':         ['BR-003'],
+    'test_get_relationship':            ['BR-003'],
+    'test_find_nodes':                  ['BR-002'],
+    'test_get_path':                    ['BR-005'],
+    'test_shortest_path':               ['BR-005'],
+    'test_concurrent_queries':          [],
+    'test_run_cypher_many_concurrent':  [],
+    'test_create_nodes_concurrent':     [],
+    'test_get_stats':                   [],
+    'test_delete_relationship':         ['BR-003'],
+    'test_delete_node':                 ['BR-002'],
+}
+
+UNCOVERED_CONTRACTS = ['BR-001', 'BR-006', 'BR-007', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '50063'))
@@ -55,7 +81,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncNeo4jClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -67,7 +96,10 @@ async def test_health_check(client: AsyncNeo4jClient) -> bool:
 
 
 async def test_run_cypher(client: AsyncNeo4jClient):
-    """Test 2: Run Cypher Query"""
+    """Test 2: Run Cypher Query
+
+    Validates: BR-004 (Cypher Query Execution)
+    """
     try:
         result = await client.run_cypher("RETURN 1 as num, 'hello' as msg")
         if result is None or len(result) == 0:
@@ -84,7 +116,10 @@ async def test_run_cypher(client: AsyncNeo4jClient):
 
 
 async def test_cypher_with_params(client: AsyncNeo4jClient):
-    """Test 3: Cypher Query with Parameters"""
+    """Test 3: Cypher Query with Parameters
+
+    Validates: BR-004 (Cypher Query Execution)
+    """
     try:
         result = await client.run_cypher(
             "RETURN $num as num, $msg as msg",
@@ -104,7 +139,10 @@ async def test_cypher_with_params(client: AsyncNeo4jClient):
 
 
 async def test_create_node(client: AsyncNeo4jClient):
-    """Test 4: Create Node"""
+    """Test 4: Create Node
+
+    Validates: BR-002 (Node Operations)
+    """
     global created_nodes
     try:
         node_id = await client.create_node(
@@ -122,7 +160,10 @@ async def test_create_node(client: AsyncNeo4jClient):
 
 
 async def test_get_node(client: AsyncNeo4jClient):
-    """Test 5: Get Node"""
+    """Test 5: Get Node
+
+    Validates: BR-002 (Node Operations)
+    """
     global created_nodes
     try:
         if not created_nodes:
@@ -148,7 +189,10 @@ async def test_get_node(client: AsyncNeo4jClient):
 
 
 async def test_update_node(client: AsyncNeo4jClient):
-    """Test 6: Update Node"""
+    """Test 6: Update Node
+
+    Validates: BR-002 (Node Operations)
+    """
     global created_nodes
     try:
         if not created_nodes:
@@ -175,7 +219,10 @@ async def test_update_node(client: AsyncNeo4jClient):
 
 
 async def test_create_second_node(client: AsyncNeo4jClient):
-    """Test 7: Create Second Node for Relationship Tests"""
+    """Test 7: Create Second Node for Relationship Tests
+
+    Validates: BR-002 (Node Operations)
+    """
     global created_nodes
     try:
         node_id = await client.create_node(
@@ -193,7 +240,10 @@ async def test_create_second_node(client: AsyncNeo4jClient):
 
 
 async def test_create_relationship(client: AsyncNeo4jClient):
-    """Test 8: Create Relationship"""
+    """Test 8: Create Relationship
+
+    Validates: BR-003 (Relationship Operations)
+    """
     global created_nodes, created_relationships
     try:
         if len(created_nodes) < 2:
@@ -217,7 +267,10 @@ async def test_create_relationship(client: AsyncNeo4jClient):
 
 
 async def test_get_relationship(client: AsyncNeo4jClient):
-    """Test 9: Get Relationship"""
+    """Test 9: Get Relationship
+
+    Validates: BR-003 (Relationship Operations)
+    """
     global created_relationships
     try:
         if not created_relationships:
@@ -239,7 +292,10 @@ async def test_get_relationship(client: AsyncNeo4jClient):
 
 
 async def test_find_nodes(client: AsyncNeo4jClient):
-    """Test 10: Find Nodes"""
+    """Test 10: Find Nodes
+
+    Validates: BR-002 (Node Operations)
+    """
     try:
         nodes = await client.find_nodes(
             labels=['AsyncTestPerson'],
@@ -259,7 +315,10 @@ async def test_find_nodes(client: AsyncNeo4jClient):
 
 
 async def test_get_path(client: AsyncNeo4jClient):
-    """Test 11: Get Path"""
+    """Test 11: Get Path
+
+    Validates: BR-005 (Graph Traversal)
+    """
     global created_nodes
     try:
         if len(created_nodes) < 2:
@@ -285,7 +344,10 @@ async def test_get_path(client: AsyncNeo4jClient):
 
 
 async def test_shortest_path(client: AsyncNeo4jClient):
-    """Test 12: Shortest Path"""
+    """Test 12: Shortest Path
+
+    Validates: BR-005 (Graph Traversal)
+    """
     global created_nodes
     try:
         if len(created_nodes) < 2:
@@ -307,7 +369,10 @@ async def test_shortest_path(client: AsyncNeo4jClient):
 
 
 async def test_concurrent_queries(client: AsyncNeo4jClient):
-    """Test 13: Concurrent Query Execution"""
+    """Test 13: Concurrent Query Execution
+
+    Validates: (additional coverage)
+    """
     try:
         start = time.time()
 
@@ -331,7 +396,10 @@ async def test_concurrent_queries(client: AsyncNeo4jClient):
 
 
 async def test_run_cypher_many_concurrent(client: AsyncNeo4jClient):
-    """Test 14: run_cypher_many_concurrent Helper"""
+    """Test 14: run_cypher_many_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     try:
         queries = [
             {'cypher': "RETURN 1 as num"},
@@ -353,7 +421,10 @@ async def test_run_cypher_many_concurrent(client: AsyncNeo4jClient):
 
 
 async def test_create_nodes_concurrent(client: AsyncNeo4jClient):
-    """Test 15: create_nodes_concurrent Helper"""
+    """Test 15: create_nodes_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     global created_nodes
     try:
         nodes = [
@@ -378,7 +449,10 @@ async def test_create_nodes_concurrent(client: AsyncNeo4jClient):
 
 
 async def test_get_stats(client: AsyncNeo4jClient):
-    """Test 16: Get Statistics"""
+    """Test 16: Get Statistics
+
+    Validates: (additional coverage)
+    """
     try:
         stats = await client.get_stats()
         if stats is None:
@@ -391,7 +465,10 @@ async def test_get_stats(client: AsyncNeo4jClient):
 
 
 async def test_delete_relationship(client: AsyncNeo4jClient):
-    """Test 17: Delete Relationship"""
+    """Test 17: Delete Relationship
+
+    Validates: BR-003 (Relationship Operations)
+    """
     global created_relationships
     try:
         if not created_relationships:
@@ -410,7 +487,10 @@ async def test_delete_relationship(client: AsyncNeo4jClient):
 
 
 async def test_delete_node(client: AsyncNeo4jClient):
-    """Test 18: Delete Node"""
+    """Test 18: Delete Node
+
+    Validates: BR-002 (Node Operations)
+    """
     global created_nodes
     try:
         if not created_nodes:

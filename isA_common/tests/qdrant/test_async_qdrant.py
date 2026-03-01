@@ -26,6 +26,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from isa_common import AsyncQdrantClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/qdrant/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':              [],
+    'test_create_collection':         ['BR-002'],
+    'test_list_collections':          [],
+    'test_get_collection_info':       [],
+    'test_upsert_points':            ['BR-003', 'BR-006', 'EC-008'],
+    'test_count_points':              [],
+    'test_search':                    ['BR-004'],
+    'test_search_with_filter':        ['BR-005'],
+    'test_search_with_score_threshold':[],
+    'test_scroll':                    [],
+    'test_recommend':                 [],
+    'test_update_payload':            ['BR-007'],
+    'test_delete_payload_fields':     [],
+    'test_create_field_index':        [],
+    'test_delete_points':             ['BR-006'],
+    'test_concurrent_searches':       [],
+    'test_concurrent_upserts':        [],
+    'test_delete_collection':         [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-001', 'BR-008', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'ER-001']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '6333'))
@@ -58,7 +84,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncQdrantClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -70,7 +99,10 @@ async def test_health_check(client: AsyncQdrantClient) -> bool:
 
 
 async def test_create_collection(client: AsyncQdrantClient, collection_name: str):
-    """Test 2: Create Collection"""
+    """Test 2: Create Collection
+
+    Validates: BR-002 (Collection Configuration)
+    """
     try:
         result = await client.create_collection(
             collection_name=collection_name,
@@ -83,7 +115,10 @@ async def test_create_collection(client: AsyncQdrantClient, collection_name: str
 
 
 async def test_list_collections(client: AsyncQdrantClient):
-    """Test 3: List Collections"""
+    """Test 3: List Collections
+
+    Validates: (additional coverage)
+    """
     try:
         collections = await client.list_collections()
         success = isinstance(collections, list)
@@ -93,7 +128,10 @@ async def test_list_collections(client: AsyncQdrantClient):
 
 
 async def test_get_collection_info(client: AsyncQdrantClient, collection_name: str):
-    """Test 4: Get Collection Info"""
+    """Test 4: Get Collection Info
+
+    Validates: (additional coverage)
+    """
     try:
         info = await client.get_collection_info(collection_name)
         success = info is not None
@@ -103,7 +141,11 @@ async def test_get_collection_info(client: AsyncQdrantClient, collection_name: s
 
 
 async def test_upsert_points(client: AsyncQdrantClient, collection_name: str):
-    """Test 5: Upsert Points"""
+    """Test 5: Upsert Points
+
+    Validates: BR-003 (Vector Upsert with Payload), BR-006 (Batch Operations),
+               EC-008 (Vector ID Conflict in Batch)
+    """
     try:
         # Note: IDs start from 1 because the Go server has a bug where ID 0
         # is treated as empty string (if id.GetNum() > 0 check fails for 0)
@@ -129,7 +171,10 @@ async def test_upsert_points(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_count_points(client: AsyncQdrantClient, collection_name: str):
-    """Test 6: Count Points"""
+    """Test 6: Count Points
+
+    Validates: (additional coverage)
+    """
     try:
         count = await client.count_points(collection_name)
         success = count is not None and count >= 0
@@ -139,7 +184,10 @@ async def test_count_points(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_search(client: AsyncQdrantClient, collection_name: str):
-    """Test 7: Vector Search"""
+    """Test 7: Vector Search
+
+    Validates: BR-004 (Similarity Search)
+    """
     try:
         query_vector = generate_vector()
         results = await client.search(
@@ -155,7 +203,10 @@ async def test_search(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_search_with_filter(client: AsyncQdrantClient, collection_name: str):
-    """Test 8: Search with Filter"""
+    """Test 8: Search with Filter
+
+    Validates: BR-005 (Payload Filtering)
+    """
     try:
         query_vector = generate_vector()
         filter_conditions = {
@@ -176,7 +227,10 @@ async def test_search_with_filter(client: AsyncQdrantClient, collection_name: st
 
 
 async def test_search_with_score_threshold(client: AsyncQdrantClient, collection_name: str):
-    """Test 9: Search with Score Threshold"""
+    """Test 9: Search with Score Threshold
+
+    Validates: (additional coverage)
+    """
     try:
         query_vector = generate_vector()
         results = await client.search(
@@ -192,7 +246,10 @@ async def test_search_with_score_threshold(client: AsyncQdrantClient, collection
 
 
 async def test_scroll(client: AsyncQdrantClient, collection_name: str):
-    """Test 10: Scroll Points"""
+    """Test 10: Scroll Points
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.scroll(
             collection_name=collection_name,
@@ -206,7 +263,10 @@ async def test_scroll(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_recommend(client: AsyncQdrantClient, collection_name: str):
-    """Test 11: Recommendation Search"""
+    """Test 11: Recommendation Search
+
+    Validates: (additional coverage)
+    """
     try:
         results = await client.recommend(
             collection_name=collection_name,
@@ -221,7 +281,10 @@ async def test_recommend(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_update_payload(client: AsyncQdrantClient, collection_name: str):
-    """Test 12: Update Payload"""
+    """Test 12: Update Payload
+
+    Validates: BR-007 (Point Retrieval by ID)
+    """
     try:
         result = await client.update_payload(
             collection_name=collection_name,
@@ -235,7 +298,10 @@ async def test_update_payload(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_delete_payload_fields(client: AsyncQdrantClient, collection_name: str):
-    """Test 13: Delete Payload Fields"""
+    """Test 13: Delete Payload Fields
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.delete_payload_fields(
             collection_name=collection_name,
@@ -249,7 +315,10 @@ async def test_delete_payload_fields(client: AsyncQdrantClient, collection_name:
 
 
 async def test_create_field_index(client: AsyncQdrantClient, collection_name: str):
-    """Test 14: Create Field Index"""
+    """Test 14: Create Field Index
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.create_field_index(
             collection_name=collection_name,
@@ -263,7 +332,10 @@ async def test_create_field_index(client: AsyncQdrantClient, collection_name: st
 
 
 async def test_delete_points(client: AsyncQdrantClient, collection_name: str):
-    """Test 15: Delete Points"""
+    """Test 15: Delete Points
+
+    Validates: BR-006 (Batch Operations)
+    """
     try:
         result = await client.delete_points(collection_name, ids=[18, 19])
         success = result is not None
@@ -273,7 +345,10 @@ async def test_delete_points(client: AsyncQdrantClient, collection_name: str):
 
 
 async def test_concurrent_searches(client: AsyncQdrantClient, collection_name: str):
-    """Test 16: Concurrent Searches"""
+    """Test 16: Concurrent Searches
+
+    Validates: (additional coverage)
+    """
     try:
         vectors = [generate_vector() for _ in range(10)]
 
@@ -293,7 +368,10 @@ async def test_concurrent_searches(client: AsyncQdrantClient, collection_name: s
 
 
 async def test_concurrent_upserts(client: AsyncQdrantClient, collection_name: str):
-    """Test 17: Concurrent Upserts"""
+    """Test 17: Concurrent Upserts
+
+    Validates: (additional coverage)
+    """
     try:
         batches = [
             [{'id': 100 + i * 5 + j, 'vector': generate_vector(), 'payload': {'batch': i}}
@@ -313,7 +391,10 @@ async def test_concurrent_upserts(client: AsyncQdrantClient, collection_name: st
 
 
 async def test_delete_collection(client: AsyncQdrantClient, collection_name: str):
-    """Test 18: Delete Collection"""
+    """Test 18: Delete Collection
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.delete_collection(collection_name)
         test_result(result is True, f"Delete collection '{collection_name}'")

@@ -26,6 +26,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from isa_common import AsyncDuckDBClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/duckdb/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':          [],
+    'test_simple_query':          ['BR-002'],
+    'test_query_with_params':     ['BR-002'],
+    'test_create_table':          [],
+    'test_list_tables':           [],
+    'test_get_table_schema':      [],
+    'test_execute_insert':        [],
+    'test_execute_batch_insert':  [],
+    'test_query_data':            ['BR-002'],
+    'test_aggregate_functions':   ['BR-002'],
+    'test_update':                [],
+    'test_delete':                [],
+    'test_sequential_queries':    [],
+    'test_csv_export':            ['BR-004'],
+    'test_drop_table':            [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-001', 'BR-003', 'BR-005', 'BR-006', 'BR-007', 'BR-008', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'EC-009', 'ER-001']
+
 # Configuration
 DATABASE = os.environ.get('DATABASE', ':memory:')  # In-memory by default
 USER_ID = os.environ.get('USER_ID', 'test_user')
@@ -47,7 +70,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncDuckDBClient) -> bool:
-    """Test 1: Health Check (verify connection)"""
+    """Test 1: Health Check (verify connection)
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -59,7 +85,10 @@ async def test_health_check(client: AsyncDuckDBClient) -> bool:
 
 
 async def test_simple_query(client: AsyncDuckDBClient):
-    """Test 2: Simple Query"""
+    """Test 2: Simple Query
+
+    Validates: BR-002 (OLAP Query Execution)
+    """
     try:
         result = await client.query("SELECT 1 as num, 'hello' as msg")
         if result is None or len(result) == 0:
@@ -76,7 +105,10 @@ async def test_simple_query(client: AsyncDuckDBClient):
 
 
 async def test_query_with_params(client: AsyncDuckDBClient):
-    """Test 3: Query with Parameters"""
+    """Test 3: Query with Parameters
+
+    Validates: BR-002 (OLAP Query Execution)
+    """
     try:
         result = await client.query(
             "SELECT ? as num, ? as msg",
@@ -96,7 +128,10 @@ async def test_query_with_params(client: AsyncDuckDBClient):
 
 
 async def test_create_table(client: AsyncDuckDBClient):
-    """Test 4: Create Table"""
+    """Test 4: Create Table
+
+    Validates: (additional coverage)
+    """
     try:
         schema = {
             'id': 'INTEGER',
@@ -112,7 +147,10 @@ async def test_create_table(client: AsyncDuckDBClient):
 
 
 async def test_list_tables(client: AsyncDuckDBClient):
-    """Test 5: List Tables"""
+    """Test 5: List Tables
+
+    Validates: (additional coverage)
+    """
     try:
         tables = await client.list_tables()
         if tables is None:
@@ -126,7 +164,10 @@ async def test_list_tables(client: AsyncDuckDBClient):
 
 
 async def test_get_table_schema(client: AsyncDuckDBClient):
-    """Test 6: Get Table Schema"""
+    """Test 6: Get Table Schema
+
+    Validates: (additional coverage)
+    """
     try:
         schema = await client.get_table_schema('', 'test_table')
         if schema is None:
@@ -143,7 +184,10 @@ async def test_get_table_schema(client: AsyncDuckDBClient):
 
 
 async def test_execute_insert(client: AsyncDuckDBClient):
-    """Test 7: Execute INSERT"""
+    """Test 7: Execute INSERT
+
+    Validates: (additional coverage)
+    """
     try:
         rows = await client.execute(
             "INSERT INTO test_table (id, name, value) VALUES (1, 'test1', 3.14)"
@@ -154,7 +198,10 @@ async def test_execute_insert(client: AsyncDuckDBClient):
 
 
 async def test_execute_batch_insert(client: AsyncDuckDBClient):
-    """Test 8: Execute Batch INSERT"""
+    """Test 8: Execute Batch INSERT
+
+    Validates: (additional coverage)
+    """
     try:
         # execute_batch expects list of {'sql': str, 'params': list} dictionaries
         operations = [
@@ -170,7 +217,10 @@ async def test_execute_batch_insert(client: AsyncDuckDBClient):
 
 
 async def test_query_data(client: AsyncDuckDBClient):
-    """Test 9: Query Data from Table"""
+    """Test 9: Query Data from Table
+
+    Validates: BR-002 (OLAP Query Execution)
+    """
     try:
         result = await client.query("SELECT * FROM test_table ORDER BY id")
         if result is None or len(result) == 0:
@@ -187,7 +237,10 @@ async def test_query_data(client: AsyncDuckDBClient):
 
 
 async def test_aggregate_functions(client: AsyncDuckDBClient):
-    """Test 10: Aggregate Functions"""
+    """Test 10: Aggregate Functions
+
+    Validates: BR-002 (OLAP Query Execution)
+    """
     try:
         result = await client.query("""
             SELECT
@@ -213,7 +266,10 @@ async def test_aggregate_functions(client: AsyncDuckDBClient):
 
 
 async def test_update(client: AsyncDuckDBClient):
-    """Test 11: Execute UPDATE"""
+    """Test 11: Execute UPDATE
+
+    Validates: (additional coverage)
+    """
     try:
         await client.execute("UPDATE test_table SET value = 5.0 WHERE id = 1")
 
@@ -228,7 +284,10 @@ async def test_update(client: AsyncDuckDBClient):
 
 
 async def test_delete(client: AsyncDuckDBClient):
-    """Test 12: Execute DELETE"""
+    """Test 12: Execute DELETE
+
+    Validates: (additional coverage)
+    """
     try:
         await client.execute("DELETE FROM test_table WHERE id = 4")
 
@@ -243,7 +302,10 @@ async def test_delete(client: AsyncDuckDBClient):
 
 
 async def test_sequential_queries(client: AsyncDuckDBClient):
-    """Test 13: Sequential Queries (DuckDB is single-connection, no true concurrency)"""
+    """Test 13: Sequential Queries (DuckDB is single-connection, no true concurrency)
+
+    Validates: (additional coverage)
+    """
     try:
         queries = [
             "SELECT COUNT(*) as cnt FROM test_table",
@@ -267,7 +329,10 @@ async def test_sequential_queries(client: AsyncDuckDBClient):
 
 
 async def test_csv_export(client: AsyncDuckDBClient):
-    """Test 14: CSV Export"""
+    """Test 14: CSV Export
+
+    Validates: BR-004 (Data Export)
+    """
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             csv_path = f.name
@@ -285,7 +350,10 @@ async def test_csv_export(client: AsyncDuckDBClient):
 
 
 async def test_drop_table(client: AsyncDuckDBClient):
-    """Test 15: Drop Table"""
+    """Test 15: Drop Table
+
+    Validates: (additional coverage)
+    """
     try:
         await client.drop_table('', 'test_table')
 

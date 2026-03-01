@@ -24,6 +24,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from isa_common import AsyncMQTTClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/mqtt/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':           [],
+    'test_connect':                [],
+    'test_connection_status':      [],
+    'test_publish':                ['BR-003', 'BR-006'],
+    'test_publish_batch':          ['BR-003'],
+    'test_publish_json':           ['BR-006'],
+    'test_validate_topic':         [],
+    'test_register_device':        [],
+    'test_list_devices':           [],
+    'test_get_device_info':        [],
+    'test_update_device_status':   [],
+    'test_list_topics':            [],
+    'test_set_retained_message':   ['BR-004'],
+    'test_get_retained_message':   ['BR-004'],
+    'test_delete_retained_message':['BR-004'],
+    'test_get_statistics':         [],
+    'test_bulk_publish':           [],
+    'test_unregister_device':      [],
+    'test_disconnect':             [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-001', 'BR-002', 'BR-005', 'BR-007', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'ER-001']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '1883'))
@@ -47,7 +74,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncMQTTClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -59,7 +89,10 @@ async def test_health_check(client: AsyncMQTTClient) -> bool:
 
 
 async def test_connect(client: AsyncMQTTClient, client_id: str) -> str:
-    """Test 2: Connect to MQTT"""
+    """Test 2: Connect to MQTT
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.mqtt_connect(client_id)
         if result and result.get('success'):
@@ -73,7 +106,10 @@ async def test_connect(client: AsyncMQTTClient, client_id: str) -> str:
 
 
 async def test_connection_status(client: AsyncMQTTClient, session_id: str):
-    """Test 3: Get Connection Status"""
+    """Test 3: Get Connection Status
+
+    Validates: (additional coverage)
+    """
     try:
         status = await client.get_connection_status(session_id)
         success = status is not None
@@ -83,7 +119,10 @@ async def test_connection_status(client: AsyncMQTTClient, session_id: str):
 
 
 async def test_publish(client: AsyncMQTTClient, session_id: str):
-    """Test 4: Publish Message"""
+    """Test 4: Publish Message
+
+    Validates: BR-003 (Quality of Service), BR-006 (Message Payload)
+    """
     try:
         result = await client.publish(session_id, 'test/async/topic', b'Hello from async client', qos=1)
         success = result is not None and result.get('success')
@@ -93,7 +132,10 @@ async def test_publish(client: AsyncMQTTClient, session_id: str):
 
 
 async def test_publish_batch(client: AsyncMQTTClient, session_id: str):
-    """Test 5: Publish Batch"""
+    """Test 5: Publish Batch
+
+    Validates: BR-003 (Quality of Service)
+    """
     try:
         messages = [
             {'topic': 'test/async/batch/1', 'payload': b'Message 1', 'qos': 1},
@@ -108,7 +150,10 @@ async def test_publish_batch(client: AsyncMQTTClient, session_id: str):
 
 
 async def test_publish_json(client: AsyncMQTTClient, session_id: str):
-    """Test 6: Publish JSON"""
+    """Test 6: Publish JSON
+
+    Validates: BR-006 (Message Payload)
+    """
     try:
         data = {
             'temperature': 25.5,
@@ -123,7 +168,10 @@ async def test_publish_json(client: AsyncMQTTClient, session_id: str):
 
 
 async def test_validate_topic(client: AsyncMQTTClient):
-    """Test 7: Validate Topic"""
+    """Test 7: Validate Topic
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.validate_topic('sensors/temperature')
         success = result is not None and result.get('valid', False)
@@ -133,7 +181,10 @@ async def test_validate_topic(client: AsyncMQTTClient):
 
 
 async def test_register_device(client: AsyncMQTTClient, device_id: str):
-    """Test 8: Register Device"""
+    """Test 8: Register Device
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.register_device(
             device_id=device_id,
@@ -148,7 +199,10 @@ async def test_register_device(client: AsyncMQTTClient, device_id: str):
 
 
 async def test_list_devices(client: AsyncMQTTClient):
-    """Test 9: List Devices"""
+    """Test 9: List Devices
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.list_devices()
         success = result is not None and 'devices' in result
@@ -158,7 +212,10 @@ async def test_list_devices(client: AsyncMQTTClient):
 
 
 async def test_get_device_info(client: AsyncMQTTClient, device_id: str):
-    """Test 10: Get Device Info"""
+    """Test 10: Get Device Info
+
+    Validates: (additional coverage)
+    """
     try:
         info = await client.get_device_info(device_id)
         success = info is not None and info.get('device_id') == device_id
@@ -168,7 +225,10 @@ async def test_get_device_info(client: AsyncMQTTClient, device_id: str):
 
 
 async def test_update_device_status(client: AsyncMQTTClient, device_id: str):
-    """Test 11: Update Device Status"""
+    """Test 11: Update Device Status
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.update_device_status(device_id, status=1, metadata={'updated': 'true'})
         success = result is not None and result.get('success')
@@ -178,7 +238,10 @@ async def test_update_device_status(client: AsyncMQTTClient, device_id: str):
 
 
 async def test_list_topics(client: AsyncMQTTClient):
-    """Test 12: List Topics"""
+    """Test 12: List Topics
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.list_topics()
         success = result is not None and 'topics' in result
@@ -188,7 +251,10 @@ async def test_list_topics(client: AsyncMQTTClient):
 
 
 async def test_set_retained_message(client: AsyncMQTTClient):
-    """Test 13: Set Retained Message"""
+    """Test 13: Set Retained Message
+
+    Validates: BR-004 (Retained Messages)
+    """
     try:
         success = await client.set_retained_message('test/async/retained', b'Retained data', qos=1)
         test_result(success, "Set retained message")
@@ -197,7 +263,10 @@ async def test_set_retained_message(client: AsyncMQTTClient):
 
 
 async def test_get_retained_message(client: AsyncMQTTClient):
-    """Test 14: Get Retained Message"""
+    """Test 14: Get Retained Message
+
+    Validates: BR-004 (Retained Messages)
+    """
     try:
         result = await client.get_retained_message('test/async/retained')
         success = result is not None
@@ -207,7 +276,10 @@ async def test_get_retained_message(client: AsyncMQTTClient):
 
 
 async def test_delete_retained_message(client: AsyncMQTTClient):
-    """Test 15: Delete Retained Message"""
+    """Test 15: Delete Retained Message
+
+    Validates: BR-004 (Retained Messages)
+    """
     try:
         success = await client.delete_retained_message('test/async/retained')
         test_result(success, "Delete retained message")
@@ -216,7 +288,10 @@ async def test_delete_retained_message(client: AsyncMQTTClient):
 
 
 async def test_get_statistics(client: AsyncMQTTClient):
-    """Test 16: Get Statistics"""
+    """Test 16: Get Statistics
+
+    Validates: (additional coverage)
+    """
     try:
         stats = await client.get_statistics()
         success = stats is not None
@@ -226,7 +301,10 @@ async def test_get_statistics(client: AsyncMQTTClient):
 
 
 async def test_bulk_publish(client: AsyncMQTTClient, session_id: str):
-    """Test 17: Bulk Publish (using single connection batch)"""
+    """Test 17: Bulk Publish (using single connection batch)
+
+    Validates: (additional coverage)
+    """
     try:
         # Note: MQTT with aiomqtt creates new connection per publish call,
         # so we use publish_batch which shares a single connection
@@ -246,7 +324,10 @@ async def test_bulk_publish(client: AsyncMQTTClient, session_id: str):
 
 
 async def test_unregister_device(client: AsyncMQTTClient, device_id: str):
-    """Test 18: Unregister Device"""
+    """Test 18: Unregister Device
+
+    Validates: (additional coverage)
+    """
     try:
         success = await client.unregister_device(device_id)
         test_result(success, f"Unregister device '{device_id}'")
@@ -255,7 +336,10 @@ async def test_unregister_device(client: AsyncMQTTClient, device_id: str):
 
 
 async def test_disconnect(client: AsyncMQTTClient, session_id: str):
-    """Test 19: Disconnect"""
+    """Test 19: Disconnect
+
+    Validates: (additional coverage)
+    """
     try:
         result = await client.disconnect(session_id)
         success = result is not None and result.get('success')

@@ -27,6 +27,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncPostgresClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/postgres/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':          [],
+    'test_simple_query':          ['BR-003'],
+    'test_query_with_params':     ['BR-001'],
+    'test_query_row':             ['BR-003'],
+    'test_list_tables':           [],
+    'test_table_exists':          ['EC-005'],
+    'test_execute_ddl':           [],
+    'test_execute_insert':        ['BR-004'],
+    'test_execute_update':        ['BR-004'],
+    'test_select_from_table':     ['BR-003', 'EC-005'],
+    'test_execute_delete':        ['BR-004'],
+    'test_execute_batch':         [],
+    'test_concurrent_queries':    [],
+    'test_query_many_concurrent': [],
+    'test_get_stats':             [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-002', 'BR-005', 'BR-006', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-006', 'EC-007', 'ER-001']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '5432'))
@@ -54,7 +77,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncPostgresClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -66,7 +92,10 @@ async def test_health_check(client: AsyncPostgresClient) -> bool:
 
 
 async def test_simple_query(client: AsyncPostgresClient):
-    """Test 2: Simple Query"""
+    """Test 2: Simple Query
+
+    Validates: BR-003 (Query Result Formatting)
+    """
     try:
         result = await client.query("SELECT 1 as num, 'hello' as msg")
         if result is None or len(result) == 0:
@@ -83,7 +112,10 @@ async def test_simple_query(client: AsyncPostgresClient):
 
 
 async def test_query_with_params(client: AsyncPostgresClient):
-    """Test 3: Query with Parameters"""
+    """Test 3: Query with Parameters
+
+    Validates: BR-001 (Query Execution with Parameter Binding)
+    """
     try:
         result = await client.query(
             "SELECT $1::int as num, $2::text as msg",
@@ -103,7 +135,10 @@ async def test_query_with_params(client: AsyncPostgresClient):
 
 
 async def test_query_row(client: AsyncPostgresClient):
-    """Test 4: Query Single Row"""
+    """Test 4: Query Single Row
+
+    Validates: BR-003 (Query Result Formatting)
+    """
     try:
         result = await client.query_row("SELECT 1 as id, 'test' as name")
         if result is None:
@@ -120,7 +155,10 @@ async def test_query_row(client: AsyncPostgresClient):
 
 
 async def test_list_tables(client: AsyncPostgresClient):
-    """Test 5: List Tables"""
+    """Test 5: List Tables
+
+    Validates: (additional coverage)
+    """
     try:
         tables = await client.list_tables()
         # Tables list could be empty, that's ok
@@ -134,7 +172,10 @@ async def test_list_tables(client: AsyncPostgresClient):
 
 
 async def test_table_exists(client: AsyncPostgresClient):
-    """Test 6: Table Exists Check"""
+    """Test 6: Table Exists Check
+
+    Validates: EC-005 (Table Does Not Exist)
+    """
     try:
         # Check a common system table
         exists = await client.table_exists('pg_catalog.pg_tables', schema='pg_catalog')
@@ -150,7 +191,10 @@ async def test_table_exists(client: AsyncPostgresClient):
 
 
 async def test_execute_ddl(client: AsyncPostgresClient):
-    """Test 7: Execute DDL (Create/Drop Table)"""
+    """Test 7: Execute DDL (Create/Drop Table)
+
+    Validates: (additional coverage)
+    """
     try:
         # Create test table
         await client.execute("""
@@ -174,7 +218,10 @@ async def test_execute_ddl(client: AsyncPostgresClient):
 
 
 async def test_execute_insert(client: AsyncPostgresClient):
-    """Test 8: Execute INSERT"""
+    """Test 8: Execute INSERT
+
+    Validates: BR-004 (Affected Rows for Mutations)
+    """
     try:
         # Insert data
         rows = await client.execute(
@@ -188,7 +235,10 @@ async def test_execute_insert(client: AsyncPostgresClient):
 
 
 async def test_execute_update(client: AsyncPostgresClient):
-    """Test 9: Execute UPDATE"""
+    """Test 9: Execute UPDATE
+
+    Validates: BR-004 (Affected Rows for Mutations)
+    """
     try:
         rows = await client.execute(
             "UPDATE async_test_table SET value = $1 WHERE name = $2",
@@ -201,7 +251,10 @@ async def test_execute_update(client: AsyncPostgresClient):
 
 
 async def test_select_from_table(client: AsyncPostgresClient):
-    """Test 10: Query Inserted Data"""
+    """Test 10: Query Inserted Data
+
+    Validates: BR-003 (Query Result Formatting), EC-005 (Table Does Not Exist)
+    """
     try:
         result = await client.query(
             "SELECT * FROM async_test_table WHERE name = $1",
@@ -222,7 +275,10 @@ async def test_select_from_table(client: AsyncPostgresClient):
 
 
 async def test_execute_delete(client: AsyncPostgresClient):
-    """Test 11: Execute DELETE"""
+    """Test 11: Execute DELETE
+
+    Validates: BR-004 (Affected Rows for Mutations)
+    """
     try:
         rows = await client.execute(
             "DELETE FROM async_test_table WHERE name = $1",
@@ -235,7 +291,10 @@ async def test_execute_delete(client: AsyncPostgresClient):
 
 
 async def test_execute_batch(client: AsyncPostgresClient):
-    """Test 12: Execute Batch Operations"""
+    """Test 12: Execute Batch Operations
+
+    Validates: (additional coverage)
+    """
     try:
         operations = [
             {'sql': "INSERT INTO async_test_table (name, value) VALUES ($1, $2)", 'params': ['batch1', 10]},
@@ -254,7 +313,10 @@ async def test_execute_batch(client: AsyncPostgresClient):
 
 
 async def test_concurrent_queries(client: AsyncPostgresClient):
-    """Test 13: Concurrent Query Execution"""
+    """Test 13: Concurrent Query Execution
+
+    Validates: (additional coverage)
+    """
     try:
         start = time.time()
 
@@ -285,7 +347,10 @@ async def test_concurrent_queries(client: AsyncPostgresClient):
 
 
 async def test_query_many_concurrent(client: AsyncPostgresClient):
-    """Test 14: query_many_concurrent Helper"""
+    """Test 14: query_many_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     try:
         queries = [
             {'sql': "SELECT 1 as num"},
@@ -307,7 +372,10 @@ async def test_query_many_concurrent(client: AsyncPostgresClient):
 
 
 async def test_get_stats(client: AsyncPostgresClient):
-    """Test 15: Get Statistics"""
+    """Test 15: Get Statistics
+
+    Validates: (additional coverage)
+    """
     try:
         stats = await client.get_stats()
         if stats is None:
