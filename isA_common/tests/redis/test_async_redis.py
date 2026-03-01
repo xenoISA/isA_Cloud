@@ -32,6 +32,32 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncRedisClient, BatchedRedisGet, BatchedRedisSet
 
+# ============================================
+# Contract Mapping — see tests/contracts/redis/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':          [],
+    'test_string_operations':     ['BR-001', 'BR-003', 'EC-003', 'EC-004'],
+    'test_ttl_expiration':        ['BR-002'],
+    'test_batch_operations':      [],
+    'test_counter_operations':    [],
+    'test_hash_operations':       ['BR-005'],
+    'test_list_operations':       [],
+    'test_set_operations':        [],
+    'test_sorted_set_operations': [],
+    'test_lock_operations':       [],
+    'test_pubsub_publish':        [],
+    'test_session_management':    [],
+    'test_concurrent_operations': ['EC-007'],
+    'test_get_many_concurrent':   ['EC-007'],
+    'test_auto_batching_get':     [],
+    'test_auto_batching_set':     [],
+    'test_execute_batch':         [],
+    'test_statistics':            [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-004', 'EC-001', 'EC-002', 'EC-005', 'EC-006', 'ER-001', 'ER-002']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '6379'))
@@ -56,7 +82,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncRedisClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -68,7 +97,11 @@ async def test_health_check(client: AsyncRedisClient) -> bool:
 
 
 async def test_string_operations(client: AsyncRedisClient):
-    """Test 2: String SET/GET/DELETE Operations"""
+    """Test 2: String SET/GET/DELETE Operations
+
+    Validates: BR-001 (Multi-Tenant Key Isolation), BR-003 (User Authentication),
+               EC-003 (Empty Value), EC-004 (Non-Existent Key)
+    """
     try:
         # SET
         success = await client.set('async:test:key1', 'value1')
@@ -106,7 +139,10 @@ async def test_string_operations(client: AsyncRedisClient):
 
 
 async def test_ttl_expiration(client: AsyncRedisClient):
-    """Test 3: TTL and Expiration"""
+    """Test 3: TTL and Expiration
+
+    Validates: BR-002 (TTL Expiration)
+    """
     try:
         # Set with TTL
         await client.set_with_ttl('async:test:expire', 'temp_value', 2)
@@ -132,7 +168,10 @@ async def test_ttl_expiration(client: AsyncRedisClient):
 
 
 async def test_batch_operations(client: AsyncRedisClient):
-    """Test 4: Batch MSET/MGET Operations (using ExecuteBatch)"""
+    """Test 4: Batch MSET/MGET Operations (using ExecuteBatch)
+
+    Validates: (additional coverage)
+    """
     try:
         # MSET - now uses single ExecuteBatch RPC
         data = {
@@ -157,7 +196,10 @@ async def test_batch_operations(client: AsyncRedisClient):
 
 
 async def test_counter_operations(client: AsyncRedisClient):
-    """Test 5: INCR/DECR Counter Operations"""
+    """Test 5: INCR/DECR Counter Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Clean up first
         await client.delete('async:test:counter')
@@ -186,7 +228,10 @@ async def test_counter_operations(client: AsyncRedisClient):
 
 
 async def test_hash_operations(client: AsyncRedisClient):
-    """Test 6: Hash Operations"""
+    """Test 6: Hash Operations
+
+    Validates: BR-005 (Hash Field Operations)
+    """
     try:
         # HSET
         success = await client.hset('async:test:hash', 'field1', 'value1')
@@ -226,7 +271,10 @@ async def test_hash_operations(client: AsyncRedisClient):
 
 
 async def test_list_operations(client: AsyncRedisClient):
-    """Test 7: List Operations"""
+    """Test 7: List Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Clean up
         await client.delete('async:test:list')
@@ -273,7 +321,10 @@ async def test_list_operations(client: AsyncRedisClient):
 
 
 async def test_set_operations(client: AsyncRedisClient):
-    """Test 8: Set Operations"""
+    """Test 8: Set Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Clean up
         await client.delete('async:test:set1')
@@ -311,7 +362,10 @@ async def test_set_operations(client: AsyncRedisClient):
 
 
 async def test_sorted_set_operations(client: AsyncRedisClient):
-    """Test 9: Sorted Set Operations"""
+    """Test 9: Sorted Set Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Clean up
         await client.delete('async:test:zset')
@@ -352,7 +406,10 @@ async def test_sorted_set_operations(client: AsyncRedisClient):
 
 
 async def test_lock_operations(client: AsyncRedisClient):
-    """Test 10: Distributed Lock Operations"""
+    """Test 10: Distributed Lock Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Acquire lock
         lock_id = await client.acquire_lock('async:test:lock', ttl_seconds=10)
@@ -385,7 +442,10 @@ async def test_lock_operations(client: AsyncRedisClient):
 
 
 async def test_pubsub_publish(client: AsyncRedisClient):
-    """Test 11: Pub/Sub Publish"""
+    """Test 11: Pub/Sub Publish
+
+    Validates: (additional coverage)
+    """
     try:
         # Publish (subscribers count may be 0)
         count = await client.publish('async:test:channel', 'Hello World')
@@ -399,7 +459,10 @@ async def test_pubsub_publish(client: AsyncRedisClient):
 
 
 async def test_session_management(client: AsyncRedisClient):
-    """Test 12: Session Management"""
+    """Test 12: Session Management
+
+    Validates: (additional coverage)
+    """
     try:
         # Create session
         session_id = await client.create_session({'user': 'john', 'role': 'admin'}, ttl_seconds=3600)
@@ -418,7 +481,10 @@ async def test_session_management(client: AsyncRedisClient):
 
 
 async def test_concurrent_operations(client: AsyncRedisClient):
-    """Test 13: Concurrent Operations with asyncio.gather"""
+    """Test 13: Concurrent Operations with asyncio.gather
+
+    Validates: EC-007 (Concurrent Updates)
+    """
     try:
         # Setup keys
         await client.mset({
@@ -452,7 +518,10 @@ async def test_concurrent_operations(client: AsyncRedisClient):
 
 
 async def test_get_many_concurrent(client: AsyncRedisClient):
-    """Test 14: get_many_concurrent helper"""
+    """Test 14: get_many_concurrent helper
+
+    Validates: EC-007 (Concurrent Updates)
+    """
     try:
         # Setup keys
         await client.mset({
@@ -482,7 +551,10 @@ async def test_get_many_concurrent(client: AsyncRedisClient):
 
 
 async def test_auto_batching_get(client: AsyncRedisClient):
-    """Test 15: Auto-batching with BatchedRedisGet"""
+    """Test 15: Auto-batching with BatchedRedisGet
+
+    Validates: (additional coverage)
+    """
     try:
         # Setup keys
         await client.mset({
@@ -517,7 +589,10 @@ async def test_auto_batching_get(client: AsyncRedisClient):
 
 
 async def test_auto_batching_set(client: AsyncRedisClient):
-    """Test 16: Auto-batching with BatchedRedisSet"""
+    """Test 16: Auto-batching with BatchedRedisSet
+
+    Validates: (additional coverage)
+    """
     try:
         # Create batched setter
         batched_set = BatchedRedisSet(client, max_size=100, max_wait_ms=10)
@@ -543,7 +618,10 @@ async def test_auto_batching_set(client: AsyncRedisClient):
 
 
 async def test_execute_batch(client: AsyncRedisClient):
-    """Test 17: Execute Batch Commands"""
+    """Test 17: Execute Batch Commands
+
+    Validates: (additional coverage)
+    """
     try:
         commands = [
             {'operation': 'SET', 'key': 'async:test:batch_exec1', 'value': 'val1'},
@@ -567,7 +645,10 @@ async def test_execute_batch(client: AsyncRedisClient):
 
 
 async def test_statistics(client: AsyncRedisClient):
-    """Test 18: Get Statistics"""
+    """Test 18: Get Statistics
+
+    Validates: (additional coverage)
+    """
     try:
         stats = await client.get_statistics()
         if not stats or 'total_keys' not in stats:

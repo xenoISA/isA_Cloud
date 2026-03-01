@@ -44,6 +44,14 @@ from .async_duckdb_client import AsyncDuckDBClient
 from .async_mqtt_client import AsyncMQTTClient
 from .async_qdrant_client import AsyncQdrantClient
 
+# =============================================================================
+# Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
+# =============================================================================
+from .async_sqlite_client import AsyncSQLiteClient
+from .async_local_storage_client import AsyncLocalStorageClient
+from .async_chroma_client import AsyncChromaClient
+from .async_memory_client import AsyncMemoryClient
+
 # Service Discovery
 from .consul_client import ConsulRegistry, consul_lifespan
 
@@ -66,6 +74,11 @@ __all__ = [
     'AsyncDuckDBClient',
     'AsyncMQTTClient',
     'AsyncQdrantClient',
+    # Local-mode alternative clients
+    'AsyncSQLiteClient',
+    'AsyncLocalStorageClient',
+    'AsyncChromaClient',
+    'AsyncMemoryClient',
     # Service discovery
     'ConsulRegistry',
     'consul_lifespan',

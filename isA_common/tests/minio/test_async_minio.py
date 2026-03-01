@@ -36,6 +36,33 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncMinIOClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/minio/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':                [],
+    'test_create_bucket':               ['EC-002'],
+    'test_bucket_exists':               [],
+    'test_list_buckets':                [],
+    'test_get_bucket_info':             [],
+    'test_upload_object':               ['BR-004'],
+    'test_get_object':                  [],
+    'test_get_object_metadata':         ['BR-004'],
+    'test_list_objects':                ['BR-005'],
+    'test_copy_object':                 [],
+    'test_object_tags':                 [],
+    'test_presigned_url':               ['BR-003'],
+    'test_presigned_put_url':           ['BR-003'],
+    'test_bucket_tags':                 [],
+    'test_concurrent_upload':           [],
+    'test_upload_many_concurrent':      [],
+    'test_download_many_concurrent':    [],
+    'test_delete_object':               [],
+    'test_delete_objects':              [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-001', 'BR-002', 'BR-006', 'BR-007', 'EC-001', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+
 # Configuration - Native S3 client (aioboto3)
 HOST = os.environ.get('MINIO_HOST', 'localhost')
 PORT = int(os.environ.get('MINIO_PORT', '9000'))  # S3 API port (not gRPC)
@@ -63,7 +90,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncMinIOClient) -> bool:
-    """Test 1: Service Health Check"""
+    """Test 1: Service Health Check
+
+    Validates: (additional coverage)
+    """
     try:
         health = await client.health_check()
         success = health is not None and health.get('healthy', False)
@@ -75,7 +105,10 @@ async def test_health_check(client: AsyncMinIOClient) -> bool:
 
 
 async def test_create_bucket(client: AsyncMinIOClient):
-    """Test 2: Create Bucket"""
+    """Test 2: Create Bucket
+
+    Validates: EC-002 (Bucket Already Exists)
+    """
     try:
         result = await client.create_bucket(TEST_BUCKET)
         if result is None:
@@ -93,7 +126,10 @@ async def test_create_bucket(client: AsyncMinIOClient):
 
 
 async def test_bucket_exists(client: AsyncMinIOClient):
-    """Test 3: Bucket Exists Check"""
+    """Test 3: Bucket Exists Check
+
+    Validates: (additional coverage)
+    """
     try:
         exists = await client.bucket_exists(TEST_BUCKET)
         if not exists:
@@ -106,7 +142,10 @@ async def test_bucket_exists(client: AsyncMinIOClient):
 
 
 async def test_list_buckets(client: AsyncMinIOClient):
-    """Test 4: List Buckets"""
+    """Test 4: List Buckets
+
+    Validates: (additional coverage)
+    """
     try:
         buckets = await client.list_buckets()
         if buckets is None:
@@ -119,7 +158,10 @@ async def test_list_buckets(client: AsyncMinIOClient):
 
 
 async def test_get_bucket_info(client: AsyncMinIOClient):
-    """Test 5: Get Bucket Info"""
+    """Test 5: Get Bucket Info
+
+    Validates: (additional coverage)
+    """
     try:
         info = await client.get_bucket_info(TEST_BUCKET)
         if info is None:
@@ -132,7 +174,10 @@ async def test_get_bucket_info(client: AsyncMinIOClient):
 
 
 async def test_upload_object(client: AsyncMinIOClient):
-    """Test 6: Upload Object"""
+    """Test 6: Upload Object
+
+    Validates: BR-004 (Object Metadata)
+    """
     try:
         data = b'Hello from async MinIO client! This is test content.'
         result = await client.upload_object(
@@ -156,7 +201,10 @@ async def test_upload_object(client: AsyncMinIOClient):
 
 
 async def test_get_object(client: AsyncMinIOClient):
-    """Test 7: Get Object"""
+    """Test 7: Get Object
+
+    Validates: (additional coverage)
+    """
     try:
         data = await client.get_object(TEST_BUCKET, 'test/hello.txt')
         if data is None:
@@ -173,7 +221,10 @@ async def test_get_object(client: AsyncMinIOClient):
 
 
 async def test_get_object_metadata(client: AsyncMinIOClient):
-    """Test 8: Get Object Metadata"""
+    """Test 8: Get Object Metadata
+
+    Validates: BR-004 (Object Metadata)
+    """
     try:
         metadata = await client.get_object_metadata(TEST_BUCKET, 'test/hello.txt')
         if metadata is None:
@@ -190,7 +241,10 @@ async def test_get_object_metadata(client: AsyncMinIOClient):
 
 
 async def test_list_objects(client: AsyncMinIOClient):
-    """Test 9: List Objects"""
+    """Test 9: List Objects
+
+    Validates: BR-005 (Object Listing with Pagination)
+    """
     try:
         objects = await client.list_objects(TEST_BUCKET, prefix='test/')
         if objects is None:
@@ -207,7 +261,10 @@ async def test_list_objects(client: AsyncMinIOClient):
 
 
 async def test_copy_object(client: AsyncMinIOClient):
-    """Test 10: Copy Object"""
+    """Test 10: Copy Object
+
+    Validates: (additional coverage)
+    """
     try:
         success = await client.copy_object(
             dest_bucket=TEST_BUCKET,
@@ -231,7 +288,10 @@ async def test_copy_object(client: AsyncMinIOClient):
 
 
 async def test_object_tags(client: AsyncMinIOClient):
-    """Test 11: Object Tags"""
+    """Test 11: Object Tags
+
+    Validates: (additional coverage)
+    """
     try:
         # Set tags
         success = await client.set_object_tags(
@@ -255,7 +315,10 @@ async def test_object_tags(client: AsyncMinIOClient):
 
 
 async def test_presigned_url(client: AsyncMinIOClient):
-    """Test 12: Generate Presigned URL"""
+    """Test 12: Generate Presigned URL
+
+    Validates: BR-003 (Presigned URL Generation)
+    """
     try:
         url = await client.get_presigned_url(
             TEST_BUCKET,
@@ -276,7 +339,10 @@ async def test_presigned_url(client: AsyncMinIOClient):
 
 
 async def test_presigned_put_url(client: AsyncMinIOClient):
-    """Test 13: Generate Presigned PUT URL"""
+    """Test 13: Generate Presigned PUT URL
+
+    Validates: BR-003 (Presigned URL Generation)
+    """
     try:
         url = await client.get_presigned_put_url(
             TEST_BUCKET,
@@ -294,7 +360,10 @@ async def test_presigned_put_url(client: AsyncMinIOClient):
 
 
 async def test_bucket_tags(client: AsyncMinIOClient):
-    """Test 14: Bucket Tags"""
+    """Test 14: Bucket Tags
+
+    Validates: (additional coverage)
+    """
     try:
         # Set bucket tags
         success = await client.set_bucket_tags(
@@ -317,7 +386,10 @@ async def test_bucket_tags(client: AsyncMinIOClient):
 
 
 async def test_concurrent_upload(client: AsyncMinIOClient):
-    """Test 15: Concurrent Upload"""
+    """Test 15: Concurrent Upload
+
+    Validates: (additional coverage)
+    """
     try:
         start = time.time()
 
@@ -345,7 +417,10 @@ async def test_concurrent_upload(client: AsyncMinIOClient):
 
 
 async def test_upload_many_concurrent(client: AsyncMinIOClient):
-    """Test 16: upload_many_concurrent Helper"""
+    """Test 16: upload_many_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     try:
         uploads = [
             {'bucket': TEST_BUCKET, 'key': f'test/batch_{i}.txt', 'data': f'Batch {i}'.encode()}
@@ -367,7 +442,10 @@ async def test_upload_many_concurrent(client: AsyncMinIOClient):
 
 
 async def test_download_many_concurrent(client: AsyncMinIOClient):
-    """Test 17: download_many_concurrent Helper"""
+    """Test 17: download_many_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     try:
         downloads = [
             {'bucket': TEST_BUCKET, 'key': f'test/batch_{i}.txt'}
@@ -389,7 +467,10 @@ async def test_download_many_concurrent(client: AsyncMinIOClient):
 
 
 async def test_delete_object(client: AsyncMinIOClient):
-    """Test 18: Delete Object"""
+    """Test 18: Delete Object
+
+    Validates: (additional coverage)
+    """
     try:
         success = await client.delete_object(TEST_BUCKET, 'test/hello_copy.txt')
         if not success:
@@ -402,7 +483,10 @@ async def test_delete_object(client: AsyncMinIOClient):
 
 
 async def test_delete_objects(client: AsyncMinIOClient):
-    """Test 19: Delete Multiple Objects"""
+    """Test 19: Delete Multiple Objects
+
+    Validates: (additional coverage)
+    """
     try:
         keys = [f'test/concurrent_{i}.txt' for i in range(5)]
         keys.extend([f'test/batch_{i}.txt' for i in range(3)])

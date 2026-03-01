@@ -28,6 +28,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from isa_common import AsyncNATSClient
 
+# ============================================
+# Contract Mapping — see tests/contracts/nats/logic_contract.md
+# ============================================
+CONTRACT_MAP = {
+    'test_health_check':              [],
+    'test_publish':                   ['BR-001'],
+    'test_publish_with_headers':      ['BR-001'],
+    'test_publish_batch':             [],
+    'test_request_reply':             ['BR-006'],
+    'test_create_stream':             ['BR-003'],
+    'test_list_streams':              [],
+    'test_publish_to_stream':         ['BR-003'],
+    'test_create_consumer':           ['BR-004'],
+    'test_pull_messages':             ['BR-004'],
+    'test_kv_operations':             ['BR-005'],
+    'test_object_store_operations':   [],
+    'test_concurrent_publish':        [],
+    'test_publish_many_concurrent':   [],
+    'test_statistics':                [],
+}
+
+UNCOVERED_CONTRACTS = ['BR-002', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+
 # Configuration
 HOST = os.environ.get('HOST', 'localhost')
 PORT = int(os.environ.get('PORT', '4222'))
@@ -52,7 +75,10 @@ def test_result(success: bool, test_name: str):
 
 
 async def test_health_check(client: AsyncNATSClient) -> bool:
-    """Test 1: Service Health Check (functional test via publish)"""
+    """Test 1: Service Health Check (functional test via publish)
+
+    Validates: (additional coverage)
+    """
     try:
         # The standard health_check() uses Ping which has a bug in the Go service
         # (FlushWithContext returns error even when connection is working).
@@ -73,7 +99,10 @@ async def test_health_check(client: AsyncNATSClient) -> bool:
 
 
 async def test_publish(client: AsyncNATSClient):
-    """Test 2: Publish Message"""
+    """Test 2: Publish Message
+
+    Validates: BR-001 (Subject-Based Publish/Subscribe)
+    """
     try:
         result = await client.publish(
             'async.test.subject',
@@ -89,7 +118,10 @@ async def test_publish(client: AsyncNATSClient):
 
 
 async def test_publish_with_headers(client: AsyncNATSClient):
-    """Test 3: Publish Message with Headers"""
+    """Test 3: Publish Message with Headers
+
+    Validates: BR-001 (Subject-Based Publish/Subscribe)
+    """
     try:
         result = await client.publish(
             'async.test.headers',
@@ -106,7 +138,10 @@ async def test_publish_with_headers(client: AsyncNATSClient):
 
 
 async def test_publish_batch(client: AsyncNATSClient):
-    """Test 4: Batch Publish"""
+    """Test 4: Batch Publish
+
+    Validates: (additional coverage)
+    """
     try:
         messages = [
             {'subject': 'async.test.batch.1', 'data': b'message 1'},
@@ -129,7 +164,10 @@ async def test_publish_batch(client: AsyncNATSClient):
 
 
 async def test_request_reply(client: AsyncNATSClient):
-    """Test 5: Request-Reply Pattern"""
+    """Test 5: Request-Reply Pattern
+
+    Validates: BR-006 (Request-Reply Pattern)
+    """
     try:
         # Note: This requires a responder - may timeout without one
         result = await client.request(
@@ -151,7 +189,10 @@ async def test_request_reply(client: AsyncNATSClient):
 
 
 async def test_create_stream(client: AsyncNATSClient):
-    """Test 6: Create JetStream Stream"""
+    """Test 6: Create JetStream Stream
+
+    Validates: BR-003 (JetStream Persistence)
+    """
     try:
         result = await client.create_stream(
             'ASYNC_TEST_STREAM',
@@ -173,7 +214,10 @@ async def test_create_stream(client: AsyncNATSClient):
 
 
 async def test_list_streams(client: AsyncNATSClient):
-    """Test 7: List Streams"""
+    """Test 7: List Streams
+
+    Validates: (additional coverage)
+    """
     try:
         streams = await client.list_streams()
         if streams is None:
@@ -186,7 +230,10 @@ async def test_list_streams(client: AsyncNATSClient):
 
 
 async def test_publish_to_stream(client: AsyncNATSClient):
-    """Test 8: Publish to JetStream Stream"""
+    """Test 8: Publish to JetStream Stream
+
+    Validates: BR-003 (JetStream Persistence)
+    """
     try:
         result = await client.publish_to_stream(
             'ASYNC_TEST_STREAM',
@@ -207,7 +254,10 @@ async def test_publish_to_stream(client: AsyncNATSClient):
 
 
 async def test_create_consumer(client: AsyncNATSClient):
-    """Test 9: Create JetStream Consumer"""
+    """Test 9: Create JetStream Consumer
+
+    Validates: BR-004 (Consumer Acknowledgment)
+    """
     try:
         result = await client.create_consumer(
             'ASYNC_TEST_STREAM',
@@ -229,7 +279,10 @@ async def test_create_consumer(client: AsyncNATSClient):
 
 
 async def test_pull_messages(client: AsyncNATSClient):
-    """Test 10: Pull Messages from Consumer"""
+    """Test 10: Pull Messages from Consumer
+
+    Validates: BR-004 (Consumer Acknowledgment)
+    """
     try:
         messages = await client.pull_messages(
             'ASYNC_TEST_STREAM',
@@ -246,7 +299,10 @@ async def test_pull_messages(client: AsyncNATSClient):
 
 
 async def test_kv_operations(client: AsyncNATSClient):
-    """Test 11: KV Store Operations"""
+    """Test 11: KV Store Operations
+
+    Validates: BR-005 (Key-Value Store)
+    """
     try:
         # Put
         result = await client.kv_put('async-test-bucket', 'test-key', b'test-value')
@@ -279,7 +335,10 @@ async def test_kv_operations(client: AsyncNATSClient):
 
 
 async def test_object_store_operations(client: AsyncNATSClient):
-    """Test 12: Object Store Operations"""
+    """Test 12: Object Store Operations
+
+    Validates: (additional coverage)
+    """
     try:
         # Put object
         result = await client.object_put(
@@ -312,7 +371,10 @@ async def test_object_store_operations(client: AsyncNATSClient):
 
 
 async def test_concurrent_publish(client: AsyncNATSClient):
-    """Test 13: Concurrent Publish Operations"""
+    """Test 13: Concurrent Publish Operations
+
+    Validates: (additional coverage)
+    """
     try:
         start = time.time()
 
@@ -335,7 +397,10 @@ async def test_concurrent_publish(client: AsyncNATSClient):
 
 
 async def test_publish_many_concurrent(client: AsyncNATSClient):
-    """Test 14: publish_many_concurrent Helper"""
+    """Test 14: publish_many_concurrent Helper
+
+    Validates: (additional coverage)
+    """
     try:
         messages = [
             {'subject': f'async.test.helper.{i}', 'data': f'msg {i}'.encode()}
@@ -356,7 +421,10 @@ async def test_publish_many_concurrent(client: AsyncNATSClient):
 
 
 async def test_statistics(client: AsyncNATSClient):
-    """Test 15: Get Statistics"""
+    """Test 15: Get Statistics
+
+    Validates: (additional coverage)
+    """
     try:
         stats = await client.get_statistics()
         if stats is None:
