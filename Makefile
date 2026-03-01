@@ -1,157 +1,135 @@
-# IsA Cloud Makefile
+# isA Cloud Makefile
+# Python infrastructure SDK (isa_common) + Docker Compose local dev
 
-.PHONY: help proto build clean test docker-build docker-push dev
+.PHONY: help install test lint fmt clean dev dev-down dev-logs dev-status health ports
 
 # Variables
-PROJECT_NAME := isa_cloud
-PROTO_DIR := api/proto
-PKG_DIR := pkg/proto
-GO_FILES := $(shell find . -name "*.go" -type f)
-DOCKER_REGISTRY := ghcr.io/isa-cloud
+COMPOSE_FILE := docker-compose.yml
+PYTHON := python3
+PIP := pip3
+PYTEST := $(PYTHON) -m pytest
+SDK_DIR := isA_common
 
-# Help
+# ==================== Help ====================
+
 help: ## Display this help message
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-# Protocol Buffers
-proto: ## Generate gRPC code from proto files
-	@echo "Generating gRPC code..."
-	@mkdir -p $(PKG_DIR)
-	@protoc --go_out=$(PKG_DIR) --go_opt=paths=source_relative \
-		--go-grpc_out=$(PKG_DIR) --go-grpc_opt=paths=source_relative \
-		$(PROTO_DIR)/*.proto
-	@echo "✅ gRPC code generated"
+# ==================== Python SDK ====================
 
-# Build
-build: proto ## Build the application
-	@echo "Building $(PROJECT_NAME)..."
-	@go mod download
-	@echo "✅ Build completed"
+install: ## Install isa_common in development mode
+	@echo "Installing isa_common..."
+	@cd $(SDK_DIR) && $(PIP) install -e ".[dev]"
+	@echo "Done"
 
-# Clean
-clean: ## Clean build artifacts
-	@echo "Cleaning..."
-	@rm -rf bin/
-	@rm -rf $(PKG_DIR)
-	@go clean
-	@echo "✅ Clean completed"
-
-# Test
-test: ## Run tests
+test: ## Run all tests (integration tests skip if services unavailable)
 	@echo "Running tests..."
-	@go test -v ./...
-	@echo "✅ Tests completed"
+	@cd $(SDK_DIR) && $(PYTEST) tests/ -v
+	@echo "Done"
 
-# Docker
-docker-build: ## Build Docker images
-	@echo "Building Docker images..."
-	@echo "✅ Docker images built"
+test-unit: ## Run unit tests only (no infrastructure needed)
+	@echo "Running unit tests..."
+	@cd $(SDK_DIR) && $(PYTEST) tests/nats/test_async_nats_reconnect.py tests/component/ -v
+	@echo "Done"
 
-docker-push: docker-build ## Push Docker images
-	@echo "Pushing Docker images..."
-	@echo "✅ Docker images pushed"
+test-smoke: ## Run billing pipeline smoke tests
+	@echo "Running smoke tests..."
+	@cd $(SDK_DIR) && $(PYTEST) tests/smoke/ -m smoke -v
+	@echo "Done"
 
-# Development
-dev: build ## Start development environment
-	@echo "Starting development environment..."
-	@docker-compose -f deployments/compose/docker-compose.dev.yml up -d
-	@echo "✅ Development environment started"
-
-# Dependencies
-deps: ## Download dependencies
-	@echo "Downloading dependencies..."
-	@go mod download
-	@go mod tidy
-	@echo "✅ Dependencies updated"
-
-# Lint
-lint: ## Run linter
-	@echo "Running linter..."
-	@golangci-lint run
-	@echo "✅ Lint completed"
-
-# Format
-fmt: ## Format code
-	@echo "Formatting code..."
-	@go fmt ./...
-	@echo "✅ Code formatted"
-
-# ====================
-# Service Management
-# ====================
-
-SERVICE_MANAGER := ./scripts/service_manager.sh
-
-# Start all services
-start-all: ## Start all microservices
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) start all
-
-# Stop all services  
-stop-all: ## Stop all microservices
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) stop all
-
-# Restart all services
-restart-all: ## Restart all microservices
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) restart all
-
-# Service status
-status: ## Check status of all services
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) status
-
-# Service health check
-health: ## Health check for all services
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) health
-
-# View service logs
-logs: ## View logs (usage: make logs service=<service_name>)
-ifdef service
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) logs $(service)
+test-service: ## Run tests for a specific service (usage: make test-service s=redis)
+ifdef s
+	@cd $(SDK_DIR) && $(PYTEST) tests/$(s)/ -v
 else
-	@echo "Please specify a service: make logs service=<service_name>"
+	@echo "Specify service: make test-service s=redis"
+	@echo "Available: redis postgres nats mqtt minio qdrant neo4j duck"
 endif
 
-# Start specific service
-start-%: ## Start specific service (e.g., make start-auth)
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) start $*
+lint: ## Run linter (flake8)
+	@echo "Running linter..."
+	@cd $(SDK_DIR) && $(PYTHON) -m flake8 isa_common/ --max-line-length=100
+	@echo "Done"
 
-# Stop specific service
-stop-%: ## Stop specific service (e.g., make stop-auth)
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) stop $*
+fmt: ## Format code (black)
+	@echo "Formatting code..."
+	@cd $(SDK_DIR) && $(PYTHON) -m black isa_common/ tests/ --line-length=100
+	@echo "Done"
 
-# Restart specific service
-restart-%: ## Restart specific service (e.g., make restart-auth)
-	@chmod +x $(SERVICE_MANAGER)
-	@$(SERVICE_MANAGER) restart $*
+typecheck: ## Run type checker (mypy)
+	@echo "Running type checker..."
+	@cd $(SDK_DIR) && $(PYTHON) -m mypy isa_common/
+	@echo "Done"
 
-# Show service ports
-ports: ## Display all service ports
-	@echo "Service Endpoints:"
-	@echo "  APISIX Gateway:   http://localhost:9080"
-	@echo "  APISIX Admin:     http://localhost:9180"
-	@echo "  Consul UI:        http://localhost:8500"
-	@echo "  Account Service:  http://localhost:8201"
-	@echo "  Auth Service:     http://localhost:8202"
-	@echo "  Authorization:    http://localhost:8203"
-	@echo "  Audit Service:    http://localhost:8204"
-	@echo "  Notification:     http://localhost:8206"
-	@echo "  Payment Service:  http://localhost:8207"
-	@echo "  Storage Service:  http://localhost:8209"
+clean: ## Clean Python build artifacts
+	@echo "Cleaning..."
+	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@echo "Done"
 
-# Docker Compose management
-docker-services-up: ## Start services with Docker Compose
-	@docker-compose up -d
+# ==================== Local Development (Docker Compose) ====================
 
-docker-services-down: ## Stop Docker Compose services
-	@docker-compose down
+dev: ## Start all infrastructure services for local development
+	@echo "Starting infrastructure services..."
+	@docker compose -f $(COMPOSE_FILE) up -d
+	@echo "Done — run 'make dev-status' to check service health"
 
-docker-services-logs: ## View Docker Compose logs
-	@docker-compose logs -f
+dev-down: ## Stop all infrastructure services
+	@echo "Stopping infrastructure services..."
+	@docker compose -f $(COMPOSE_FILE) down
+	@echo "Done"
+
+dev-destroy: ## Stop services and remove all data volumes
+	@echo "Stopping services and removing volumes..."
+	@docker compose -f $(COMPOSE_FILE) down -v
+	@echo "Done"
+
+dev-logs: ## View infrastructure service logs (usage: make dev-logs or make dev-logs s=redis)
+ifdef s
+	@docker compose -f $(COMPOSE_FILE) logs -f $(s)
+else
+	@docker compose -f $(COMPOSE_FILE) logs -f
+endif
+
+dev-status: ## Check status of infrastructure services
+	@docker compose -f $(COMPOSE_FILE) ps
+
+dev-restart: ## Restart a specific service (usage: make dev-restart s=redis)
+ifdef s
+	@docker compose -f $(COMPOSE_FILE) restart $(s)
+else
+	@echo "Specify service: make dev-restart s=redis"
+endif
+
+# ==================== Service Endpoints ====================
+
+ports: ## Display all service endpoints
+	@echo "Infrastructure Endpoints:"
+	@echo "  PostgreSQL:       localhost:5432"
+	@echo "  Redis:            localhost:6379"
+	@echo "  Neo4j HTTP:       http://localhost:7474"
+	@echo "  Neo4j Bolt:       localhost:7687"
+	@echo "  NATS:             localhost:4222"
+	@echo "  NATS Monitor:     http://localhost:8222"
+	@echo "  MinIO API:        http://localhost:9000"
+	@echo "  MinIO Console:    http://localhost:9001"
+	@echo "  Mosquitto/MQTT:   localhost:1883"
+	@echo "  Qdrant:           http://localhost:6333"
+	@echo "  Loki:             http://localhost:3100"
+	@echo "  Grafana:          http://localhost:3000"
+	@echo "  Consul:           http://localhost:8500"
+
+health: ## Quick health check for all services
+	@echo "Checking service health..."
+	@echo -n "  PostgreSQL:  " && (docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U postgres > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Redis:       " && (docker compose -f $(COMPOSE_FILE) exec -T redis redis-cli ping > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Neo4j:       " && (curl -sf http://localhost:7474/ > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  NATS:        " && (curl -sf http://localhost:8222/healthz > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  MinIO:       " && (curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Qdrant:      " && (curl -sf http://localhost:6333/ > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Loki:        " && (curl -sf http://localhost:3100/ready > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Grafana:     " && (curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Consul:      " && (curl -sf http://localhost:8500/v1/status/leader > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Mosquitto:   " && (docker compose -f $(COMPOSE_FILE) exec -T mosquitto mosquitto_sub -t '$$SYS/#' -C 1 -W 2 > /dev/null 2>&1 && echo "OK" || echo "DOWN")
