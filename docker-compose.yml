@@ -157,6 +157,49 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # ==================== Prometheus (9090) ====================
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: isa-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=24h'
+      - '--storage.tsdb.retention.size=1GB'
+      - '--web.enable-remote-write-receiver'
+      - '--enable-feature=exemplar-storage'
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./configs/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==================== Tempo (3200/4317/4318) ====================
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: isa-tempo
+    command: -config.file=/etc/tempo/tempo-config.yml
+    ports:
+      - "${TEMPO_HTTP_PORT:-3200}:3200"
+      - "${TEMPO_OTLP_GRPC_PORT:-4317}:4317"
+      - "${TEMPO_OTLP_HTTP_PORT:-4318}:4318"
+    volumes:
+      - ./configs/local/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo-data:/var/tempo
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
   # ==================== Grafana (3000) ====================
   grafana:
     image: grafana/grafana:latest
@@ -173,6 +216,10 @@ services:
       - ./configs/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      tempo:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -209,5 +256,7 @@ volumes:
   mosquitto-logs:
   qdrant-data:
   loki-data:
+  prometheus-data:
+  tempo-data:
   grafana-data:
   consul-data:

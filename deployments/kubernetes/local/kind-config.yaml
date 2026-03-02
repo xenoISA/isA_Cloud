@@ -165,7 +165,7 @@ nodes:
       protocol: TCP
 
     # ============================================================
-    # OBSERVABILITY (Optional)
+    # OBSERVABILITY
     # ============================================================
     # Grafana (NodePort 30300 -> localhost:3000)
     - containerPort: 30300
@@ -175,6 +175,26 @@ nodes:
     # Loki (NodePort 31100 -> localhost:3100)
     - containerPort: 31100
       hostPort: 3100
+      protocol: TCP
+
+    # Prometheus (NodePort 30090 -> localhost:9090)
+    - containerPort: 30090
+      hostPort: 9090
+      protocol: TCP
+
+    # Tempo HTTP API (NodePort 31320 -> localhost:3200)
+    - containerPort: 31320
+      hostPort: 3200
+      protocol: TCP
+
+    # Tempo OTLP gRPC (NodePort 31317 -> localhost:4317)
+    - containerPort: 31317
+      hostPort: 4317
+      protocol: TCP
+
+    # Tempo OTLP HTTP (NodePort 31318 -> localhost:4318)
+    - containerPort: 31318
+      hostPort: 4318
       protocol: TCP
 
     # ============================================================

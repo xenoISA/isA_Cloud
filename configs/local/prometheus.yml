@@ -1,0 +1,36 @@
+# Prometheus Configuration - LOCAL
+# Used by docker-compose for local development.
+# Scrapes isA services that expose /metrics endpoints.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # isA platform services (docker-compose)
+  # Add service targets as they expose /metrics endpoints
+  - job_name: 'isa-services'
+    static_configs: []
+    # Example — uncomment when services expose metrics:
+    # - targets: ['isa-gateway:8080']
+    #   labels:
+    #     app: isa-gateway
+
+  # Infrastructure services with metrics support
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          app: redis
+
+  - job_name: 'nats'
+    metrics_path: /
+    static_configs:
+      - targets: ['nats:8222']
+        labels:
+          app: nats
