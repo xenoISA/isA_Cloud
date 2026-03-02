@@ -1,0 +1,77 @@
+# Grafana Helm Values - LOCAL (Simple)
+# Chart: grafana/grafana
+# Install: helm install grafana grafana/grafana -n isa-cloud-local -f local/values/grafana.yaml
+
+replicas: 1
+
+# Admin credentials
+adminUser: admin
+adminPassword: admin
+
+# Service - NodePort for local access (30300 -> localhost:3000)
+service:
+  type: NodePort
+  port: 80
+  targetPort: 3000
+  nodePort: 30300
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+persistence:
+  enabled: true
+  size: 2Gi
+
+# Pod labels matching other infra services
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# Disable sign-up
+grafana.ini:
+  users:
+    allow_sign_up: false
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+
+# Auto-provision Loki datasource
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki-headless.isa-cloud-local.svc.cluster.local:3100
+        isDefault: true
+        editable: true
+
+# Auto-provision dashboard provider
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: 'isA Platform'
+        orgId: 1
+        folder: 'isA'
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/isa
+
+# Auto-provision dashboards via ConfigMap
+dashboardsConfigMaps:
+  isa: grafana-isa-dashboards
+
+# Disable test pod
+testFramework:
+  enabled: false
