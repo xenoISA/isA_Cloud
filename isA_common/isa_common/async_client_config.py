@@ -130,3 +130,21 @@ class MinIOConfig(ClientConfig):
             secure=os.getenv(f'{prefix}_SECURE', 'false').lower() == 'true',
             region=os.getenv(f'{prefix}_REGION', 'us-east-1'),
         )
+
+
+@dataclass
+class LokiConfig(ClientConfig):
+    """Loki-specific configuration."""
+    tenant_id: str = ''
+    batch_size: int = 100
+    flush_interval: float = 1.0
+
+    @classmethod
+    def from_env(cls, prefix: str = 'LOKI') -> 'LokiConfig':
+        base = ClientConfig.from_env(prefix, 'localhost', 3100)
+        return cls(
+            **base.to_dict(),
+            tenant_id=os.getenv(f'{prefix}_TENANT_ID', ''),
+            batch_size=int(os.getenv(f'{prefix}_BATCH_SIZE', '100')),
+            flush_interval=float(os.getenv(f'{prefix}_FLUSH_INTERVAL', '1.0')),
+        )

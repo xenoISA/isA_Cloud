@@ -30,7 +30,7 @@ from typing import Dict
 # Base Client & Configuration
 # =============================================================================
 from .async_base_client import AsyncBaseClient
-from .async_client_config import ClientConfig, PostgresConfig, RedisConfig, MinIOConfig
+from .async_client_config import ClientConfig, PostgresConfig, RedisConfig, MinIOConfig, LokiConfig
 
 # =============================================================================
 # Native Async Clients (Direct Connections)
@@ -43,6 +43,8 @@ from .async_minio_client import AsyncMinIOClient
 from .async_duckdb_client import AsyncDuckDBClient
 from .async_mqtt_client import AsyncMQTTClient
 from .async_qdrant_client import AsyncQdrantClient
+from .async_loki_client import AsyncLokiClient
+from .loki_handler import LokiHandler, setup_loki_logging
 
 # =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
@@ -65,6 +67,7 @@ __all__ = [
     'PostgresConfig',
     'RedisConfig',
     'MinIOConfig',
+    'LokiConfig',
     # Native async clients
     'AsyncRedisClient',
     'AsyncPostgresClient',
@@ -74,6 +77,9 @@ __all__ = [
     'AsyncDuckDBClient',
     'AsyncMQTTClient',
     'AsyncQdrantClient',
+    'AsyncLokiClient',
+    'LokiHandler',
+    'setup_loki_logging',
     # Local-mode alternative clients
     'AsyncSQLiteClient',
     'AsyncLocalStorageClient',
@@ -98,6 +104,8 @@ NATIVE_PORTS: Dict[str, int] = {
     'mqtt': 1883,
     'minio': 9000,
     'consul': 8500,
+    'loki': 3100,
+    'grafana': 3000,
     'duckdb': 0,  # Embedded, no port
 }
 

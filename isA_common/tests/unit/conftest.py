@@ -4,7 +4,7 @@ Unit test fixtures — all tests use mocked backends, no infrastructure required
 import logging
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ============================================================================
@@ -169,4 +169,26 @@ async def mqtt_client():
     )
     client._connected = True
     yield client
+    client._connected = False
+
+
+# ============================================================================
+# Loki
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def loki_client():
+    """AsyncLokiClient with mocked aiohttp session."""
+    from isa_common import AsyncLokiClient
+
+    client = AsyncLokiClient(
+        host="localhost", port=3100,
+        user_id="test_user", organization_id="org1",
+        default_labels={"app": "test-service", "env": "test"},
+        lazy_connect=True,
+    )
+    client._session = AsyncMock()
+    client._connected = True
+    yield client
+    client._batch = []
     client._connected = False

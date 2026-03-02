@@ -39,6 +39,7 @@ dependencies = [
     "qdrant-client>=1.7.0",  # Async Qdrant vector database
     "aiomqtt>=2.0.0",  # Async MQTT client
     "duckdb>=0.10.0",  # DuckDB analytics database
+    "aiohttp>=3.9.0",  # Async HTTP client (Loki)
 ]
 
 [project.optional-dependencies]
