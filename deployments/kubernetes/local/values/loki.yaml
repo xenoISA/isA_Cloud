@@ -1,0 +1,107 @@
+# Loki Helm Values - LOCAL (SingleBinary)
+# Chart: grafana/loki
+# Install: helm install loki grafana/loki -n isa-cloud-local -f local/values/loki.yaml
+
+# SingleBinary mode — simplest deployment, no object storage required
+deploymentMode: SingleBinary
+
+# Use filesystem storage (no S3/GCS needed for local dev)
+loki:
+  auth_enabled: false
+
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  storage:
+    type: filesystem
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+
+  limits_config:
+    retention_period: 72h
+    ingestion_rate_mb: 16
+    ingestion_burst_size_mb: 32
+    max_streams_per_user: 10000
+    max_entries_limit_per_query: 5000
+
+  commonConfig:
+    replication_factor: 1
+
+  podLabels:
+    tier: infrastructure
+    environment: local
+
+# SingleBinary configuration
+singleBinary:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# Disable gateway — expose Loki directly via NodePort
+gateway:
+  enabled: false
+
+# Disable components not needed in SingleBinary mode
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Disable caches for local dev
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# Disable minio sub-chart (we use filesystem)
+minio:
+  enabled: false
+
+# Disable monitoring for lighter footprint
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+
+# Expose Loki via NodePort (31100 -> localhost:3100)
+# The singleBinary service needs to be NodePort
+extraObjects:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: loki-nodeport
+      namespace: isa-cloud-local
+      labels:
+        tier: infrastructure
+        environment: local
+    spec:
+      type: NodePort
+      ports:
+        - port: 3100
+          targetPort: http-metrics
+          nodePort: 31100
+          protocol: TCP
+          name: http
+      selector:
+        app.kubernetes.io/name: loki
+        app.kubernetes.io/component: single-binary
