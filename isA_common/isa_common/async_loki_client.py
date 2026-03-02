@@ -63,6 +63,8 @@ class AsyncLokiClient(AsyncBaseClient):
         self._session: Optional[aiohttp.ClientSession] = None
         self._batch: List[Dict[str, Any]] = []
         self._flush_task: Optional[asyncio.Task] = None
+        self._dropped_entries: int = 0
+        self._max_flush_retries: int = 2
 
     @property
     def _base_url(self) -> str:
@@ -141,7 +143,7 @@ class AsyncLokiClient(AsyncBaseClient):
         """
         try:
             merged_labels = {**self._default_labels, **(labels or {})}
-            ts = timestamp_ns or int(time.time() * 1e9)
+            ts = timestamp_ns or time.time_ns()
 
             entry = {
                 "labels": merged_labels,
@@ -210,43 +212,59 @@ class AsyncLokiClient(AsyncBaseClient):
             return False
 
     async def _flush_batch(self) -> bool:
-        """Flush accumulated batch to Loki."""
+        """Flush accumulated batch to Loki.
+
+        On failure, re-queues entries for the next flush attempt.
+        After max retries, drops entries and increments _dropped_entries.
+        """
         if not self._batch:
             return True
 
         batch = self._batch
         self._batch = []
 
-        try:
-            await self._ensure_connected()
+        for attempt in range(self._max_flush_retries):
+            try:
+                await self._ensure_connected()
 
-            # Group by label set
-            streams: Dict[str, Dict] = {}
-            for entry in batch:
-                labels = entry["labels"]
-                label_key = self._labels_to_str(labels)
-                if label_key not in streams:
-                    streams[label_key] = {
-                        "stream": labels,
-                        "values": [],
-                    }
-                streams[label_key]["values"].extend(entry["values"])
+                # Group by label set
+                streams: Dict[str, Dict] = {}
+                for entry in batch:
+                    labels = entry["labels"]
+                    label_key = self._labels_to_str(labels)
+                    if label_key not in streams:
+                        streams[label_key] = {
+                            "stream": labels,
+                            "values": [],
+                        }
+                    streams[label_key]["values"].extend(entry["values"])
 
-            payload = {"streams": list(streams.values())}
+                payload = {"streams": list(streams.values())}
 
-            async with self._session.post(
-                "/loki/api/v1/push",
-                json=payload,
-            ) as resp:
-                if resp.status == 204:
-                    return True
-                text = await resp.text()
-                self._logger.warning(f"Loki flush returned {resp.status}: {text}")
-                return False
+                async with self._session.post(
+                    "/loki/api/v1/push",
+                    json=payload,
+                ) as resp:
+                    if resp.status == 204:
+                        return True
+                    text = await resp.text()
+                    self._logger.warning(f"Loki flush returned {resp.status}: {text}")
 
-        except Exception as e:
-            self.handle_error(e, "flush_batch")
-            return False
+            except Exception as e:
+                self.handle_error(e, "flush_batch")
+
+            # Brief pause before retry
+            if attempt < self._max_flush_retries - 1:
+                await asyncio.sleep(0.5)
+
+        # All retries exhausted — drop the batch
+        count = sum(len(e.get("values", [])) for e in batch)
+        self._dropped_entries += count
+        self._logger.error(
+            f"Loki flush failed after {self._max_flush_retries} attempts, "
+            f"dropped {count} entries (total dropped: {self._dropped_entries})"
+        )
+        return False
 
     async def flush(self) -> bool:
         """Manually flush the current batch."""
@@ -265,8 +283,11 @@ class AsyncLokiClient(AsyncBaseClient):
         """Periodically flush batch."""
         while True:
             await asyncio.sleep(self._flush_interval)
-            if self._batch:
-                await self._flush_batch()
+            try:
+                if self._batch:
+                    await self._flush_batch()
+            except Exception as e:
+                self._logger.warning(f"Auto-flush failed: {e}")
 
     # ============================================
     # Query Operations

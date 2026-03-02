@@ -89,7 +89,7 @@ class LokiHandler(logging.Handler):
             entry = {
                 "labels": labels,
                 "message": message,
-                "timestamp_ns": int(record.created * 1e9),
+                "timestamp_ns": int(record.created * 1_000_000_000),
             }
 
             with self._lock:
@@ -122,16 +122,30 @@ class LokiHandler(logging.Handler):
 
     def close(self) -> None:
         """Flush remaining entries and shut down."""
-        self._do_flush()
-        # Give background loop a moment to process the final batch
-        future = asyncio.run_coroutine_threadsafe(
+        # Drain the queue and wait for the flush to complete
+        with self._lock:
+            batch = self._queue
+            self._queue = []
+        if batch:
+            flush_future = asyncio.run_coroutine_threadsafe(
+                self._client.push_batch(batch), self._loop
+            )
+            try:
+                flush_future.result(timeout=5)
+            except Exception:
+                pass
+
+        # Now close the client session
+        close_future = asyncio.run_coroutine_threadsafe(
             self._client.close(), self._loop
         )
         try:
-            future.result(timeout=5)
+            close_future.result(timeout=5)
         except Exception:
             pass
+
         self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=2)
         super().close()
 
 
