@@ -1,5 +1,5 @@
 # Grafana Dashboard ConfigMap
-# Contains the isA Platform Logs dashboard JSON for auto-provisioning.
+# Contains isA dashboards JSON for auto-provisioning.
 # Referenced by grafana.yaml values: dashboardsConfigMaps.isa = grafana-isa-dashboards
 apiVersion: v1
 kind: ConfigMap
@@ -94,5 +94,162 @@ data:
       "timezone": "browser",
       "title": "isA Platform Logs",
       "uid": "isa-platform-logs",
+      "version": 1
+    }
+  isa-mcp-service.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Request Rate by Endpoint",
+          "description": "Requests per second grouped by endpoint",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum by (endpoint) (rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m]))", "legendFormat": "{{endpoint}}", "refId": "A"}]
+        },
+        {
+          "title": "Error Rate (%)",
+          "description": "Percentage of 5xx responses",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "fieldConfig": {"defaults": {"unit": "percentunit", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.01}, {"color": "red", "value": 0.05}]}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(mcp_requests_total{status_code=~\"5..\", environment=~\"$environment\", instance=~\"$instance\"}[5m])) / sum(rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m]))", "legendFormat": "Error Rate", "refId": "A"}]
+        },
+        {
+          "title": "Request Latency (P50 / P95 / P99)",
+          "description": "Request duration percentiles",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}}, "overrides": []},
+          "options": {"tooltip": {"mode": "multi"}},
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.50, sum by (le) (rate(mcp_request_duration_seconds_bucket{environment=~\"$environment\", instance=~\"$instance\"}[5m])))", "legendFormat": "P50", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(mcp_request_duration_seconds_bucket{environment=~\"$environment\", instance=~\"$instance\"}[5m])))", "legendFormat": "P95", "refId": "B"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.99, sum by (le) (rate(mcp_request_duration_seconds_bucket{environment=~\"$environment\", instance=~\"$instance\"}[5m])))", "legendFormat": "P99", "refId": "C"}
+          ],
+          "links": [{"title": "View traces in Tempo", "url": "/explore?orgId=1&left={\"datasource\":\"tempo\",\"queries\":[{\"refId\":\"A\",\"queryType\":\"traceqlSearch\",\"serviceName\":\"mcp\",\"minDuration\":\"${__value.text}\"}],\"range\":{\"from\":\"${__from}\",\"to\":\"${__to}\"}}"}]
+        },
+        {
+          "title": "Tool Execution Duration by Tool (P95)",
+          "description": "95th percentile tool execution time grouped by tool name",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 4,
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(mcp_tool_execution_duration_seconds_bucket{environment=~\"$environment\", instance=~\"$instance\"}[5m])))", "legendFormat": "{{tool}}", "refId": "A"}]
+        },
+        {
+          "title": "Top 10 Slowest Tools",
+          "description": "Tools ranked by P95 execution duration",
+          "type": "table",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "id": 5,
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": [{"matcher": {"id": "byName", "options": "tool"}, "properties": [{"id": "custom.width", "value": 300}]}]},
+          "options": {"sortBy": [{"displayName": "Value", "desc": true}]},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "topk(10, histogram_quantile(0.95, sum by (le, tool) (rate(mcp_tool_execution_duration_seconds_bucket{environment=~\"$environment\", instance=~\"$instance\"}[5m]))))", "format": "table", "instant": true, "refId": "A"}],
+          "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "le": true}, "renameByName": {"Value": "P95 Duration (s)", "tool": "Tool"}}}]
+        },
+        {
+          "title": "Circuit Breaker State by Service",
+          "description": "Circuit breaker state: 0=closed, 1=open, 2=half-open",
+          "type": "state-timeline",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "id": 6,
+          "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "CLOSED", "color": "green"}}, "type": "value"}, {"options": {"1": {"text": "OPEN", "color": "red"}}, "type": "value"}, {"options": {"2": {"text": "HALF-OPEN", "color": "yellow"}}, "type": "value"}]}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "mcp_circuit_breaker_state{environment=~\"$environment\", instance=~\"$instance\"}", "legendFormat": "{{service}}", "refId": "A"}]
+        },
+        {
+          "title": "Rate Limit Hits",
+          "description": "Rate limit rejections per second",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+          "id": 7,
+          "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "bars", "fillOpacity": 50, "lineWidth": 1}, "color": {"mode": "fixed", "fixedColor": "orange"}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(mcp_rate_limit_hits_total{environment=~\"$environment\", instance=~\"$instance\"}[5m]))", "legendFormat": "Rate Limit Hits", "refId": "A"}]
+        },
+        {
+          "title": "Cache Hit/Miss Ratio",
+          "description": "Proportion of cache hits vs total lookups",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+          "id": 8,
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) / (sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) + sum(mcp_cache_misses_total{environment=~\"$environment\", instance=~\"$instance\"}))", "legendFormat": "Hit Ratio", "refId": "A"}]
+        },
+        {
+          "title": "Active Background Shells",
+          "description": "Currently running background shell processes",
+          "type": "gauge",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 4, "x": 16, "y": 24},
+          "id": 9,
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 100}]}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(mcp_active_background_shells{environment=~\"$environment\", instance=~\"$instance\"})", "legendFormat": "Active Shells", "refId": "A"}]
+        },
+        {
+          "title": "Active Connections",
+          "description": "Current number of active client connections",
+          "type": "gauge",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 4, "x": 20, "y": 24},
+          "id": 10,
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 100}, {"color": "red", "value": 500}]}}, "overrides": []},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(mcp_active_connections{environment=~\"$environment\", instance=~\"$instance\"})", "legendFormat": "Connections", "refId": "A"}]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["isA", "MCP", "observability", "RED"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
+            "definition": "label_values(mcp_requests_total, environment)",
+            "includeAll": true,
+            "multi": true,
+            "name": "environment",
+            "options": [],
+            "query": {"query": "label_values(mcp_requests_total, environment)", "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
+            "definition": "label_values(mcp_requests_total, instance)",
+            "includeAll": true,
+            "multi": true,
+            "name": "instance",
+            "options": [],
+            "query": {"query": "label_values(mcp_requests_total, instance)", "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "isA MCP Service",
+      "uid": "isa-mcp-service",
       "version": 1
     }
