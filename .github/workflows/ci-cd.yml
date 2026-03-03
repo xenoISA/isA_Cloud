@@ -47,13 +47,10 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
+    # Go testing is handled by ci-golang.yaml (path-filtered, with proper go.mod detection)
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
@@ -61,19 +58,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-
-    - name: Install dependencies - Gateway (Go)
-      run: |
-        cd .
-        go mod download
-        go mod tidy
-
-    - name: Test Gateway
-      run: |
-        go test ./... -v
-      env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
-        REDIS_URL: redis://localhost:6379
 
     - name: Install dependencies - Python services
       run: |
@@ -136,6 +120,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # Go security (gosec, govulncheck) is handled by security-scan.yaml
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
@@ -144,12 +129,6 @@ jobs:
         format: 'table'
         exit-code: '1'
         ignore-unfixed: true
-
-    - name: Run Go security scan
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: './...'
-      if: always()
 
   # ============================================
   # Build and Push Images Job
