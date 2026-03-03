@@ -123,7 +123,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
           "id": 2,
           "fieldConfig": {"defaults": {"unit": "percentunit", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.01}, {"color": "red", "value": 0.05}]}}, "overrides": []},
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(mcp_requests_total{status_code=~\"5..\", environment=~\"$environment\", instance=~\"$instance\"}[5m])) / sum(rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m]))", "legendFormat": "Error Rate", "refId": "A"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(mcp_requests_total{status_code=~\"5..\", environment=~\"$environment\", instance=~\"$instance\"}[5m])) / (sum(rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) > 0)", "legendFormat": "Error Rate", "refId": "A"}]
         },
         {
           "title": "Request Latency (P50 / P95 / P99)",
@@ -191,7 +191,7 @@ data:
           "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
           "id": 8,
           "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.8}]}}, "overrides": []},
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) / (sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) + sum(mcp_cache_misses_total{environment=~\"$environment\", instance=~\"$instance\"}))", "legendFormat": "Hit Ratio", "refId": "A"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) / (sum(rate(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) + sum(rate(mcp_cache_misses_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])))", "legendFormat": "Hit Ratio", "refId": "A"}]
         },
         {
           "title": "Active Background Shells",

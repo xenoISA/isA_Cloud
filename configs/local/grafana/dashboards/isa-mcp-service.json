@@ -58,7 +58,7 @@
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editorMode": "code",
-          "expr": "sum(rate(mcp_requests_total{status_code=~\"5..\", environment=~\"$environment\", instance=~\"$instance\"}[5m])) / sum(rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m]))",
+          "expr": "sum(rate(mcp_requests_total{status_code=~\"5..\", environment=~\"$environment\", instance=~\"$instance\"}[5m])) / (sum(rate(mcp_requests_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) > 0)",
           "legendFormat": "Error Rate",
           "refId": "A"
         }
@@ -251,7 +251,7 @@
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editorMode": "code",
-          "expr": "sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) / (sum(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}) + sum(mcp_cache_misses_total{environment=~\"$environment\", instance=~\"$instance\"}))",
+          "expr": "sum(rate(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) / (sum(rate(mcp_cache_hits_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])) + sum(rate(mcp_cache_misses_total{environment=~\"$environment\", instance=~\"$instance\"}[5m])))",
           "legendFormat": "Hit Ratio",
           "refId": "A"
         }
