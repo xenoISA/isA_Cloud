@@ -33,13 +33,15 @@ podLabels:
   tier: infrastructure
   environment: local
 
-# Disable sign-up
+# Disable sign-up, enable unified alerting
 grafana.ini:
   users:
     allow_sign_up: false
   auth.anonymous:
     enabled: true
     org_role: Viewer
+  unified_alerting:
+    enabled: true
 
 # Auto-provision datasources (Loki, Prometheus, Tempo)
 datasources:
@@ -92,6 +94,193 @@ dashboardProviders:
 # Auto-provision dashboards via ConfigMap
 dashboardsConfigMaps:
   isa: grafana-isa-dashboards
+
+# Auto-provision alerting rules
+alerting:
+  mcp-alerts.yml:
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: MCP Service Alerts
+        folder: isA
+        interval: 1m
+        rules:
+          - uid: mcp-error-rate-warning
+            title: "MCP Error Rate > 5%"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'sum(rate(mcp_requests_total{status_code=~"5.."}[5m])) / (sum(rate(mcp_requests_total[5m])) > 0)'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0.05]}}], refId: C}
+            for: 5m
+            labels: {severity: warning, service: mcp}
+            annotations:
+              summary: "MCP error rate above 5% for 5 minutes"
+
+          - uid: mcp-error-rate-critical
+            title: "MCP Error Rate > 15%"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'sum(rate(mcp_requests_total{status_code=~"5.."}[5m])) / (sum(rate(mcp_requests_total[5m])) > 0)'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0.15]}}], refId: C}
+            for: 2m
+            labels: {severity: critical, service: mcp}
+            annotations:
+              summary: "MCP error rate above 15% for 2 minutes"
+
+          - uid: mcp-latency-warning
+            title: "MCP P95 Latency > 500ms"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'histogram_quantile(0.95, sum by (le) (rate(mcp_request_duration_seconds_bucket[5m])))'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0.5]}}], refId: C}
+            for: 5m
+            labels: {severity: warning, service: mcp}
+            annotations:
+              summary: "MCP P95 latency above 500ms for 5 minutes"
+
+          - uid: mcp-latency-critical
+            title: "MCP P95 Latency > 2s"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'histogram_quantile(0.95, sum by (le) (rate(mcp_request_duration_seconds_bucket[5m])))'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [2]}}], refId: C}
+            for: 2m
+            labels: {severity: critical, service: mcp}
+            annotations:
+              summary: "MCP P95 latency above 2s for 2 minutes"
+
+          - uid: mcp-circuit-breaker-open
+            title: "Circuit Breaker OPEN"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'mcp_circuit_breaker_state == 1'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0]}}], refId: C}
+            for: 1m
+            labels: {severity: critical, service: mcp}
+            annotations:
+              summary: "Circuit breaker OPEN for over 1 minute"
+
+          - uid: mcp-rate-limit-warning
+            title: "Rate Limit Hits > 100/min"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'sum by (user) (rate(mcp_rate_limit_hits_total[1m])) * 60'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: max, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [100]}}], refId: C}
+            for: 0s
+            labels: {severity: warning, service: mcp}
+            annotations:
+              summary: "Rate limit hits exceed 100/min for a user"
+
+          - uid: mcp-shell-pool-warning
+            title: "Background Shell Pool > 80% Capacity"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: prometheus
+                model:
+                  expr: 'sum(mcp_active_background_shells) / sum(mcp_background_shells_capacity) * 100'
+                  refId: A
+              - refId: B
+                relativeTimeRange: {from: 300, to: 0}
+                datasourceUid: __expr__
+                model: {type: reduce, expression: A, reducer: last, refId: B}
+              - refId: C
+                datasourceUid: __expr__
+                model: {type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [80]}}], refId: C}
+            for: 0s
+            labels: {severity: warning, service: mcp}
+            annotations:
+              summary: "Background shell pool above 80% capacity"
+
+  contact-points.yml:
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: grafana-default-email
+        receivers:
+          - uid: grafana-default-email
+            type: email
+            disableResolveMessage: false
+            settings:
+              addresses: ""
+              singleEmail: false
+
+  notification-policies.yml:
+    apiVersion: 1
+    policies:
+      - orgId: 1
+        receiver: grafana-default-email
+        group_by: ["grafana_folder", "alertname"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
 
 # Skip chown — PVC already has correct ownership from initial deploy
 initChownData:

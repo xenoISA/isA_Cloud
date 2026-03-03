@@ -1,0 +1,15 @@
+# Contact Points for Alert Notifications
+# Local dev: alerts appear in Grafana UI only (no external webhook).
+# Production: add a webhook receiver below.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: grafana-default-email
+    receivers:
+      - uid: grafana-default-email
+        type: email
+        disableResolveMessage: false
+        settings:
+          addresses: ""
+          singleEmail: false
