@@ -36,7 +36,8 @@ metrics_generator:
       cluster: local
   storage:
     path: /var/tempo/generator/wal
-    remote_write: []
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
 
 overrides:
   defaults:
