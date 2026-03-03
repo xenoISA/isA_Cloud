@@ -1,0 +1,88 @@
+# Tempo Helm Values - LOCAL (Single Binary)
+# Chart: grafana/tempo
+# Install: helm install tempo grafana/tempo -n isa-cloud-local -f local/values/tempo.yaml
+
+# Single-binary mode for local dev
+tempo:
+  reportingEnabled: false
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  # OTLP receivers for trace ingestion
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  # Metrics generator — derive RED metrics from traces
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://prometheus-server.isa-cloud-local.svc.cluster.local:80/api/v1/write"
+
+  # Retention
+  retention: 24h
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 5Gi
+
+# Pod labels
+podLabels:
+  tier: infrastructure
+  environment: local
+
+# Expose Tempo via NodePort for local access
+# OTLP gRPC: 31317 -> 4317
+# OTLP HTTP: 31318 -> 4318
+# Tempo HTTP API: 31320 -> 3200
+extraObjects:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: tempo-nodeport
+      namespace: isa-cloud-local
+      labels:
+        tier: infrastructure
+        environment: local
+    spec:
+      type: NodePort
+      ports:
+        - port: 4317
+          targetPort: 4317
+          nodePort: 31317
+          protocol: TCP
+          name: otlp-grpc
+        - port: 4318
+          targetPort: 4318
+          nodePort: 31318
+          protocol: TCP
+          name: otlp-http
+        - port: 3200
+          targetPort: 3200
+          nodePort: 31320
+          protocol: TCP
+          name: tempo-http
+      selector:
+        app.kubernetes.io/name: tempo
+
+# Disable test pod
+tempoQuery:
+  enabled: false

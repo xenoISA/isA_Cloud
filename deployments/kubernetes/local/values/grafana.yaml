@@ -41,17 +41,38 @@ grafana.ini:
     enabled: true
     org_role: Viewer
 
-# Auto-provision Loki datasource
+# Auto-provision datasources (Loki, Prometheus, Tempo)
 datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
       - name: Loki
         type: loki
+        uid: loki
         access: proxy
         url: http://loki-headless.isa-cloud-local.svc.cluster.local:3100
         isDefault: true
         editable: true
+
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus-server.isa-cloud-local.svc.cluster.local:80
+        editable: true
+        jsonData:
+          httpMethod: POST
+
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        access: proxy
+        url: http://tempo.isa-cloud-local.svc.cluster.local:3200
+        editable: true
+        jsonData:
+          httpMethod: GET
+          nodeGraph:
+            enabled: true
 
 # Auto-provision dashboard provider
 dashboardProviders:
@@ -71,6 +92,10 @@ dashboardProviders:
 # Auto-provision dashboards via ConfigMap
 dashboardsConfigMaps:
   isa: grafana-isa-dashboards
+
+# Skip chown — PVC already has correct ownership from initial deploy
+initChownData:
+  enabled: false
 
 # Disable test pod
 testFramework:

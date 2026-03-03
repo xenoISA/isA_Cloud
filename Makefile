@@ -118,6 +118,8 @@ ports: ## Display all service endpoints
 	@echo "  Mosquitto/MQTT:   localhost:1883"
 	@echo "  Qdrant:           http://localhost:6333"
 	@echo "  Loki:             http://localhost:3100"
+	@echo "  Prometheus:       http://localhost:9090"
+	@echo "  Tempo:            http://localhost:3200"
 	@echo "  Grafana:          http://localhost:3000"
 	@echo "  Consul:           http://localhost:8500"
 
@@ -130,6 +132,8 @@ health: ## Quick health check for all services
 	@echo -n "  MinIO:       " && (curl -sf http://localhost:9000/minio/health/live > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Qdrant:      " && (curl -sf http://localhost:6333/ > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Loki:        " && (curl -sf http://localhost:3100/ready > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Prometheus:  " && (curl -sf http://localhost:9090/-/healthy > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+	@echo -n "  Tempo:       " && (curl -sf http://localhost:3200/ready > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Grafana:     " && (curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Consul:      " && (curl -sf http://localhost:8500/v1/status/leader > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Mosquitto:   " && (docker compose -f $(COMPOSE_FILE) exec -T mosquitto mosquitto_sub -t '$$SYS/#' -C 1 -W 2 > /dev/null 2>&1 && echo "OK" || echo "DOWN")
