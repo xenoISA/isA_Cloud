@@ -39,7 +39,11 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           GITLEAKS_NOTIFY_USER_LIST: '@${{ github.actor }}'
+        # Org repos require GITLEAKS_LICENSE secret. Allow pipeline to
+        # continue if the secret is not configured yet.
+        continue-on-error: true
 
   # ═══════════════════════════════════════════════════════════
   # Python Security Scanning
@@ -94,33 +98,47 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check for Go module
+        id: check-go
+        run: |
+          if [ -f "go.mod" ]; then
+            echo "has_go=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_go=false" >> $GITHUB_OUTPUT
+            echo "No go.mod found at repo root — skipping Go security scan" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Set up Go
+        if: steps.check-go.outputs.has_go == 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache: true
 
       - name: Install security tools
+        if: steps.check-go.outputs.has_go == 'true'
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Run govulncheck (dependency vulnerabilities)
+        if: steps.check-go.outputs.has_go == 'true'
         run: |
-          echo "## 🔍 Running govulncheck" >> $GITHUB_STEP_SUMMARY
+          echo "## Running govulncheck" >> $GITHUB_STEP_SUMMARY
           govulncheck ./... 2>&1 | tee govulncheck-results.txt >> $GITHUB_STEP_SUMMARY || true
         continue-on-error: true
 
       - name: Run gosec (SAST)
+        if: steps.check-go.outputs.has_go == 'true'
         run: |
-          echo "## 🔍 Running gosec SAST" >> $GITHUB_STEP_SUMMARY
+          echo "## Running gosec SAST" >> $GITHUB_STEP_SUMMARY
           gosec -fmt json -out gosec-results.json ./... || true
           gosec ./... >> $GITHUB_STEP_SUMMARY || true
         continue-on-error: true
 
       - name: Upload security artifacts
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.check-go.outputs.has_go == 'true'
         with:
           name: go-security-results
           path: |
