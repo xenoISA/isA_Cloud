@@ -8,6 +8,7 @@ Provides helper functions to publish billing events to NATS message bus.
 
 import json
 import logging
+import asyncio
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from decimal import Decimal
 from datetime import datetime
@@ -96,14 +97,18 @@ class BillingEventPublisher:
     def close(self):
         """Close NATS connection"""
         if hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.nats_client.close())
+            except RuntimeError:
+                asyncio.run(self.nats_client.close())
 
     async def aclose(self):
         """Async close NATS connection"""
         if hasattr(self.nats_client, 'aclose'):
             await self.nats_client.aclose()
         elif hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+            await self.nats_client.close()
 
     def _serialize_event(self, event) -> bytes:
         """
@@ -178,7 +183,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "usage.recorded"}
@@ -249,7 +254,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "billing.calculated"}
@@ -311,7 +316,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "wallet.tokens.deducted"}
@@ -364,7 +369,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "wallet.tokens.insufficient"}
@@ -417,7 +422,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "billing.failed"}
@@ -442,7 +447,7 @@ async def publish_usage_event(
     usage_amount: Decimal,
     unit_type: str,
     nats_host: str = 'localhost',
-    nats_port: int = 50056,
+    nats_port: int = 4222,
     **kwargs
 ) -> bool:
     """

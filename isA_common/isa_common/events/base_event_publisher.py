@@ -8,6 +8,7 @@ Generic event publisher that can be extended for business-specific needs.
 
 import json
 import logging
+import asyncio
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from abc import ABC, abstractmethod
 
@@ -103,14 +104,18 @@ class BaseEventPublisher(ABC):
     def close(self):
         """Close NATS connection"""
         if hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.nats_client.close())
+            except RuntimeError:
+                asyncio.run(self.nats_client.close())
 
     async def aclose(self):
         """Async close NATS connection"""
         if hasattr(self.nats_client, 'aclose'):
             await self.nats_client.aclose()
         elif hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+            await self.nats_client.close()
 
     def _serialize_event(self, event: BaseEvent) -> bytes:
         """
@@ -157,7 +162,7 @@ class BaseEventPublisher(ABC):
             headers['event_type'] = event.event_type
 
             # Publish to NATS
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers=headers
@@ -200,7 +205,7 @@ class BaseEventPublisher(ABC):
             True if published successfully
         """
         try:
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers=headers

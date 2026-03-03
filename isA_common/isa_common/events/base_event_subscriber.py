@@ -252,7 +252,7 @@ class BaseEventSubscriber:
 
             logger.info(f"[{self.service_name}] Creating stream {stream_name} with subjects: {stream_subjects}")
 
-            stream_result = self.nats_client.create_stream(
+            stream_result = await self.nats_client.create_stream(
                 name=stream_name,
                 subjects=stream_subjects
             )
@@ -267,7 +267,7 @@ class BaseEventSubscriber:
 
         # Create JetStream consumer
         try:
-            result = self.nats_client.create_consumer(
+            result = await self.nats_client.create_consumer(
                 stream_name=stream_name,
                 consumer_name=consumer_name,
                 filter_subject=subject
@@ -367,7 +367,7 @@ class BaseEventSubscriber:
         while True:
             try:
                 # Pull batch of messages (non-blocking)
-                messages = self.nats_client.pull_messages(
+                messages = await self.nats_client.pull_messages(
                     stream_name=stream_name,
                     consumer_name=consumer_name,
                     batch_size=10
@@ -383,7 +383,7 @@ class BaseEventSubscriber:
 
                         # Acknowledge if processed successfully
                         if success:
-                            self.nats_client.ack_message(
+                            await self.nats_client.ack_message(
                                 stream_name=stream_name,
                                 consumer_name=consumer_name,
                                 sequence=msg['sequence']
@@ -609,7 +609,7 @@ class BaseEventSubscriber:
             dlq_bytes = json.dumps(dlq_data).encode('utf-8')
 
             # Publish to DLQ
-            self.nats_client.publish(dlq_subject, dlq_bytes)
+            await self.nats_client.publish(dlq_subject, dlq_bytes)
 
             logger.warning(
                 f"[{self.service_name}] Moved event to DLQ: {dlq_subject}"
