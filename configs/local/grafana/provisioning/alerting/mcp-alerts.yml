@@ -1,0 +1,320 @@
+# MCP Service Alert Rules
+# Provisioned via Grafana unified alerting file provisioning.
+# See: https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/file-provisioning/
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: MCP Service Alerts
+    folder: isA
+    interval: 1m
+    rules:
+      # ── Error Rate ──────────────────────────────────────
+      - uid: mcp-error-rate-warning
+        title: "MCP Error Rate > 5%"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                sum(rate(mcp_requests_total{status_code=~"5.."}[5m]))
+                / (sum(rate(mcp_requests_total[5m])) > 0)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]
+              refId: C
+        for: 5m
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "MCP error rate above 5% for 5 minutes"
+          description: "Error rate is {{ $values.B }}. Investigate 5xx responses."
+
+      - uid: mcp-error-rate-critical
+        title: "MCP Error Rate > 15%"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                sum(rate(mcp_requests_total{status_code=~"5.."}[5m]))
+                / (sum(rate(mcp_requests_total[5m])) > 0)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.15]
+              refId: C
+        for: 2m
+        labels:
+          severity: critical
+          service: mcp
+        annotations:
+          summary: "MCP error rate above 15% for 2 minutes"
+          description: "Error rate is {{ $values.B }}. Immediate attention required."
+
+      # ── Latency ─────────────────────────────────────────
+      - uid: mcp-latency-warning
+        title: "MCP P95 Latency > 500ms"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                histogram_quantile(0.95,
+                  sum by (le) (rate(mcp_request_duration_seconds_bucket[5m])))
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              refId: C
+        for: 5m
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "MCP P95 latency above 500ms for 5 minutes"
+          description: "P95 latency is {{ $values.B }}s. Check for slow endpoints or downstream issues."
+
+      - uid: mcp-latency-critical
+        title: "MCP P95 Latency > 2s"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                histogram_quantile(0.95,
+                  sum by (le) (rate(mcp_request_duration_seconds_bucket[5m])))
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+              refId: C
+        for: 2m
+        labels:
+          severity: critical
+          service: mcp
+        annotations:
+          summary: "MCP P95 latency above 2s for 2 minutes"
+          description: "P95 latency is {{ $values.B }}s. Service degradation — investigate immediately."
+
+      # ── Circuit Breaker ─────────────────────────────────
+      - uid: mcp-circuit-breaker-open
+        title: "Circuit Breaker OPEN"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: "mcp_circuit_breaker_state == 1"
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: C
+        for: 1m
+        labels:
+          severity: critical
+          service: mcp
+        annotations:
+          summary: "Circuit breaker OPEN for service {{ $labels.service }}"
+          description: "A downstream circuit breaker has been open for over 1 minute. Requests are being rejected."
+
+      # ── Rate Limiting ───────────────────────────────────
+      - uid: mcp-rate-limit-warning
+        title: "Rate Limit Hits > 100/min"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                sum by (user) (rate(mcp_rate_limit_hits_total[1m])) * 60
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: max
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [100]
+              refId: C
+        for: 0s
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "Rate limit hits exceed 100/min for a user"
+          description: "User {{ $labels.user }} is hitting rate limits at {{ $values.B }}/min."
+
+      # ── Background Shell Pool ───────────────────────────
+      - uid: mcp-shell-pool-warning
+        title: "Background Shell Pool > 80% Capacity"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: >-
+                sum(mcp_active_background_shells)
+                / sum(mcp_background_shells_capacity) * 100
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [80]
+              refId: C
+        for: 0s
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "Background shell pool above 80% capacity"
+          description: "Pool utilization is {{ $values.B }}%. Scale up or investigate stuck shells."

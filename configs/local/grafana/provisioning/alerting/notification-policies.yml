@@ -1,0 +1,12 @@
+# Notification Policies
+# Routes alerts to contact points based on labels.
+# Local dev: all alerts route to the default Grafana UI receiver.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: grafana-default-email
+    group_by: ["grafana_folder", "alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
