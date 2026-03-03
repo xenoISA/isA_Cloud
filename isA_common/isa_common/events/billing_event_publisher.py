@@ -8,7 +8,9 @@ Provides helper functions to publish billing events to NATS message bus.
 
 import json
 import logging
-from typing import Optional, Dict, Any, TYPE_CHECKING
+import asyncio
+import warnings
+from typing import Optional, Dict, Any
 from decimal import Decimal
 from datetime import datetime
 
@@ -22,9 +24,6 @@ from .billing_events import (
     get_nats_subject
 )
 
-if TYPE_CHECKING:
-    from ..consul_client import ConsulRegistry
-
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +32,7 @@ class BillingEventPublisher:
     Publishes billing events to NATS message bus.
 
     Usage:
-        publisher = BillingEventPublisher(nats_host='localhost', nats_port=50056)
+        publisher = BillingEventPublisher(nats_host='localhost', nats_port=4222)
 
         # Publish usage event
         await publisher.publish_usage(
@@ -51,59 +50,59 @@ class BillingEventPublisher:
         nats_port: Optional[int] = None,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
-        enable_compression: bool = False,
-        consul_registry: Optional['ConsulRegistry'] = None
     ):
         """
         Initialize event publisher.
 
         Args:
-            nats_host: NATS service host (optional, will use Consul discovery if not provided)
-            nats_port: NATS service gRPC port (optional, will use Consul discovery if not provided)
+            nats_host: NATS service host
+            nats_port: NATS service port (default: 4222)
             user_id: Default user ID for events
             organization_id: Default organization ID
-            enable_compression: Enable message compression
-            consul_registry: ConsulRegistry instance for service discovery (optional)
         """
         self.nats_client = NATSClient(
             host=nats_host,
             port=nats_port,
             user_id=user_id,
             organization_id=organization_id,
-            enable_compression=enable_compression,
-            consul_registry=consul_registry
         )
         self.default_user_id = user_id
         self.default_org_id = organization_id
-        self.consul_registry = consul_registry
-
-    def __enter__(self):
-        """Context manager entry"""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.close()
 
     async def __aenter__(self):
-        """Async context manager entry"""
+        """Async context manager entry."""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
+        """Async context manager exit."""
         await self.aclose()
 
-    def close(self):
-        """Close NATS connection"""
-        if hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
-
     async def aclose(self):
-        """Async close NATS connection"""
-        if hasattr(self.nats_client, 'aclose'):
-            await self.nats_client.aclose()
-        elif hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+        """Close NATS connection (async)."""
+        await self.nats_client.close()
+
+    def close(self):
+        """Close NATS connection (sync fallback).
+
+        Prefer ``aclose()`` or ``async with`` instead.
+        """
+        warnings.warn(
+            "Sync close() is deprecated — use 'await aclose()' or 'async with'.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            asyncio.get_running_loop()
+            logger.warning(
+                "BillingEventPublisher.close() called inside a running event loop; "
+                "connection close is best-effort. Use aclose() instead."
+            )
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(self.nats_client.close())
+            finally:
+                loop.close()
 
     def _serialize_event(self, event) -> bytes:
         """
@@ -178,7 +177,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "usage.recorded"}
@@ -249,7 +248,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "billing.calculated"}
@@ -311,7 +310,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "wallet.tokens.deducted"}
@@ -364,7 +363,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "wallet.tokens.insufficient"}
@@ -417,7 +416,7 @@ class BillingEventPublisher:
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers={"event_type": "billing.failed"}
@@ -442,7 +441,7 @@ async def publish_usage_event(
     usage_amount: Decimal,
     unit_type: str,
     nats_host: str = 'localhost',
-    nats_port: int = 50056,
+    nats_port: int = 4222,
     **kwargs
 ) -> bool:
     """

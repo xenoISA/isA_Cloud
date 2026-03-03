@@ -8,14 +8,13 @@ Generic event publisher that can be extended for business-specific needs.
 
 import json
 import logging
-from typing import Optional, Dict, Any, TYPE_CHECKING
+import asyncio
+import warnings
+from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 
 from ..nats_client import NATSClient
 from .base_event_models import BaseEvent
-
-if TYPE_CHECKING:
-    from ..consul_client import ConsulRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -46,34 +45,27 @@ class BaseEventPublisher(ABC):
         nats_port: Optional[int] = None,
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
-        enable_compression: bool = False,
         service_name: Optional[str] = None,
-        consul_registry: Optional['ConsulRegistry'] = None
     ):
         """
         Initialize event publisher.
 
         Args:
-            nats_host: NATS service host (optional, will use Consul discovery if not provided)
-            nats_port: NATS service gRPC port (optional, will use Consul discovery if not provided)
+            nats_host: NATS service host
+            nats_port: NATS service port (default: 4222)
             user_id: Default user ID for events
             organization_id: Default organization ID
-            enable_compression: Enable message compression
             service_name: Name of the service publishing events
-            consul_registry: ConsulRegistry instance for service discovery (optional)
         """
         self.nats_client = NATSClient(
             host=nats_host,
             port=nats_port,
             user_id=user_id or service_name,
             organization_id=organization_id,
-            enable_compression=enable_compression,
-            consul_registry=consul_registry
         )
         self.default_user_id = user_id
         self.default_org_id = organization_id
         self._service_name = service_name
-        self.consul_registry = consul_registry
 
     @abstractmethod
     def service_name(self) -> str:
@@ -84,33 +76,46 @@ class BaseEventPublisher(ABC):
         """
         pass
 
-    def __enter__(self):
-        """Context manager entry"""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.close()
-
     async def __aenter__(self):
-        """Async context manager entry"""
+        """Async context manager entry."""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
+        """Async context manager exit."""
         await self.aclose()
 
-    def close(self):
-        """Close NATS connection"""
-        if hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
-
     async def aclose(self):
-        """Async close NATS connection"""
-        if hasattr(self.nats_client, 'aclose'):
-            await self.nats_client.aclose()
-        elif hasattr(self.nats_client, 'close'):
-            self.nats_client.close()
+        """Close NATS connection (async)."""
+        await self.nats_client.close()
+
+    def close(self):
+        """Close NATS connection (sync fallback).
+
+        Prefer ``aclose()`` or ``async with`` instead.  This method
+        creates a new event loop when none is running, which is safe
+        for cleanup in synchronous teardown paths.  If a loop *is*
+        already running, the close is scheduled as a task that will
+        execute before the loop ends, but cannot be awaited here.
+        """
+        warnings.warn(
+            "Sync close() is deprecated — use 'await aclose()' or 'async with'.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            asyncio.get_running_loop()
+            # We're inside a running loop — cannot block.  Best-effort.
+            logger.warning(
+                "BaseEventPublisher.close() called inside a running event loop; "
+                "connection close is best-effort. Use aclose() instead."
+            )
+        except RuntimeError:
+            # No running loop — safe to create one and block.
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(self.nats_client.close())
+            finally:
+                loop.close()
 
     def _serialize_event(self, event: BaseEvent) -> bytes:
         """
@@ -157,7 +162,7 @@ class BaseEventPublisher(ABC):
             headers['event_type'] = event.event_type
 
             # Publish to NATS
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers=headers
@@ -200,7 +205,7 @@ class BaseEventPublisher(ABC):
             True if published successfully
         """
         try:
-            result = self.nats_client.publish(
+            result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
                 headers=headers
