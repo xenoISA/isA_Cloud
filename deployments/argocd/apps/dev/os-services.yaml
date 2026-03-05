@@ -16,7 +16,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/isA_Cloud.git
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
     targetRevision: develop
     path: deployments/charts/isa-service
     helm:
@@ -47,7 +47,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/isA_Cloud.git
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
     targetRevision: develop
     path: deployments/charts/isa-service
     helm:
@@ -78,7 +78,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/isA_Cloud.git
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
     targetRevision: develop
     path: deployments/charts/isa-service
     helm:
@@ -109,7 +109,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/isA_Cloud.git
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
     targetRevision: develop
     path: deployments/charts/isa-service
     helm:

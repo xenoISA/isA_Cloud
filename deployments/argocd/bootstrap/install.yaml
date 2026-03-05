@@ -28,7 +28,7 @@ data:
 
   # Git 仓库配置
   repositories: |
-    - url: https://github.com/your-org/isA_Cloud.git
+    - url: https://github.com/xenoISA/isA_Cloud.git
       name: isa-cloud-gitops
       type: git
 

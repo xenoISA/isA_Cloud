@@ -19,7 +19,7 @@ spec:
 
   # App-of-apps source
   source:
-    repoURL: https://github.com/your-org/isA_Cloud.git
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
     targetRevision: develop
     path: deployments/argocd/apps/dev
 
