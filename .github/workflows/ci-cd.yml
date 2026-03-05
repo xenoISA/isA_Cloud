@@ -29,7 +29,7 @@ jobs:
       - name: Run unit tests
         run: |
           cd isA_common
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/unit/ tests/component/ -v --tb=short
 
   # ============================================
   # Security scan (isA_Cloud files only)

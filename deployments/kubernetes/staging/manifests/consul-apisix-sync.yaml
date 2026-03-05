@@ -144,12 +144,12 @@ data:
                         \"active\": {\
                             \"http_path\": \"/health\",\
                             \"timeout\": 3,\
-                            \"healthy\": { \"interval\": 5, \"successes\": 2 },\
-                            \"unhealthy\": { \"interval\": 3, \"http_failures\": 3 }\
+                            \"healthy\": { \"interval\": 5, \"successes\": 3 },\
+                            \"unhealthy\": { \"interval\": 2, \"http_failures\": 2 }\
                         },\
                         \"passive\": {\
                             \"healthy\": { \"http_statuses\": [200, 201, 204], \"successes\": 3 },\
-                            \"unhealthy\": { \"http_statuses\": [500, 502, 503], \"http_failures\": 3, \"timeouts\": 3 }\
+                            \"unhealthy\": { \"http_statuses\": [500, 502, 503, 504], \"http_failures\": 3, \"timeouts\": 3 }\
                         }\
                     }\
                 }\
@@ -213,6 +213,8 @@ data:
                     \"discovery_type\": \"consul\",\
                     \"scheme\": \"http\",\
                     \"pass_host\": \"pass\",\
+                    \"retries\": 2,\
+                    \"retry_timeout\": 6,\
                     \"timeout\": {\
                         \"connect\": 6,\
                         \"send\": 6,\
@@ -222,12 +224,12 @@ data:
                         \"active\": {\
                             \"http_path\": \"/health\",\
                             \"timeout\": 3,\
-                            \"healthy\": { \"interval\": 5, \"successes\": 2 },\
-                            \"unhealthy\": { \"interval\": 3, \"http_failures\": 3 }\
+                            \"healthy\": { \"interval\": 5, \"successes\": 3 },\
+                            \"unhealthy\": { \"interval\": 2, \"http_failures\": 2 }\
                         },\
                         \"passive\": {\
                             \"healthy\": { \"http_statuses\": [200, 201, 204], \"successes\": 3 },\
-                            \"unhealthy\": { \"http_statuses\": [500, 502, 503], \"http_failures\": 3, \"timeouts\": 3 }\
+                            \"unhealthy\": { \"http_statuses\": [500, 502, 503, 504], \"http_failures\": 3, \"timeouts\": 3 }\
                         }\
                     }\
                 }\

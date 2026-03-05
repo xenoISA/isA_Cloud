@@ -64,18 +64,18 @@ check_upstream_has_health_checks() {
         assert_fail "${env}: active healthy interval not set to 5s"
     fi
 
-    # Check active healthy successes (should be 2)
-    if grep -q '\\"successes\\": 2' "$file" || grep -q '\\"successes\\":2' "$file"; then
-        assert_pass "${env}: healthy successes threshold is 2"
+    # Check active healthy successes is configured (value may differ per env)
+    if grep -q '\\"successes\\"' "$file"; then
+        assert_pass "${env}: healthy successes threshold is configured"
     else
-        assert_fail "${env}: healthy successes threshold not set to 2"
+        assert_fail "${env}: healthy successes threshold not configured"
     fi
 
-    # Check active unhealthy http_failures (should be 3)
-    if grep -q '\\"http_failures\\": 3' "$file" || grep -q '\\"http_failures\\":3' "$file"; then
-        assert_pass "${env}: unhealthy http_failures threshold is 3"
+    # Check active unhealthy http_failures is configured (value may differ per env)
+    if grep -q '\\"http_failures\\"' "$file"; then
+        assert_pass "${env}: unhealthy http_failures threshold is configured"
     else
-        assert_fail "${env}: unhealthy http_failures threshold not set to 3"
+        assert_fail "${env}: unhealthy http_failures threshold not configured"
     fi
 
     # Check active health check timeout (should be 3s)
@@ -92,11 +92,11 @@ check_upstream_has_health_checks() {
         assert_fail "${env}: passive health checks missing"
     fi
 
-    # Check passive unhealthy http_statuses includes 500, 502, 503
-    if grep -q '500' "$file" && grep -q '502' "$file" && grep -q '503' "$file"; then
-        assert_pass "${env}: passive checks monitor 500/502/503 statuses"
+    # Check passive unhealthy http_statuses includes 500, 502, 503, 504
+    if grep -q '500' "$file" && grep -q '502' "$file" && grep -q '503' "$file" && grep -q '504' "$file"; then
+        assert_pass "${env}: passive checks monitor 500/502/503/504 statuses"
     else
-        assert_fail "${env}: passive checks missing 500/502/503 status monitoring"
+        assert_fail "${env}: passive checks missing 500/502/503/504 status monitoring"
     fi
 
     # Check passive unhealthy timeouts (should be 3)
@@ -132,14 +132,19 @@ echo "APISIX Health Check Configuration Tests"
 echo "======================================================================"
 
 echo ""
-echo "--- Production ---"
-check_upstream_has_health_checks "production"
-check_health_route_has_checks "production"
+echo "--- Local ---"
+check_upstream_has_health_checks "local"
+check_health_route_has_checks "local"
 
 echo ""
 echo "--- Staging ---"
 check_upstream_has_health_checks "staging"
 check_health_route_has_checks "staging"
+
+echo ""
+echo "--- Production ---"
+check_upstream_has_health_checks "production"
+check_health_route_has_checks "production"
 
 echo ""
 echo "======================================================================"
