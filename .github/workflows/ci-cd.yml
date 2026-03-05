@@ -1,377 +1,79 @@
-name: isA Platform CI/CD
+name: isA Cloud CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
-
-env:
-  AWS_REGION: us-east-1
-  ECS_CLUSTER: isa-platform-cluster
-  ECR_REPOSITORY: isa-platform
+    branches: [main]
 
 jobs:
   # ============================================
-  # Test Job - Run tests for all services
+  # Test isa_common Python library
   # ============================================
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # Go testing is handled by ci-golang.yaml (path-filtered, with proper go.mod detection)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Install isa_common with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./isA_common[dev]"
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
+      - name: Lint with flake8
+        run: |
+          cd isA_common
+          flake8 isa_common/ --max-line-length=100 --exclude=__pycache__
 
-    - name: Install dependencies - Python services
-      run: |
-        python -m pip install --upgrade pip
-        # Install common dependencies for all Python services
-        pip install pytest pytest-asyncio httpx fastapi uvicorn
-
-    # Test each service individually
-    - name: Test MCP Service
-      run: |
-        if [ -d "../isA_MCP" ]; then
-          cd ../isA_MCP
-          pip install -r requirements.txt
-          python -m pytest tests/ -v || echo "MCP tests not found"
-        fi
-      env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
-
-    - name: Test Model Service  
-      run: |
-        if [ -d "../isA_Model" ]; then
-          cd ../isA_Model
-          pip install -e .
-          python -m pytest tests/ -v || echo "Model tests not found"
-        fi
-
-    - name: Test Agent Service
-      run: |
-        if [ -d "../isA_Agent" ]; then
-          cd ../isA_Agent
-          pip install -r requirements.txt
-          python -m pytest tests/ -v || echo "Agent tests not found"
-        fi
-
-    - name: Test User Services
-      run: |
-        if [ -d "../isA_user" ]; then
-          cd ../isA_user
-          pip install -r requirements.txt
-          python -m pytest tests/ -v || echo "User service tests not found"
-        fi
-      env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db
-        REDIS_URL: redis://localhost:6379
-
-    - name: Test Blockchain Services
-      run: |
-        if [ -d "../isA_Chain" ]; then
-          cd ../isA_Chain
-          npm ci
-          npm test || echo "Blockchain tests not found"
-        fi
+      - name: Run unit tests
+        run: |
+          cd isA_common
+          python -m pytest tests/ -v --tb=short
 
   # ============================================
-  # Security Scan Job
+  # Security scan (isA_Cloud files only)
   # ============================================
   security:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # Go security (gosec, govulncheck) is handled by security-scan.yaml
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'table'
-        exit-code: '1'
-        ignore-unfixed: true
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
 
   # ============================================
-  # Build and Push Images Job
+  # Validate Kubernetes manifests
   # ============================================
-  build:
-    needs: [test, security]
+  validate-manifests:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Lint Helm chart
+        run: |
+          helm lint deployments/charts/isa-service/
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Set environment variables
-      run: |
-        echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
-        echo "IMAGE_TAG=${GITHUB_SHA::8}" >> $GITHUB_ENV
-        echo "ENVIRONMENT=${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}" >> $GITHUB_ENV
-
-    # Build and push Gateway service
-    - name: Build and push Gateway image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./deployments/dockerfiles/Dockerfile.gateway
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-gateway:latest
-          ${{ env.ECR_REGISTRY }}/isa-gateway:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    # Build and push MCP service
-    - name: Build and push MCP image
-      uses: docker/build-push-action@v5
-      with:
-        context: ../isA_MCP
-        file: ./deployments/dockerfiles/Dockerfile.mcp
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-mcp:latest
-          ${{ env.ECR_REGISTRY }}/isa-mcp:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    # Build and push Model service
-    - name: Build and push Model image
-      uses: docker/build-push-action@v5
-      with:
-        context: ../isA_Model
-        file: ./deployments/dockerfiles/Dockerfile.model
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-model:latest
-          ${{ env.ECR_REGISTRY }}/isa-model:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    # Build and push Agent service
-    - name: Build and push Agent image
-      uses: docker/build-push-action@v5
-      with:
-        context: ../isA_Agent
-        file: ./deployments/dockerfiles/Dockerfile.agent
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-agent:latest
-          ${{ env.ECR_REGISTRY }}/isa-agent:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    # Build and push User service base
-    - name: Build and push User service base image
-      uses: docker/build-push-action@v5
-      with:
-        context: ../isA_user
-        file: ./deployments/dockerfiles/Dockerfile.user-base
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-user-base:latest
-          ${{ env.ECR_REGISTRY }}/isa-user-base:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    # Build and push Blockchain service
-    - name: Build and push Blockchain image
-      uses: docker/build-push-action@v5
-      with:
-        context: ../isA_Chain
-        file: ./deployments/dockerfiles/Dockerfile.blockchain
-        push: true
-        tags: |
-          ${{ env.ECR_REGISTRY }}/isa-blockchain:latest
-          ${{ env.ECR_REGISTRY }}/isa-blockchain:${{ env.IMAGE_TAG }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-  # ============================================
-  # Deploy to Staging
-  # ============================================
-  deploy-staging:
-    needs: [build]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/develop'
-    environment: staging
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Deploy to ECS Staging
-      run: |
-        # Update ECS services with new images
-        aws ecs update-service \
-          --cluster ${{ env.ECS_CLUSTER }}-staging \
-          --service isa-gateway-staging \
-          --force-new-deployment
-
-        aws ecs update-service \
-          --cluster ${{ env.ECS_CLUSTER }}-staging \
-          --service isa-mcp-staging \
-          --force-new-deployment
-
-        # Add other services...
-
-    - name: Wait for deployment to complete
-      run: |
-        aws ecs wait services-stable \
-          --cluster ${{ env.ECS_CLUSTER }}-staging \
-          --services isa-gateway-staging isa-mcp-staging
-
-    - name: Run health checks
-      run: |
-        # Wait for ALB to be healthy
-        sleep 60
-        
-        # Check service health
-        curl -f ${{ secrets.STAGING_GATEWAY_URL }}/health
-        curl -f ${{ secrets.STAGING_MCP_URL }}/health
-
-  # ============================================
-  # Deploy to Production
-  # ============================================
-  deploy-production:
-    needs: [build]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    environment: production
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Deploy to ECS Production
-      run: |
-        # Blue-Green deployment strategy
-        aws ecs update-service \
-          --cluster ${{ env.ECS_CLUSTER }}-production \
-          --service isa-gateway-production \
-          --force-new-deployment \
-          --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100"
-
-        aws ecs update-service \
-          --cluster ${{ env.ECS_CLUSTER }}-production \
-          --service isa-mcp-production \
-          --force-new-deployment \
-          --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100"
-
-    - name: Wait for production deployment
-      run: |
-        aws ecs wait services-stable \
-          --cluster ${{ env.ECS_CLUSTER }}-production \
-          --services isa-gateway-production isa-mcp-production
-
-    - name: Run production health checks
-      run: |
-        sleep 60
-        curl -f ${{ secrets.PRODUCTION_GATEWAY_URL }}/health
-        curl -f ${{ secrets.PRODUCTION_MCP_URL }}/health
-
-    - name: Notify deployment success
-      uses: 8398a7/action-slack@v3
-      with:
-        status: success
-        text: 'isA Platform deployed to production successfully!'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      if: always()
-
-  # ============================================
-  # Rollback Job (Manual trigger)
-  # ============================================
-  rollback:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    environment: production
-    
-    steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Rollback ECS services
-      run: |
-        # Get previous task definition
-        TASK_DEF=$(aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }}-production --services isa-gateway-production --query 'services[0].taskDefinition' --output text)
-        PREVIOUS_REVISION=$((${TASK_DEF##*:} - 1))
-        
-        # Update service to previous revision
-        aws ecs update-service \
-          --cluster ${{ env.ECS_CLUSTER }}-production \
-          --service isa-gateway-production \
-          --task-definition "isa-gateway-production:$PREVIOUS_REVISION"
+      - name: Validate Kubernetes YAML
+        run: |
+          # Check all YAML files in kubernetes/ are valid
+          find deployments/kubernetes -name '*.yaml' -not -path '*/_legacy/*' | while read -r file; do
+            echo "Validating: $file"
+            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+          done
