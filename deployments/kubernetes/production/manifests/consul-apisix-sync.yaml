@@ -128,6 +128,8 @@ data:
                     \"discovery_type\": \"consul\",\
                     \"scheme\": \"http\",\
                     \"pass_host\": \"pass\",\
+                    \"retries\": 2,\
+                    \"retry_timeout\": 6,\
                     \"timeout\": {\
                         \"connect\": 6,\
                         \"send\": 6,\
@@ -137,6 +139,18 @@ data:
                         \"size\": 320,\
                         \"idle_timeout\": 60,\
                         \"requests\": 1000\
+                    },\
+                    \"checks\": {\
+                        \"active\": {\
+                            \"http_path\": \"/health\",\
+                            \"timeout\": 3,\
+                            \"healthy\": { \"interval\": 5, \"successes\": 2 },\
+                            \"unhealthy\": { \"interval\": 3, \"http_failures\": 3 }\
+                        },\
+                        \"passive\": {\
+                            \"healthy\": { \"http_statuses\": [200, 201, 204], \"successes\": 3 },\
+                            \"unhealthy\": { \"http_statuses\": [500, 502, 503], \"http_failures\": 3, \"timeouts\": 3 }\
+                        }\
                     }\
                 }\
             }")
@@ -203,6 +217,18 @@ data:
                         \"connect\": 6,\
                         \"send\": 6,\
                         \"read\": 10\
+                    },\
+                    \"checks\": {\
+                        \"active\": {\
+                            \"http_path\": \"/health\",\
+                            \"timeout\": 3,\
+                            \"healthy\": { \"interval\": 5, \"successes\": 2 },\
+                            \"unhealthy\": { \"interval\": 3, \"http_failures\": 3 }\
+                        },\
+                        \"passive\": {\
+                            \"healthy\": { \"http_statuses\": [200, 201, 204], \"successes\": 3 },\
+                            \"unhealthy\": { \"http_statuses\": [500, 502, 503], \"http_failures\": 3, \"timeouts\": 3 }\
+                        }\
                     }\
                 }\
             }")
