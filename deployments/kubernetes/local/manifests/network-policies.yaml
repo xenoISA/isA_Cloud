@@ -315,6 +315,8 @@ spec:
         - protocol: TCP
           port: 8080
         - protocol: TCP
+          port: 8081
+        - protocol: TCP
           port: 9090
         # gRPC ports range 50051-50063
         - protocol: TCP
@@ -471,6 +473,8 @@ spec:
           port: 443
         - protocol: TCP
           port: 8080
+        - protocol: TCP
+          port: 8081
         - protocol: TCP
           port: 9090
         - protocol: TCP
