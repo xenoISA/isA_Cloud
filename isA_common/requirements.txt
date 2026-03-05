@@ -21,6 +21,6 @@ aioboto3==12.3.0
 aiofiles==23.2.1
 redis==5.0.3
 nats-py==2.7.2
-qdrant-client==1.8.2
+qdrant-client==1.9.2
 aiomqtt==2.0.0
 duckdb==0.10.1
