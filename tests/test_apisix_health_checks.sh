@@ -6,7 +6,7 @@
 # - Active health checks present in main route upstream
 # - Passive health checks present in main route upstream
 # - Health check parameters match requirements
-# - Both production and staging environments configured
+# - All environments configured (local, staging, production)
 
 set -e
 
@@ -30,8 +30,6 @@ assert_fail() {
     TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
-# Extract the upstream JSON block from the sync script's create_or_update_route function
-# We look for the -d payload and extract the upstream object
 check_upstream_has_health_checks() {
     local env=$1
     local file="${BASE_DIR}/deployments/kubernetes/${env}/manifests/consul-apisix-sync.yaml"
@@ -41,65 +39,57 @@ check_upstream_has_health_checks() {
         return
     fi
 
-    # The sync script embeds JSON with escaped quotes (\"key\"), so match accordingly
-    # Check that the main route upstream contains "checks" config
     if grep -q '\\"checks\\"' "$file"; then
-        assert_pass "${env}: upstream contains 'checks' configuration"
+        assert_pass "${env}: upstream contains checks configuration"
     else
-        assert_fail "${env}: upstream missing 'checks' configuration"
+        assert_fail "${env}: upstream missing checks configuration"
         return
     fi
 
-    # Check active health check path
     if grep -q '\\"http_path\\"' "$file" && grep -q '/health' "$file"; then
         assert_pass "${env}: active health check polls /health"
     else
         assert_fail "${env}: active health check missing /health path"
     fi
 
-    # Check active healthy interval (should be 5s)
     if grep -q '\\"interval\\": 5' "$file" || grep -q '\\"interval\\":5' "$file"; then
         assert_pass "${env}: active healthy interval is 5s"
     else
         assert_fail "${env}: active healthy interval not set to 5s"
     fi
 
-    # Check active healthy successes is configured (value may differ per env)
-    if grep -q '\\"successes\\"' "$file"; then
-        assert_pass "${env}: healthy successes threshold is configured"
+    # AC: healthy after 3 successes
+    if grep -q '\\"successes\\": 3' "$file" || grep -q '\\"successes\\":3' "$file"; then
+        assert_pass "${env}: healthy successes threshold is 3"
     else
-        assert_fail "${env}: healthy successes threshold not configured"
+        assert_fail "${env}: healthy successes threshold not set to 3"
     fi
 
-    # Check active unhealthy http_failures is configured (value may differ per env)
-    if grep -q '\\"http_failures\\"' "$file"; then
-        assert_pass "${env}: unhealthy http_failures threshold is configured"
+    # AC: unhealthy after 2 failures
+    if grep -q '\\"http_failures\\": 2' "$file" || grep -q '\\"http_failures\\":2' "$file"; then
+        assert_pass "${env}: unhealthy http_failures threshold is 2"
     else
-        assert_fail "${env}: unhealthy http_failures threshold not configured"
+        assert_fail "${env}: unhealthy http_failures threshold not set to 2"
     fi
 
-    # Check active health check timeout (should be 3s)
     if grep -q '\\"timeout\\": 3' "$file" || grep -q '\\"timeout\\":3' "$file"; then
         assert_pass "${env}: active health check timeout is 3s"
     else
         assert_fail "${env}: active health check timeout not set to 3s"
     fi
 
-    # Check passive health checks exist
     if grep -q '\\"passive\\"' "$file"; then
         assert_pass "${env}: passive health checks configured"
     else
         assert_fail "${env}: passive health checks missing"
     fi
 
-    # Check passive unhealthy http_statuses includes 500, 502, 503, 504
     if grep -q '500' "$file" && grep -q '502' "$file" && grep -q '503' "$file" && grep -q '504' "$file"; then
         assert_pass "${env}: passive checks monitor 500/502/503/504 statuses"
     else
         assert_fail "${env}: passive checks missing 500/502/503/504 status monitoring"
     fi
 
-    # Check passive unhealthy timeouts (should be 3)
     if grep -q '\\"timeouts\\": 3' "$file" || grep -q '\\"timeouts\\":3' "$file"; then
         assert_pass "${env}: passive unhealthy timeouts threshold is 3"
     else
@@ -107,7 +97,6 @@ check_upstream_has_health_checks() {
     fi
 }
 
-# Check that health route upstream also has checks
 check_health_route_has_checks() {
     local env=$1
     local file="${BASE_DIR}/deployments/kubernetes/${env}/manifests/consul-apisix-sync.yaml"
@@ -116,7 +105,6 @@ check_health_route_has_checks() {
         return
     fi
 
-    # Count occurrences of "checks" — should appear in both route functions
     local checks_count
     checks_count=$(grep -c '\\"checks\\"' "$file" || true)
 
