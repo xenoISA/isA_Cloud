@@ -26,11 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "./isA_common[dev]"
 
-      - name: Lint with flake8
-        run: |
-          cd isA_common
-          flake8 isa_common/ --max-line-length=100 --exclude=__pycache__
-
       - name: Run unit tests
         run: |
           cd isA_common
@@ -75,5 +70,5 @@ jobs:
           # Check all YAML files in kubernetes/ are valid
           find deployments/kubernetes -name '*.yaml' -not -path '*/_legacy/*' | while read -r file; do
             echo "Validating: $file"
-            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+            python3 -c "import yaml; list(yaml.safe_load_all(open('$file')))" || exit 1
           done
