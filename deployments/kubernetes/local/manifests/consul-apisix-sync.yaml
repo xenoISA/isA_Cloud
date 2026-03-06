@@ -213,6 +213,8 @@ data:
                     \"discovery_type\": \"consul\",\
                     \"scheme\": \"http\",\
                     \"pass_host\": \"pass\",\
+                    \"retries\": 2,\
+                    \"retry_timeout\": 6,\
                     \"timeout\": {\
                         \"connect\": 6,\
                         \"send\": 6,\
