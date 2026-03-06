@@ -199,12 +199,12 @@ kubectl exec -n isa-cloud-production consul-server-0 -- consul operator raft lis
 # Check routes
 kubectl exec -n isa-cloud-production <apisix-pod> -- \
   curl -s http://localhost:9180/apisix/admin/routes \
-  -H "X-API-KEY: edd1c9f034335f136f87ad84b625c8f1"
+  -H "X-API-KEY: $(kubectl get secret apisix-admin-key -n isa-cloud-production -o jsonpath='{.data.admin-key}' | base64 -d)"
 
 # Check upstreams
 kubectl exec -n isa-cloud-production <apisix-pod> -- \
   curl -s http://localhost:9180/apisix/admin/upstreams \
-  -H "X-API-KEY: edd1c9f034335f136f87ad84b625c8f1"
+  -H "X-API-KEY: $(kubectl get secret apisix-admin-key -n isa-cloud-production -o jsonpath='{.data.admin-key}' | base64 -d)"
 ```
 
 ## Emergency Procedures

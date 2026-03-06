@@ -25,7 +25,7 @@ data:
     # Configuration
     CONSUL_URL="${CONSUL_URL:-http://consul-ui.isa-cloud-production.svc.cluster.local}"
     APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-production.svc.cluster.local:9180}"
-    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set via K8s Secret}"
 
     # Functions
     print_success() { echo -e "${GREEN}OK  $1${NC}"; }
@@ -380,7 +380,10 @@ spec:
                 - name: APISIX_ADMIN_URL
                   value: "http://apisix-admin.isa-cloud-production.svc.cluster.local:9180"
                 - name: APISIX_ADMIN_KEY
-                  value: "edd1c9f034335f136f87ad84b625c8f1"
+                  valueFrom:
+                    secretKeyRef:
+                      name: apisix-admin-key
+                      key: admin-key
                 # SECURITY: Configure allowed CORS origins (comma-separated)
                 # WARNING: Never use '*' in production with credentials
                 - name: CORS_ALLOWED_ORIGINS

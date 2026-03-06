@@ -175,7 +175,7 @@ check_helm_release "apisix"
 apisix_pod=$(kubectl get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=apisix" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [ -n "$apisix_pod" ]; then
     route_count=$(kubectl exec -n "$NAMESPACE" "$apisix_pod" -- \
-        curl -s http://localhost:9180/apisix/admin/routes -H "X-API-KEY: edd1c9f034335f136f87ad84b625c8f1" 2>/dev/null | \
+        curl -s http://localhost:9180/apisix/admin/routes -H "X-API-KEY: $(kubectl get secret apisix-admin-key -n $NAMESPACE -o jsonpath='{.data.admin-key}' | base64 -d)" 2>/dev/null | \
         grep -o '"total":[0-9]*' | cut -d: -f2 || echo "0")
     echo -e "     ${CYAN}Routes: ${route_count:-0}${NC}"
 fi
