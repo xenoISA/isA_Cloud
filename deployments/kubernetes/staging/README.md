@@ -151,7 +151,7 @@ kubectl logs -n isa-cloud-staging etcd-0
 # Check APISIX routes
 kubectl exec -n isa-cloud-staging <apisix-pod> -- \
   curl -s http://localhost:9180/apisix/admin/routes \
-  -H "X-API-KEY: edd1c9f034335f136f87ad84b625c8f1"
+  -H "X-API-KEY: $(kubectl get secret apisix-admin-key -n isa-cloud-staging -o jsonpath='{.data.admin-key}' | base64 -d)"
 
 # Check APISIX logs
 kubectl logs -n isa-cloud-staging -l app.kubernetes.io/name=apisix
