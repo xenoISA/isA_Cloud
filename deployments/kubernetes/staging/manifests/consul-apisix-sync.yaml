@@ -111,6 +111,24 @@ data:
             print_info "  Added JWT auth requirement"
         fi
 
+        # Add circuit breaker for model_service to prevent cascading failures
+        if [[ "$service_name" == "model_service" ]]; then
+            plugins=$(echo "$plugins" | jq '. + {
+                "api-breaker": {
+                    "break_response_code": 502,
+                    "max_breaker_sec": 15,
+                    "unhealthy": {
+                        "http_statuses": [500, 502, 503, 504],
+                        "failures": 3
+                    },
+                    "healthy": {
+                        "successes": 2
+                    }
+                }
+            }')
+            print_info "  Added api-breaker circuit breaker"
+        fi
+
         # Create/Update route with uris array (supports both root and wildcard)
         local response=$(curl -s -w "\n%{http_code}" -X PUT \
             "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
