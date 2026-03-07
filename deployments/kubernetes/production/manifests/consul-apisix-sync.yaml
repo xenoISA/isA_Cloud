@@ -26,6 +26,7 @@ data:
     CONSUL_URL="${CONSUL_URL:-http://consul-ui.isa-cloud-production.svc.cluster.local}"
     APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-production.svc.cluster.local:9180}"
     ADMIN_KEY="${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set via K8s Secret}"
+    REDIS_HOST="${REDIS_HOST:-redis-master.isa-cloud-production.svc.cluster.local}"
 
     # Functions
     print_success() { echo -e "${GREEN}OK  $1${NC}"; }
@@ -74,6 +75,7 @@ data:
         local plugins=$(jq -n \
             --arg rate_limit "$rate_limit" \
             --arg cors_origins "$cors_origins" \
+            --arg redis_host "$REDIS_HOST" \
             '{
                 "cors": {
                     "allow_origins": $cors_origins,
@@ -88,7 +90,10 @@ data:
                     "time_window": 60,
                     "rejected_code": 429,
                     "rejected_msg": "Rate limit exceeded",
-                    "policy": "local"
+                    "policy": "redis",
+                    "redis_host": $redis_host,
+                    "redis_port": 6379,
+                    "redis_database": 1
                 },
                 "request-id": {
                     "algorithm": "uuid",
@@ -111,7 +116,7 @@ data:
             print_info "  Added JWT auth requirement"
         fi
 
-        # Add circuit breaker for model_service to prevent cascading failures
+        # Add circuit breaker for critical services to prevent cascading failures
         if [[ "$service_name" == "model_service" ]]; then
             plugins=$(echo "$plugins" | jq '. + {
                 "api-breaker": {
@@ -126,7 +131,22 @@ data:
                     }
                 }
             }')
-            print_info "  Added api-breaker circuit breaker"
+            print_info "  Added api-breaker circuit breaker (max_breaker_sec=15)"
+        elif [[ "$service_name" == "mcp_service" ]]; then
+            plugins=$(echo "$plugins" | jq '. + {
+                "api-breaker": {
+                    "break_response_code": 502,
+                    "max_breaker_sec": 30,
+                    "unhealthy": {
+                        "http_statuses": [500, 502, 503],
+                        "failures": 3
+                    },
+                    "healthy": {
+                        "successes": 2
+                    }
+                }
+            }')
+            print_info "  Added api-breaker circuit breaker (max_breaker_sec=30)"
         fi
 
         # Create/Update route with uris array (supports both root and wildcard)
@@ -384,6 +404,8 @@ spec:
                     secretKeyRef:
                       name: apisix-admin-key
                       key: admin-key
+                - name: REDIS_HOST
+                  value: "redis-master.isa-cloud-production.svc.cluster.local"
                 # SECURITY: Configure allowed CORS origins (comma-separated)
                 # WARNING: Never use '*' in production with credentials
                 - name: CORS_ALLOWED_ORIGINS
