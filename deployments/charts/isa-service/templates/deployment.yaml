@@ -47,8 +47,18 @@ spec:
         - configMapRef:
             name: {{ .Values.configMapRef }}
         {{- end }}
-        {{- if .Values.env }}
         env:
+        {{- if .Values.observability }}
+        - name: TEMPO_HOST
+          value: {{ .Values.observability.tempoHost | quote }}
+        - name: TEMPO_PORT
+          value: {{ .Values.observability.tempoPort | quote }}
+        - name: LOKI_URL
+          value: {{ .Values.observability.lokiUrl | quote }}
+        - name: ISA_ENV
+          value: {{ .Values.observability.isaEnv | quote }}
+        {{- end }}
+        {{- if .Values.env }}
         {{- toYaml .Values.env | nindent 8 }}
         {{- end }}
         resources:

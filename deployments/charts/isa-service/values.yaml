@@ -69,6 +69,16 @@ health:
 # Environment variables (from ConfigMap)
 configMapRef: ""
 
+# Observability (shared across all isA services)
+observability:
+  # Tempo distributed tracing (OTLP gRPC)
+  tempoHost: "tempo.isa-cloud-local.svc.cluster.local"
+  tempoPort: "4317"
+  # Loki log shipping
+  lokiUrl: "http://loki.isa-cloud-local.svc.cluster.local:3100"
+  # Environment label
+  isaEnv: "staging"
+
 # Extra environment variables
 env: []
 

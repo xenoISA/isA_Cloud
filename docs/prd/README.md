@@ -277,6 +277,75 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
+## Epic 8: Unified Observability (Epic #92)
+
+> Shared Prometheus metrics, OpenTelemetry tracing (Tempo), and unified observability clients in `isa_common`.
+
+### E8-US1: Shared Observability Clients
+
+**As a** backend developer
+**I want** a single `setup_observability()` call to configure metrics, logging, and tracing
+**So that** every service gets consistent observability without duplicating setup code
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | `isa_common.metrics` provides `setup_metrics()`, counter/histogram/gauge factories, FastAPI middleware, and `/metrics` endpoint | Done |
+| AC-1.2 | `isa_common.tracing` provides `setup_tracing()`, `get_tracer()`, OTLP export to Tempo, and auto-instrumentation (FastAPI, aiohttp, asyncpg, redis, httpx) | Done |
+| AC-1.3 | `isa_common.observability` provides unified `setup_observability()` wiring metrics + Loki + tracing | Done |
+| AC-1.4 | All modules gracefully degrade to no-ops when optional dependencies are not installed | Done |
+| AC-1.5 | L1 unit tests cover all three modules (metrics, tracing, observability) | Done |
+| AC-1.6 | L2 component tests verify middleware with Starlette TestClient | Planned |
+| AC-1.7 | L3 integration tests verify OTLP export to mock collector | Planned |
+
+### E8-US2: Service Migration to Shared Clients
+
+**As a** platform operator
+**I want** all isA services using the shared observability clients
+**So that** metrics and traces are consistent across the platform
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | isA_Trade migrated to `isa_common` metrics and observability | Done |
+| AC-2.2 | isA_user migrated to `isa_common` metrics and observability | Done |
+| AC-2.3 | isA_OS migrated to `isa_common` metrics (without global state mutation) | Partial |
+| AC-2.4 | isA_Creative migrated to `isa_common` metrics (without global state mutation) | Partial |
+| AC-2.5 | isA_MCP migrated — duplicate `core/tracing.py` and `PrometheusMiddleware` removed | Planned |
+| AC-2.6 | isA_Model migrated from `prometheus-fastapi-instrumentator` to `isa_common.metrics` | Planned |
+| AC-2.7 | isA_Mate migrated from raw `prometheus_client` to `isa_common.metrics` | Planned |
+
+### E8-US3: Tracing Pipeline Active
+
+**As a** platform operator
+**I want** at least one service sending traces to Tempo
+**So that** the distributed tracing pipeline is validated end-to-end
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | OTel SDK + OTLP exporter installed in at least one service | Planned |
+| AC-3.2 | `TEMPO_HOST` / `OTEL_EXPORTER_OTLP_ENDPOINT` configured in deployment | Planned |
+| AC-3.3 | Traces visible in Grafana Tempo datasource | Planned |
+
+### E8-US4: Prometheus Scrape Coverage
+
+**As a** platform operator
+**I want** all metric-emitting services scraped by Prometheus
+**So that** no service metrics are silently dropped
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | Local `prometheus.yml` includes scrape targets for isA_Trade, isA_user, isA_Creative, isA_OS | Planned |
+| AC-4.2 | Production ServiceMonitors cover all deployed services | Planned |
+
+---
+
 ## Priority Matrix
 
 | Epic | Priority | Status | Notes |
@@ -288,6 +357,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E5: Qdrant | P1 | Done | AI features |
 | E6: Loki | P1 | Done | Observability |
 | E7: Cross-cutting | P0 | Partial | Tracing planned |
+| E8: Unified Observability | P1 | Partial | Shared clients done, migrations + tracing remaining |
 
 ---
 
@@ -299,5 +369,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.0.0
-**Last Updated**: 2026-02-28
+**Version**: 2.1.0
+**Last Updated**: 2026-03-09
