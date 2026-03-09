@@ -37,13 +37,11 @@ jobs:
 
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
+        if: ${{ secrets.GITLEAKS_LICENSE != '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           GITLEAKS_NOTIFY_USER_LIST: '@${{ github.actor }}'
-        # Org repos require GITLEAKS_LICENSE secret. Allow pipeline to
-        # continue if the secret is not configured yet.
-        continue-on-error: true
 
   # ═══════════════════════════════════════════════════════════
   # Python Security Scanning
@@ -66,17 +64,15 @@ jobs:
 
       - name: Run pip-audit (dependency vulnerabilities)
         run: |
-          echo "## 🔍 Checking isA_common dependencies" >> $GITHUB_STEP_SUMMARY
-          pip-audit -r isA_common/requirements.txt --format json --output pip-audit-results.json || true
-          pip-audit -r isA_common/requirements.txt --format markdown >> $GITHUB_STEP_SUMMARY || true
-        continue-on-error: true
+          echo "## Checking isA_common dependencies" >> $GITHUB_STEP_SUMMARY
+          pip-audit -r isA_common/requirements.txt --format json --output pip-audit-results.json
+          pip-audit -r isA_common/requirements.txt --format markdown >> $GITHUB_STEP_SUMMARY
 
       - name: Run bandit (SAST)
         run: |
-          echo "## 🔍 Running Bandit SAST" >> $GITHUB_STEP_SUMMARY
-          bandit -r isA_common/ -f json -o bandit-results.json || true
-          bandit -r isA_common/ -f txt >> $GITHUB_STEP_SUMMARY || true
-        continue-on-error: true
+          echo "## Running Bandit SAST" >> $GITHUB_STEP_SUMMARY
+          bandit -r isA_common/ -f json -o bandit-results.json
+          bandit -r isA_common/ -f txt >> $GITHUB_STEP_SUMMARY
 
       - name: Upload security artifacts
         uses: actions/upload-artifact@v4
@@ -125,16 +121,14 @@ jobs:
         if: steps.check-go.outputs.has_go == 'true'
         run: |
           echo "## Running govulncheck" >> $GITHUB_STEP_SUMMARY
-          govulncheck ./... 2>&1 | tee govulncheck-results.txt >> $GITHUB_STEP_SUMMARY || true
-        continue-on-error: true
+          govulncheck ./... 2>&1 | tee govulncheck-results.txt >> $GITHUB_STEP_SUMMARY
 
       - name: Run gosec (SAST)
         if: steps.check-go.outputs.has_go == 'true'
         run: |
           echo "## Running gosec SAST" >> $GITHUB_STEP_SUMMARY
-          gosec -fmt json -out gosec-results.json ./... || true
-          gosec ./... >> $GITHUB_STEP_SUMMARY || true
-        continue-on-error: true
+          gosec -fmt json -out gosec-results.json ./...
+          gosec ./... >> $GITHUB_STEP_SUMMARY
 
       - name: Upload security artifacts
         uses: actions/upload-artifact@v4
@@ -157,7 +151,7 @@ jobs:
     steps:
       - name: Generate summary
         run: |
-          echo "# 🔒 Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -167,3 +161,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any scan failed
+        if: contains(needs.*.result, 'failure')
+        run: |
+          echo "One or more security scans failed. See summary above."
+          exit 1
