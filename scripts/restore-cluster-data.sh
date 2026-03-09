@@ -43,7 +43,7 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=redis -n $NAMES
     echo "Redis not ready yet"
 
 echo ""
-echo "[1/5] Restoring PostgreSQL..."
+echo "[1/8] Restoring PostgreSQL..."
 if [ -f "$BACKUP_DIR/postgres/full_backup.sql" ]; then
     PG_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
              kubectl get pods -n $NAMESPACE -l app=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -59,7 +59,7 @@ else
 fi
 
 echo ""
-echo "[2/5] Restoring MinIO..."
+echo "[2/8] Restoring MinIO..."
 if [ -d "$BACKUP_DIR/minio" ] && [ "$(ls -A "$BACKUP_DIR/minio" 2>/dev/null)" ]; then
     # Setup port-forward for MinIO
     MINIO_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=minio -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -91,7 +91,7 @@ else
 fi
 
 echo ""
-echo "[3/5] Restoring Qdrant..."
+echo "[3/8] Restoring Qdrant..."
 if [ -d "$BACKUP_DIR/qdrant" ] && [ "$(ls -A "$BACKUP_DIR/qdrant" 2>/dev/null)" ]; then
     QDRANT_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=qdrant -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
                  kubectl get svc -n $NAMESPACE -l app=qdrant -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -119,7 +119,7 @@ else
 fi
 
 echo ""
-echo "[4/5] Restoring Neo4j..."
+echo "[4/8] Restoring Neo4j..."
 if [ -f "$BACKUP_DIR/neo4j/neo4j.dump" ]; then
     NEO4J_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=neo4j -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
                 kubectl get pods -n $NAMESPACE -l app=neo4j -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -139,7 +139,7 @@ else
 fi
 
 echo ""
-echo "[5/5] Restoring Redis..."
+echo "[5/8] Restoring Redis..."
 if [ -f "$BACKUP_DIR/redis/dump.rdb" ]; then
     REDIS_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
                 kubectl get pods -n $NAMESPACE -l app=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -156,6 +156,96 @@ if [ -f "$BACKUP_DIR/redis/dump.rdb" ]; then
     echo "  ✓ Redis RDB copied (will load on restart)"
 else
     echo "  ⚠ No Redis backup found"
+fi
+
+echo ""
+echo "[6/8] Restoring NATS JetStream..."
+if [ -d "$BACKUP_DIR/nats" ] && [ "$(ls -A "$BACKUP_DIR/nats" 2>/dev/null)" ]; then
+    NATS_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=nats -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+               kubectl get pods -n $NAMESPACE -l app=nats -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+               echo "nats-0")
+
+    kubectl port-forward -n $NAMESPACE pod/$NATS_POD 4222:4222 &>/dev/null &
+    PF_PID=$!
+    sleep 2
+
+    if command -v nats &>/dev/null; then
+        # Restore stream configs
+        for stream_file in "$BACKUP_DIR/nats"/stream_*.json; do
+            if [ -f "$stream_file" ]; then
+                STREAM_NAME=$(jq -r '.config.name' "$stream_file" 2>/dev/null)
+                if [ -n "$STREAM_NAME" ] && [ "$STREAM_NAME" != "null" ]; then
+                    jq '.config' "$stream_file" | nats stream add "$STREAM_NAME" --config /dev/stdin 2>/dev/null && \
+                        echo "  Stream '$STREAM_NAME' restored" || \
+                        echo "  ⚠ Stream '$STREAM_NAME' restore failed (may already exist)"
+                fi
+            fi
+        done
+        # Restore consumer configs
+        for consumer_file in "$BACKUP_DIR/nats"/consumer_*.json; do
+            if [ -f "$consumer_file" ]; then
+                STREAM_NAME=$(jq -r '.stream_name' "$consumer_file" 2>/dev/null)
+                CONSUMER_NAME=$(jq -r '.config.durable_name' "$consumer_file" 2>/dev/null)
+                if [ -n "$STREAM_NAME" ] && [ -n "$CONSUMER_NAME" ] && [ "$CONSUMER_NAME" != "null" ]; then
+                    jq '.config' "$consumer_file" | nats consumer add "$STREAM_NAME" "$CONSUMER_NAME" --config /dev/stdin 2>/dev/null && \
+                        echo "  Consumer '$STREAM_NAME/$CONSUMER_NAME' restored" || \
+                        echo "  ⚠ Consumer '$STREAM_NAME/$CONSUMER_NAME' restore failed (may already exist)"
+                fi
+            fi
+        done
+        echo "  ✓ NATS JetStream restore complete"
+    else
+        echo "  ⚠ NATS CLI not installed"
+    fi
+
+    kill $PF_PID 2>/dev/null || true
+else
+    echo "  ⚠ No NATS backup found"
+fi
+
+echo ""
+echo "[7/8] Restoring Consul KV..."
+if [ -f "$BACKUP_DIR/consul/consul-snapshot.snap" ] || [ -f "$BACKUP_DIR/consul/kv-export.json" ]; then
+    CONSUL_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=consul -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+                 kubectl get svc -n $NAMESPACE -l app=consul -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+                 echo "consul-server")
+    kubectl port-forward -n $NAMESPACE svc/$CONSUL_SVC 8500:8500 &>/dev/null &
+    PF_PID=$!
+    sleep 2
+
+    if [ -f "$BACKUP_DIR/consul/consul-snapshot.snap" ]; then
+        # Restore from atomic snapshot
+        curl -sf -X PUT --data-binary @"$BACKUP_DIR/consul/consul-snapshot.snap" http://localhost:8500/v1/snapshot 2>/dev/null && \
+            echo "  ✓ Consul snapshot restored" || \
+            echo "  ⚠ Consul snapshot restore failed"
+    elif [ -f "$BACKUP_DIR/consul/kv-export.json" ]; then
+        # Restore from KV JSON export
+        curl -sf -X PUT --data-binary @"$BACKUP_DIR/consul/kv-export.json" http://localhost:8500/v1/txn 2>/dev/null && \
+            echo "  ✓ Consul KV restored from export" || \
+            echo "  ⚠ Consul KV restore failed"
+    fi
+
+    kill $PF_PID 2>/dev/null || true
+else
+    echo "  ⚠ No Consul backup found"
+fi
+
+echo ""
+echo "[8/8] Restoring MQTT retained messages..."
+if [ -f "$BACKUP_DIR/mqtt/mosquitto.db" ]; then
+    MQTT_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=mosquitto -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+               kubectl get pods -n $NAMESPACE -l app=mosquitto -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+               echo "")
+
+    if [ -n "$MQTT_POD" ] && kubectl get pod -n $NAMESPACE $MQTT_POD &>/dev/null; then
+        kubectl cp "$BACKUP_DIR/mqtt/mosquitto.db" $NAMESPACE/$MQTT_POD:/mosquitto/data/mosquitto.db 2>/dev/null && \
+            echo "  ✓ MQTT retained messages restored (restart broker to load)" || \
+            echo "  ⚠ MQTT restore failed"
+    else
+        echo "  ⚠ MQTT broker pod not found"
+    fi
+else
+    echo "  ⚠ No MQTT backup found"
 fi
 
 echo ""

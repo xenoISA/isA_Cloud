@@ -28,7 +28,7 @@ echo "=============================================="
 echo "Backup directory: $BACKUP_DIR"
 echo ""
 
-mkdir -p "$BACKUP_DIR"/{postgres,minio,qdrant,neo4j,redis}
+mkdir -p "$BACKUP_DIR"/{postgres,minio,qdrant,neo4j,redis,nats,consul,mqtt}
 
 # Check cluster connectivity
 if ! kubectl cluster-info &>/dev/null; then
@@ -36,7 +36,7 @@ if ! kubectl cluster-info &>/dev/null; then
     exit 1
 fi
 
-echo "[1/5] Backing up PostgreSQL..."
+echo "[1/8] Backing up PostgreSQL..."
 # Get postgres pod (supports both Bitnami helm chart and custom deployments)
 PG_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
          kubectl get pods -n $NAMESPACE -l app=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -61,7 +61,7 @@ else
 fi
 
 echo ""
-echo "[2/5] Backing up MinIO..."
+echo "[2/8] Backing up MinIO..."
 # Setup port-forward for MinIO (try different service names)
 MINIO_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=minio -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
             kubectl get svc -n $NAMESPACE -l app=minio -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -92,7 +92,7 @@ fi
 kill $PF_PID 2>/dev/null || true
 
 echo ""
-echo "[3/5] Backing up Qdrant..."
+echo "[3/8] Backing up Qdrant..."
 # Setup port-forward for Qdrant
 QDRANT_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=qdrant -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
              kubectl get svc -n $NAMESPACE -l app=qdrant -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
@@ -119,7 +119,7 @@ fi
 kill $PF_PID 2>/dev/null || true
 
 echo ""
-echo "[4/5] Backing up Neo4j..."
+echo "[4/8] Backing up Neo4j..."
 NEO4J_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=neo4j -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
             kubectl get pods -n $NAMESPACE -l app=neo4j -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
             echo "neo4j-0")
@@ -135,7 +135,7 @@ else
 fi
 
 echo ""
-echo "[5/5] Backing up Redis (RDB snapshot)..."
+echo "[5/8] Backing up Redis (RDB snapshot)..."
 REDIS_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
             kubectl get pods -n $NAMESPACE -l app=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
             echo "redis-master-0")
@@ -152,6 +152,80 @@ if kubectl get pod -n $NAMESPACE $REDIS_POD &>/dev/null; then
         echo "  ⚠ Redis backup failed"
 else
     echo "  ⚠ Redis pod not found"
+fi
+
+echo ""
+echo "[6/8] Backing up NATS JetStream..."
+NATS_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=nats -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+           kubectl get pods -n $NAMESPACE -l app=nats -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+           echo "nats-0")
+
+if kubectl get pod -n $NAMESPACE $NATS_POD &>/dev/null; then
+    # Export stream configurations and consumer definitions
+    kubectl port-forward -n $NAMESPACE pod/$NATS_POD 4222:4222 &>/dev/null &
+    PF_PID=$!
+    sleep 2
+
+    if command -v nats &>/dev/null; then
+        # Backup stream configs
+        for stream in $(nats stream list --json 2>/dev/null | jq -r '.[].config.name' 2>/dev/null); do
+            nats stream info "$stream" --json > "$BACKUP_DIR/nats/stream_${stream}.json" 2>/dev/null && \
+                echo "  Stream '$stream' config saved" || true
+            # Backup consumer configs for this stream
+            for consumer in $(nats consumer list "$stream" --json 2>/dev/null | jq -r '.[].config.durable_name // empty' 2>/dev/null); do
+                nats consumer info "$stream" "$consumer" --json > "$BACKUP_DIR/nats/consumer_${stream}_${consumer}.json" 2>/dev/null && \
+                    echo "  Consumer '$stream/$consumer' config saved" || true
+            done
+        done
+        echo "  ✓ NATS JetStream backup complete"
+    else
+        echo "  ⚠ NATS CLI not installed. Skipping NATS backup."
+        echo "    Install with: brew tap nats-io/nats-tools && brew install nats-io/nats-tools/nats"
+    fi
+
+    kill $PF_PID 2>/dev/null || true
+else
+    echo "  ⚠ NATS pod not found"
+fi
+
+echo ""
+echo "[7/8] Backing up Consul KV..."
+CONSUL_SVC=$(kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=consul -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+             kubectl get svc -n $NAMESPACE -l app=consul -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+             echo "consul-server")
+kubectl port-forward -n $NAMESPACE svc/$CONSUL_SVC 8500:8500 &>/dev/null &
+PF_PID=$!
+sleep 2
+
+# Use Consul snapshot API for atomic backup of KV + service catalog
+SNAPSHOT_FILE="$BACKUP_DIR/consul/consul-snapshot.snap"
+if curl -sf -o "$SNAPSHOT_FILE" http://localhost:8500/v1/snapshot 2>/dev/null; then
+    echo "  ✓ Consul snapshot complete ($(du -h "$SNAPSHOT_FILE" | cut -f1))"
+else
+    # Fallback: export KV tree as JSON
+    if curl -sf http://localhost:8500/v1/kv/?recurse=true > "$BACKUP_DIR/consul/kv-export.json" 2>/dev/null; then
+        echo "  ✓ Consul KV export complete (snapshot API unavailable, using KV export)"
+    else
+        echo "  ⚠ Consul backup failed (not accessible)"
+    fi
+fi
+
+kill $PF_PID 2>/dev/null || true
+
+echo ""
+echo "[8/8] Backing up MQTT retained messages..."
+MQTT_POD=$(kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=mosquitto -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+           kubectl get pods -n $NAMESPACE -l app=mosquitto -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+           kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=emqx -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+           echo "")
+
+if [ -n "$MQTT_POD" ] && kubectl get pod -n $NAMESPACE $MQTT_POD &>/dev/null; then
+    # Mosquitto: copy persistence DB file
+    kubectl cp $NAMESPACE/$MQTT_POD:/mosquitto/data/mosquitto.db "$BACKUP_DIR/mqtt/mosquitto.db" 2>/dev/null && \
+        echo "  ✓ MQTT retained messages backed up" || \
+        echo "  ⚠ MQTT backup failed (persistence file not found)"
+else
+    echo "  ⚠ MQTT broker pod not found (skipping)"
 fi
 
 echo ""
