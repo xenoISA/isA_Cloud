@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isa-common"
-version = "0.3.1"
+version = "0.4.0"
 description = "Shared Python infrastructure library for isA platform"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -44,6 +44,24 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+metrics = [
+    "prometheus-client>=0.20.0",
+    "starlette>=0.27.0",  # For metrics middleware/endpoint
+]
+tracing = [
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+]
+tracing-extras = [
+    "opentelemetry-instrumentation-aiohttp-client>=0.41b0",
+    "opentelemetry-instrumentation-asyncpg>=0.41b0",
+    "opentelemetry-instrumentation-redis>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+]
+observability = [
+    "isa-common[metrics,tracing]",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
