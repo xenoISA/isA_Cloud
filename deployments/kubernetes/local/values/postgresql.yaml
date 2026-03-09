@@ -51,6 +51,13 @@ primary:
     nodePorts:
       postgresql: 30432  # NodePort must be 30000-32767
 
-# Disable metrics for lighter footprint
+# Metrics (postgres-exporter sidecar)
 metrics:
-  enabled: false
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
