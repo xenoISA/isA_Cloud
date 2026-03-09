@@ -361,6 +361,115 @@ data:
     # Run
     main
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-apisix-watch-script
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-apisix-watch
+    tier: infrastructure
+data:
+  watch_handler.sh: |
+    #!/bin/bash
+    # Consul watch handler — debounced route sync
+    # Triggered by `consul watch -type=services` on any service catalog change.
+    # Uses a lock file + cooldown to prevent rapid-fire syncs during rolling deployments.
+
+    LOCK_FILE="/tmp/consul-apisix-sync.lock"
+    COOLDOWN_FILE="/tmp/consul-apisix-sync.last"
+    COOLDOWN_SECONDS=5
+
+    # Debounce: skip if last sync was < COOLDOWN_SECONDS ago
+    if [ -f "$COOLDOWN_FILE" ]; then
+        last_run=$(cat "$COOLDOWN_FILE")
+        now=$(date +%s)
+        elapsed=$((now - last_run))
+        if [ "$elapsed" -lt "$COOLDOWN_SECONDS" ]; then
+            echo "INFO Debounce: last sync ${elapsed}s ago, skipping (cooldown=${COOLDOWN_SECONDS}s)"
+            exit 0
+        fi
+    fi
+
+    # Lock: prevent concurrent syncs
+    exec 200>"$LOCK_FILE"
+    if ! flock -n 200; then
+        echo "INFO Sync already in progress, skipping"
+        exit 0
+    fi
+
+    date +%s > "$COOLDOWN_FILE"
+    echo "INFO Consul service change detected, triggering route sync..."
+    bash /scripts/sync_routes.sh
+    echo "INFO Watch-triggered sync complete"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consul-apisix-watch
+  namespace: isa-cloud-staging
+  labels:
+    app: consul-apisix-watch
+    tier: infrastructure
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consul-apisix-watch
+  template:
+    metadata:
+      labels:
+        app: consul-apisix-watch
+    spec:
+      containers:
+        - name: watch
+          image: hashicorp/consul:1.17
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache bash curl jq > /dev/null 2>&1
+              echo "INFO Starting Consul watch for service changes..."
+              consul watch \
+                -type=services \
+                -http-addr="${CONSUL_URL}" \
+                /watch-scripts/watch_handler.sh
+          volumeMounts:
+            - name: sync-script
+              mountPath: /scripts
+            - name: watch-script
+              mountPath: /watch-scripts
+          env:
+            - name: CONSUL_URL
+              value: "http://consul-ui.isa-cloud-staging.svc.cluster.local"
+            - name: APISIX_ADMIN_URL
+              value: "http://apisix-admin.isa-cloud-staging.svc.cluster.local:9180"
+            - name: APISIX_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: apisix-admin-key
+                  key: admin-key
+            - name: REDIS_HOST
+              value: "redis-master.isa-cloud-staging.svc.cluster.local"
+            - name: CORS_ALLOWED_ORIGINS
+              value: "https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: sync-script
+          configMap:
+            name: consul-apisix-sync-script
+            defaultMode: 0755
+        - name: watch-script
+          configMap:
+            name: consul-apisix-watch-script
+            defaultMode: 0755
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -370,7 +479,7 @@ metadata:
     app: consul-apisix-sync
     tier: infrastructure
 spec:
-  schedule: "*/5 * * * *"
+  schedule: "*/15 * * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
