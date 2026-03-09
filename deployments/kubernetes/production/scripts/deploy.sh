@@ -6,6 +6,7 @@
 # Production deployments should go through CI/CD pipeline (ArgoCD).
 #
 # Usage:
+#   ./deploy.sh secrets            # Deploy Vault + ESO (run first!)
 #   ./deploy.sh infrastructure    # Deploy HA infrastructure
 #   ./deploy.sh services          # Deploy application services (ArgoCD)
 #   ./deploy.sh mlplatform        # Deploy ML platform (Ray, MLflow, JupyterHub)
@@ -73,12 +74,13 @@ check_prerequisites() {
         kubectl create namespace ${NAMESPACE}
     fi
 
-    # Check secrets exist
+    # Check secrets exist (created by Vault + ESO, or manually)
     local required_secrets=("postgresql-secret" "redis-secret" "neo4j-secret" "minio-secret")
     for secret in "${required_secrets[@]}"; do
         if ! kubectl get secret ${secret} -n ${NAMESPACE} &>/dev/null; then
             log_error "Required secret '${secret}' not found in ${NAMESPACE}"
-            log_error "Please create secrets before deploying. See secrets/infrastructure-secrets.yaml"
+            log_error "Ensure Vault + ESO are deployed and secrets are seeded."
+            log_error "Run: ./vault-init.sh (first time) or ./vault-init.sh status (check)"
             exit 1
         fi
     done
@@ -93,6 +95,7 @@ setup_helm_repos() {
     local repos=(
         "bitnami https://charts.bitnami.com/bitnami"
         "hashicorp https://helm.releases.hashicorp.com"
+        "external-secrets https://charts.external-secrets.io"
         "apisix https://charts.apiseven.com"
         "nats https://nats-io.github.io/k8s/helm/charts"
         "qdrant https://qdrant.github.io/qdrant-helm"
@@ -112,6 +115,37 @@ setup_helm_repos() {
 
     helm repo update
     log_info "Helm repositories configured"
+}
+
+# Deploy Vault + External Secrets Operator
+deploy_secrets() {
+    log_info "Deploying secret management (Vault + ESO)..."
+    confirm "This will deploy HashiCorp Vault and External Secrets Operator. Continue?"
+
+    setup_helm_repos
+
+    # 1. Deploy Vault HA
+    log_step "Deploying HashiCorp Vault (HA with Consul backend)..."
+    helm upgrade --install vault hashicorp/vault \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/vault.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 2. Deploy External Secrets Operator
+    log_step "Deploying External Secrets Operator..."
+    helm upgrade --install external-secrets external-secrets/external-secrets \
+        -n external-secrets --create-namespace \
+        -f ${VALUES_DIR}/external-secrets.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # 3. Apply ClusterSecretStore and ExternalSecret CRs
+    log_step "Applying ClusterSecretStore and ExternalSecret manifests..."
+    kubectl apply -f "${MANIFESTS_DIR}/cluster-secret-store.yaml"
+    kubectl apply -f "${MANIFESTS_DIR}/external-secrets.yaml"
+
+    log_info "Secret management deployed!"
+    log_warn "If this is the first deployment, run: ./vault-init.sh"
+    log_warn "This will initialize Vault, unseal it, and seed secrets."
 }
 
 # Deploy etcd HA cluster
@@ -378,6 +412,7 @@ deploy_all() {
     log_info "Starting full production deployment..."
     confirm "This will deploy ALL components to PRODUCTION. Are you absolutely sure?"
 
+    deploy_secrets
     check_prerequisites
     deploy_infrastructure
     deploy_mlplatform
@@ -392,6 +427,7 @@ usage() {
     echo "Usage: $0 <command>"
     echo ""
     echo "Commands:"
+    echo "  secrets           Deploy Vault + External Secrets Operator"
     echo "  infrastructure    Deploy HA infrastructure (etcd, PostgreSQL, Redis, etc.)"
     echo "  services          Deploy application services via ArgoCD"
     echo "  mlplatform        Deploy ML platform (Ray, MLflow, JupyterHub)"
@@ -416,6 +452,9 @@ main() {
     shift || true
 
     case "${command}" in
+        secrets)
+            deploy_secrets
+            ;;
         infrastructure)
             check_prerequisites
             deploy_infrastructure
