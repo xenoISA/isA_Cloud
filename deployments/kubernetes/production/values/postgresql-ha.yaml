@@ -138,14 +138,21 @@ metrics:
     labels:
       release: prometheus
 
-# Backup configuration (optional - enable if using volumeSnapshots)
-# backup:
-#   enabled: true
-#   cronjob:
-#     schedule: "0 2 * * *"  # Daily at 2 AM
-#     storage:
-#       storageClass: "infotrend-nfs"
-#       size: 100Gi
+# Backup configuration (Bitnami chart volumeSnapshot-based backup)
+backup:
+  enabled: true
+  cronjob:
+    schedule: "0 2 * * *"  # Daily at 2 AM UTC
+    timeZone: "Etc/UTC"
+    annotations:
+      backup.isa-cloud.io/type: "volume-snapshot"
+    storage:
+      storageClass: "infotrend-nfs"
+      size: 100Gi
+    # Keep last 7 daily snapshots
+    startingDeadlineSeconds: 600
+    successfulJobsHistoryLimit: 7
+    failedJobsHistoryLimit: 3
 
 # Pod Disruption Budget
 pdb:

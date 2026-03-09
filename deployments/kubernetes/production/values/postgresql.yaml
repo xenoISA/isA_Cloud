@@ -164,7 +164,16 @@ metrics:
 # BACKUP (using volumeSnapshots or external backup tool)
 # =============================================================================
 backup:
-  enabled: false  # Use Velero or cloud-native backup instead
+  enabled: true
+  cronjob:
+    schedule: "0 2 * * *"  # Daily at 2 AM UTC
+    timeZone: "Etc/UTC"
+    storage:
+      storageClass: "fast-ssd"
+      size: 100Gi
+    startingDeadlineSeconds: 600
+    successfulJobsHistoryLimit: 7
+    failedJobsHistoryLimit: 3
 
 # =============================================================================
 # PGPOOL (Connection Pooling + Load Balancing) - Optional

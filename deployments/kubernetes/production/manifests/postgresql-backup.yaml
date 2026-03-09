@@ -1,0 +1,353 @@
+# PostgreSQL Logical Backup CronJob
+# Performs pg_dumpall to a PVC, with configurable schedule and retention.
+# Complements Bitnami chart volumeSnapshot backups with portable SQL dumps.
+#
+# Prerequisite: PVC "postgresql-backup-data" must exist (see PVC below).
+# Secrets: reads postgres password from "postgresql-secret" (key: postgres-password).
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-backup-data
+  namespace: isa-cloud-production
+  labels:
+    app: postgresql-backup
+    tier: infrastructure
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: infotrend-nfs
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-backup-script
+  namespace: isa-cloud-production
+  labels:
+    app: postgresql-backup
+    tier: infrastructure
+data:
+  backup.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    # Configuration (override via env vars)
+    PG_HOST="${PGHOST:-postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local}"
+    PG_PORT="${PGPORT:-5432}"
+    PG_USER="${PGUSER:-postgres}"
+    BACKUP_DIR="/backups"
+    RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+    TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+    BACKUP_FILE="${BACKUP_DIR}/pgdump_${TIMESTAMP}.sql.gz"
+
+    echo "INFO  PostgreSQL backup starting"
+    echo "INFO  Host: ${PG_HOST}:${PG_PORT}"
+    echo "INFO  Retention: ${RETENTION_DAYS} days"
+
+    # Full logical dump, compressed
+    if pg_dumpall -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" --clean --if-exists \
+        | gzip > "$BACKUP_FILE"; then
+      SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+      echo "OK    Backup complete: ${BACKUP_FILE} (${SIZE})"
+    else
+      echo "ERR   pg_dumpall failed"
+      rm -f "$BACKUP_FILE"
+      exit 1
+    fi
+
+    # Per-database custom-format dumps (faster restore, parallel support)
+    DB_LIST=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -At \
+      -c "SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres';")
+
+    for DB in $DB_LIST; do
+      DB_FILE="${BACKUP_DIR}/${DB}_${TIMESTAMP}.dump"
+      if pg_dump -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -Fc "$DB" -f "$DB_FILE"; then
+        echo "OK    Database dump: ${DB} ($(du -h "$DB_FILE" | cut -f1))"
+      else
+        echo "WARN  Failed to dump database: ${DB}"
+      fi
+    done
+
+    # Write metadata
+    cat > "${BACKUP_DIR}/latest.json" <<EOF
+    {
+      "timestamp": "${TIMESTAMP}",
+      "host": "${PG_HOST}",
+      "full_backup": "$(basename "$BACKUP_FILE")",
+      "databases": [$(echo "$DB_LIST" | sed 's/.*/"&"/' | paste -sd,)],
+      "retention_days": ${RETENTION_DAYS}
+    }
+    EOF
+    echo "OK    Metadata written to latest.json"
+
+    # Prune old backups beyond retention window
+    DELETED=0
+    find "$BACKUP_DIR" -name "pgdump_*.sql.gz" -mtime "+${RETENTION_DAYS}" -print -delete | while read -r f; do
+      echo "DEL   Pruned: $(basename "$f")"
+      DELETED=$((DELETED + 1))
+    done
+    find "$BACKUP_DIR" -name "*_*.dump" -mtime "+${RETENTION_DAYS}" -print -delete | while read -r f; do
+      echo "DEL   Pruned: $(basename "$f")"
+    done
+
+    echo "INFO  Backup complete. Files in ${BACKUP_DIR}:"
+    ls -lhS "$BACKUP_DIR"/*.sql.gz "$BACKUP_DIR"/*.dump 2>/dev/null | tail -20
+  restore.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    # Restore from latest full backup or a specified file.
+    # Usage:
+    #   restore.sh                           # restore latest
+    #   restore.sh pgdump_20260309_020000    # restore specific timestamp
+    #   restore.sh --db isa_production       # restore single database
+
+    PG_HOST="${PGHOST:-postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local}"
+    PG_PORT="${PGPORT:-5432}"
+    PG_USER="${PGUSER:-postgres}"
+    BACKUP_DIR="/backups"
+
+    MODE="full"
+    TARGET=""
+    DB_NAME=""
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --db) DB_NAME="$2"; MODE="single"; shift 2 ;;
+        *)    TARGET="$1"; shift ;;
+      esac
+    done
+
+    if [ "$MODE" = "single" ] && [ -n "$DB_NAME" ]; then
+      # Find the latest .dump for this database
+      if [ -n "$TARGET" ]; then
+        DUMP_FILE="${BACKUP_DIR}/${DB_NAME}_${TARGET}.dump"
+      else
+        DUMP_FILE=$(ls -t "${BACKUP_DIR}/${DB_NAME}_"*.dump 2>/dev/null | head -1)
+      fi
+
+      if [ ! -f "$DUMP_FILE" ]; then
+        echo "ERR   No dump found for database: ${DB_NAME}"
+        exit 1
+      fi
+
+      echo "INFO  Restoring database ${DB_NAME} from $(basename "$DUMP_FILE")"
+      pg_restore -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" \
+        --clean --if-exists --no-owner --jobs=4 "$DUMP_FILE"
+      echo "OK    Database ${DB_NAME} restored"
+    else
+      # Full restore from pg_dumpall output
+      if [ -n "$TARGET" ]; then
+        BACKUP_FILE="${BACKUP_DIR}/pgdump_${TARGET}.sql.gz"
+      else
+        BACKUP_FILE=$(ls -t "${BACKUP_DIR}"/pgdump_*.sql.gz 2>/dev/null | head -1)
+      fi
+
+      if [ ! -f "$BACKUP_FILE" ]; then
+        echo "ERR   No full backup found"
+        exit 1
+      fi
+
+      echo "INFO  Restoring full backup from $(basename "$BACKUP_FILE")"
+      gunzip -c "$BACKUP_FILE" | psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres
+      echo "OK    Full restore complete"
+    fi
+  verify.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    # Verify the latest backup is valid and restorable.
+    # Checks: file exists, non-empty, valid gzip, SQL content, freshness.
+
+    BACKUP_DIR="/backups"
+    MAX_AGE_HOURS="${BACKUP_MAX_AGE_HOURS:-26}"  # Alert if backup > 26h old
+    ERRORS=0
+
+    echo "INFO  Verifying PostgreSQL backups in ${BACKUP_DIR}"
+
+    # Find latest full backup
+    LATEST=$(ls -t "${BACKUP_DIR}"/pgdump_*.sql.gz 2>/dev/null | head -1)
+
+    if [ -z "$LATEST" ]; then
+      echo "ERR   No backup files found"
+      exit 1
+    fi
+
+    FILENAME=$(basename "$LATEST")
+    SIZE=$(stat -c%s "$LATEST" 2>/dev/null || stat -f%z "$LATEST" 2>/dev/null)
+    echo "INFO  Latest backup: ${FILENAME} (${SIZE} bytes)"
+
+    # Check non-empty
+    if [ "$SIZE" -lt 100 ]; then
+      echo "ERR   Backup is suspiciously small (${SIZE} bytes)"
+      ERRORS=$((ERRORS + 1))
+    else
+      echo "OK    Size check passed"
+    fi
+
+    # Check valid gzip
+    if gzip -t "$LATEST" 2>/dev/null; then
+      echo "OK    Gzip integrity check passed"
+    else
+      echo "ERR   Gzip integrity check FAILED"
+      ERRORS=$((ERRORS + 1))
+    fi
+
+    # Check SQL content (first few lines should contain PostgreSQL dump markers)
+    HEADER=$(gunzip -c "$LATEST" | head -20)
+    if echo "$HEADER" | grep -qi "postgresql"; then
+      echo "OK    SQL content check passed (PostgreSQL header found)"
+    else
+      echo "WARN  SQL content check: no PostgreSQL header in first 20 lines"
+    fi
+
+    # Check freshness
+    FILE_AGE_SEC=$(( $(date +%s) - $(stat -c%Y "$LATEST" 2>/dev/null || stat -f%m "$LATEST" 2>/dev/null) ))
+    FILE_AGE_HOURS=$(( FILE_AGE_SEC / 3600 ))
+    if [ "$FILE_AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
+      echo "ERR   Backup is ${FILE_AGE_HOURS}h old (max: ${MAX_AGE_HOURS}h)"
+      ERRORS=$((ERRORS + 1))
+    else
+      echo "OK    Freshness check passed (${FILE_AGE_HOURS}h old)"
+    fi
+
+    # Check per-database dumps
+    DB_DUMPS=$(ls "${BACKUP_DIR}"/*_*.dump 2>/dev/null | wc -l)
+    echo "INFO  Per-database dumps found: ${DB_DUMPS}"
+
+    # Check metadata
+    if [ -f "${BACKUP_DIR}/latest.json" ]; then
+      echo "OK    Metadata file exists"
+    else
+      echo "WARN  No latest.json metadata file"
+    fi
+
+    # Summary
+    echo ""
+    if [ "$ERRORS" -gt 0 ]; then
+      echo "ERR   Verification FAILED with ${ERRORS} error(s)"
+      exit 1
+    else
+      echo "OK    All checks passed"
+      exit 0
+    fi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup
+  namespace: isa-cloud-production
+  labels:
+    app: postgresql-backup
+    tier: infrastructure
+spec:
+  schedule: "0 2 * * *"          # Daily at 2 AM UTC
+  timeZone: "Etc/UTC"
+  startingDeadlineSeconds: 600   # Must start within 10 min of schedule
+  concurrencyPolicy: Forbid      # Never run two backups at once
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600  # Timeout after 1 hour
+      template:
+        metadata:
+          labels:
+            app: postgresql-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: bitnami/postgresql:16
+              command: ["bash", "/scripts/backup.sh"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: backup-data
+                  mountPath: /backups
+              env:
+                - name: PGHOST
+                  value: "postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local"
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  value: "postgres"
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgresql-secret
+                      key: postgres-password
+                - name: BACKUP_RETENTION_DAYS
+                  value: "7"
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
+          volumes:
+            - name: scripts
+              configMap:
+                name: postgresql-backup-script
+                defaultMode: 0755
+            - name: backup-data
+              persistentVolumeClaim:
+                claimName: postgresql-backup-data
+---
+# Weekly backup verification job — runs after the daily backup on Sundays
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup-verify
+  namespace: isa-cloud-production
+  labels:
+    app: postgresql-backup
+    tier: infrastructure
+spec:
+  schedule: "30 3 * * 0"        # Sunday at 3:30 AM UTC (after 2 AM backup)
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app: postgresql-backup-verify
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: verify
+              image: bitnami/postgresql:16
+              command: ["bash", "/scripts/verify.sh"]
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: backup-data
+                  mountPath: /backups
+              env:
+                - name: BACKUP_MAX_AGE_HOURS
+                  value: "26"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: postgresql-backup-script
+                defaultMode: 0755
+            - name: backup-data
+              persistentVolumeClaim:
+                claimName: postgresql-backup-data
