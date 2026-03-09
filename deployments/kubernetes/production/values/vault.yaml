@@ -1,0 +1,98 @@
+# HashiCorp Vault Helm Values - PRODUCTION
+# Chart: hashicorp/vault
+# Install: helm install vault hashicorp/vault -n isa-cloud-production -f production/values/vault.yaml
+#
+# Vault uses Consul as its storage backend (already deployed in the cluster).
+# HA mode with 3 replicas for production resilience.
+
+global:
+  enabled: true
+
+server:
+  enabled: true
+
+  # HA mode with Consul storage backend
+  ha:
+    enabled: true
+    replicas: 3
+
+    # Raft is simpler but we already have Consul — use it as the backend
+    raft:
+      enabled: false
+
+    config: |
+      ui = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "consul" {
+        path = "vault/"
+        address = "consul-server.isa-cloud-production.svc.cluster.local:8500"
+      }
+
+      service_registration "kubernetes" {}
+
+      # Seal configuration — use Kubernetes auth by default.
+      # For auto-unseal, configure a transit seal or cloud KMS.
+      # See vault-init.sh for manual unseal workflow.
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # Persistent audit logs
+  auditStorage:
+    enabled: true
+    size: 10Gi
+
+  # Data storage (handled by Consul, but keep for audit)
+  dataStorage:
+    enabled: false
+
+  # Readiness/liveness probes
+  readinessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+  livenessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true"
+    initialDelaySeconds: 60
+
+  # Service configuration
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8200
+
+  # Standalone mode (disabled — using HA)
+  standalone:
+    enabled: false
+
+# =============================================================================
+# INJECTOR (Vault Agent Sidecar Injector)
+# =============================================================================
+# Disabled — we use External Secrets Operator instead of the injector.
+# ESO creates native K8s Secrets, which is simpler and works with any workload.
+injector:
+  enabled: false
+
+# =============================================================================
+# UI
+# =============================================================================
+ui:
+  enabled: true
+  serviceType: ClusterIP
+
+# =============================================================================
+# CSI PROVIDER
+# =============================================================================
+csi:
+  enabled: false

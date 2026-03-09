@@ -298,31 +298,58 @@ kubectl apply -f kubernetes/staging/secrets/infrastructure-secrets.local.yaml
 rm kubernetes/staging/secrets/infrastructure-secrets.local.yaml
 ```
 
-### Production (Recommended: External Secrets)
+### Production (Vault + External Secrets Operator)
+
+Production secrets are managed by **HashiCorp Vault** (HA with Consul backend) and synced to
+K8s Secrets via the **External Secrets Operator (ESO)**.
+
+```
+Vault (stores secrets)
+  └── ClusterSecretStore (ESO connects to Vault via K8s auth)
+       └── ExternalSecret CRs (map Vault paths → K8s Secrets)
+            └── K8s Secrets (postgresql-secret, redis-secret, etc.)
+```
+
+#### First-time setup
 
 ```bash
-# Install External Secrets Operator
-helm repo add external-secrets https://charts.external-secrets.io
-helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace
+# 1. Deploy Vault + ESO (via deploy script or ArgoCD)
+cd kubernetes/production/scripts
+./deploy.sh secrets
 
-# Configure SecretStore for AWS Secrets Manager
-kubectl apply -f - <<EOF
-apiVersion: external-secrets.io/v1beta1
-kind: ClusterSecretStore
-metadata:
-  name: aws-secrets-manager
-spec:
-  provider:
-    aws:
-      service: SecretsManager
-      region: us-west-2
-      auth:
-        jwt:
-          serviceAccountRef:
-            name: external-secrets-sa
-            namespace: external-secrets
-EOF
+# 2. Initialize Vault, unseal, configure auth, seed secrets
+./vault-init.sh
+
+# 3. Verify secrets are synced
+kubectl get externalsecret -n isa-cloud-production
 ```
+
+#### Day-2 operations
+
+```bash
+# Check Vault status
+./vault-init.sh status
+
+# Unseal after pod restart
+./vault-init.sh unseal
+
+# Update/add secrets
+./vault-init.sh seed
+
+# Force ESO re-sync
+kubectl annotate externalsecret -n isa-cloud-production --all force-sync=$(date +%s)
+```
+
+#### Key files
+
+| File | Purpose |
+|------|---------|
+| `argocd/apps/production/secret-management.yaml` | ArgoCD apps for Vault + ESO |
+| `kubernetes/production/values/vault.yaml` | Vault Helm values (HA, Consul backend) |
+| `kubernetes/production/values/external-secrets.yaml` | ESO Helm values |
+| `kubernetes/production/manifests/cluster-secret-store.yaml` | ClusterSecretStore CR (Vault backend) |
+| `kubernetes/production/manifests/external-secrets.yaml` | ExternalSecret CRs for all infra secrets |
+| `kubernetes/production/scripts/vault-init.sh` | Init, unseal, configure, and seed Vault |
 
 ### Local Credentials
 
@@ -346,8 +373,10 @@ EOF
 # Verify kubectl context
 kubectl config current-context
 
-# Create secrets FIRST
-kubectl apply -f kubernetes/production/secrets/infrastructure-secrets.local.yaml
+# Deploy Vault + ESO and seed secrets FIRST
+cd kubernetes/production/scripts
+./deploy.sh secrets
+./vault-init.sh
 ```
 
 ### Deploy Infrastructure
