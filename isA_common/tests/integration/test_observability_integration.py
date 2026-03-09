@@ -15,11 +15,32 @@ except ImportError:
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     _OTEL_SDK_AVAILABLE = True
 except ImportError:
     _OTEL_SDK_AVAILABLE = False
+
+
+def _make_collecting_exporter():
+    """Create a collecting exporter class at runtime (avoids NameError when otel missing)."""
+    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+
+    class _CollectingExporter(SpanExporter):
+        def __init__(self):
+            self.spans = []
+
+        def export(self, spans):
+            self.spans.extend(spans)
+            return SpanExportResult.SUCCESS
+
+        def shutdown(self):
+            pass
+
+        def force_flush(self, timeout_millis=None):
+            return True
+
+    return _CollectingExporter
 
 pytestmark = [
     pytest.mark.integration,
@@ -154,24 +175,11 @@ class TestSetServiceNameIntegration:
 class TestTracingIntegration:
     """Test tracing with in-memory exporter captures spans correctly."""
 
-    class _CollectingExporter(SpanExporter):
-        def __init__(self):
-            self.spans = []
-
-        def export(self, spans):
-            self.spans.extend(spans)
-            return SpanExportResult.SUCCESS
-
-        def shutdown(self):
-            pass
-
-        def force_flush(self, timeout_millis=None):
-            return True
-
     @pytest.fixture
     def tracing_provider(self):
         """Create an isolated TracerProvider — no global override needed."""
-        exporter = self._CollectingExporter()
+        ExporterCls = _make_collecting_exporter()
+        exporter = ExporterCls()
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))
         yield provider, exporter
