@@ -2,7 +2,15 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from prometheus_client import CollectorRegistry
+try:
+    from prometheus_client import CollectorRegistry
+    _HAS_PROMETHEUS = True
+except ImportError:
+    _HAS_PROMETHEUS = False
+
+pytestmark = pytest.mark.skipif(
+    not _HAS_PROMETHEUS, reason="prometheus_client not installed"
+)
 
 
 # ============================================================================
