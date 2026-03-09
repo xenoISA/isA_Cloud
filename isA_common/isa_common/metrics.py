@@ -84,6 +84,11 @@ _service_name: str = "unknown"
 _registry: Optional[object] = None
 
 
+def _effective_registry():
+    """Return the registry to use — custom if set, otherwise the default."""
+    return _registry if _registry is not None else DEFAULT_REGISTRY
+
+
 class _NoOpMetric:
     """No-op metric for when prometheus_client is not installed."""
 
@@ -144,7 +149,7 @@ def create_counter(
         _metric_name(_service_name, name),
         description,
         labelnames=labelnames or [],
-        registry=_registry,
+        registry=_effective_registry(),
     )
 
 
@@ -173,7 +178,7 @@ def create_histogram(
         description,
         labelnames=labelnames or [],
         buckets=buckets,
-        registry=_registry,
+        registry=_effective_registry(),
     )
 
 
@@ -199,7 +204,7 @@ def create_gauge(
         _metric_name(_service_name, name),
         description,
         labelnames=labelnames or [],
-        registry=_registry,
+        registry=_effective_registry(),
     )
 
 
@@ -254,7 +259,7 @@ def _init_common_metrics() -> None:
         SERVICE_INFO = Info(
             _metric_name(_service_name, "service"),
             "Service information",
-            registry=_registry,
+            registry=_effective_registry(),
         )
 
 
@@ -330,7 +335,7 @@ def _create_metrics_endpoint():
     async def metrics_endpoint(request):
         from starlette.responses import Response
 
-        data = generate_latest(_registry or DEFAULT_REGISTRY)
+        data = generate_latest(_effective_registry())
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
     return metrics_endpoint
@@ -406,4 +411,4 @@ def metrics_text() -> bytes:
     """
     if not _PROMETHEUS_AVAILABLE:
         return b""
-    return generate_latest(_registry or DEFAULT_REGISTRY)
+    return generate_latest(_effective_registry())
