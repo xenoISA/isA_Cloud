@@ -60,6 +60,13 @@ autoscaling:
   targetCPUUtilization: 70
   targetMemoryUtilization: 80
 
+# Pod Disruption Budget (enabled by default when replicas > 1)
+podDisruptionBudget:
+  enabled: true
+  # Set one of minAvailable or maxUnavailable (not both)
+  # minAvailable: 1
+  maxUnavailable: 1
+
 # Health checks
 health:
   path: /health
