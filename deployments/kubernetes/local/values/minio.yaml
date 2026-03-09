@@ -55,7 +55,7 @@ podLabels:
   tier: infrastructure
   environment: local
 
-# Disable metrics for local
+# Metrics
 metrics:
   serviceMonitor:
-    enabled: false
+    enabled: false  # No Prometheus Operator in local — uses annotation-based scraping instead

@@ -1,0 +1,166 @@
+# ServiceMonitor CRDs for isA platform services
+# Requires: Prometheus Operator (kube-prometheus-stack) in the cluster.
+# These complement the per-chart serviceMonitor configs (Redis, PostgreSQL, etc.)
+# by covering isA application services that use isa_common.metrics.setup_metrics().
+#
+# All ServiceMonitors use the label "release: prometheus" for operator discovery.
+---
+# isA Application Services — auto-discovers any service with prometheus.io annotations
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-application-services
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/part-of
+        operator: In
+        values:
+          - isa-platform
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isA Gateway — primary entry point, higher scrape frequency
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-gateway
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-gateway
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+# isA MCP Tool Server
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-mcp
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-mcp
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# isA Model Router
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-model
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-model
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# isA Agent Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-agent
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-agent
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# APISIX Gateway — scrape its built-in Prometheus plugin
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: apisix-gateway
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: infrastructure
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  endpoints:
+    - port: prometheus
+      path: /apisix/prometheus/metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+# Consul — scrape telemetry endpoint
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: consul
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: infrastructure
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consul
+  endpoints:
+    - port: http
+      path: /v1/agent/metrics
+      params:
+        format: ["prometheus"]
+      interval: 30s
+      scrapeTimeout: 10s
