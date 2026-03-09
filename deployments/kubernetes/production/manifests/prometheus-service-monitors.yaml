@@ -119,6 +119,94 @@ spec:
       interval: 30s
       scrapeTimeout: 10s
 ---
+# isA Trade Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-trade
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-trade
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# isA User Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-user
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-user
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# isA Creative Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-creative
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-creative
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# isA OS Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-os
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-os
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
 # APISIX Gateway — scrape its built-in Prometheus plugin
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

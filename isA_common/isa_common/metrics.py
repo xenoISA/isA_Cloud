@@ -84,6 +84,20 @@ _service_name: str = "unknown"
 _registry: Optional[object] = None
 
 
+def set_service_name(service_name: str) -> None:
+    """
+    Set the service name used for metric naming before creating metrics.
+
+    Call this before any create_counter/create_histogram/create_gauge calls
+    when metrics are created at module level (before setup_metrics runs).
+
+    Args:
+        service_name: Name of the service (e.g., "isA_OS_desktop", "isA_Creative")
+    """
+    global _service_name
+    _service_name = service_name
+
+
 def _effective_registry():
     """Return the registry to use — custom if set, otherwise the default."""
     return _registry if _registry is not None else DEFAULT_REGISTRY

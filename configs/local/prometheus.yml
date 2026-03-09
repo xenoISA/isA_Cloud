@@ -29,6 +29,18 @@ scrape_configs:
       - targets: ['isa-agent:8080']
         labels:
           app: isa-agent
+      - targets: ['isa-trade:8083']
+        labels:
+          app: isa-trade
+      - targets: ['isa-user:8084']
+        labels:
+          app: isa-user
+      - targets: ['isa-creative:8085']
+        labels:
+          app: isa-creative
+      - targets: ['isa-os:8086']
+        labels:
+          app: isa-os
 
   # Infrastructure exporters
   - job_name: 'redis'
