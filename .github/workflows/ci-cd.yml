@@ -5,12 +5,45 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - rollback
+      service:
+        description: "Service to rollback (or 'all')"
+        required: true
+        type: choice
+        options:
+          - all
+          - mcp-service
+          - model-service
+          - agent-service
+          - data-service
+          - os-services
+          - user-services
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      revision:
+        description: "Git revision/tag to rollback to (e.g., v1.2.3 or commit SHA)"
+        required: true
+        type: string
 
 jobs:
   # ============================================
   # Test isa_common Python library
   # ============================================
   test:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,6 +68,7 @@ jobs:
   # Security scan (isA_Cloud files only)
   # ============================================
   security:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -53,6 +87,7 @@ jobs:
   # Validate Kubernetes manifests
   # ============================================
   validate-manifests:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -72,3 +107,74 @@ jobs:
             echo "Validating: $file"
             python3 -c "import yaml; list(yaml.safe_load_all(open('$file')))" || exit 1
           done
+
+  # ============================================
+  # Rollback (manual trigger only)
+  # ============================================
+  rollback:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    strategy:
+      matrix:
+        service: ${{ github.event.inputs.service == 'all' && fromJSON('["mcp-service","model-service","agent-service","data-service","os-services","user-services"]') || fromJSON(format('["{0}"]', github.event.inputs.service)) }}
+    steps:
+      - name: Checkout code at target revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.revision }}
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+
+      - name: Configure ArgoCD
+        run: |
+          argocd login "$ARGOCD_SERVER" \
+            --username "$ARGOCD_USERNAME" \
+            --password "$ARGOCD_PASSWORD" \
+            --grpc-web
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_USERNAME: ${{ secrets.ARGOCD_USERNAME }}
+          ARGOCD_PASSWORD: ${{ secrets.ARGOCD_PASSWORD }}
+
+      - name: Rollback ${{ matrix.service }}
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          SERVICE="${{ matrix.service }}"
+          REVISION="${{ github.event.inputs.revision }}"
+          NAMESPACE="isa-cloud-${ENV}"
+          APP_NAME="${SERVICE}-${ENV}"
+
+          echo "Rolling back ${SERVICE} in ${ENV} to ${REVISION}"
+
+          # Sync ArgoCD app to the target revision
+          argocd app sync "${APP_NAME}" \
+            --revision "${REVISION}" \
+            --force \
+            --prune \
+            --timeout 300
+
+          # Wait for rollout to complete
+          argocd app wait "${APP_NAME}" \
+            --timeout 300 \
+            --health
+
+          echo "Rollback complete: ${SERVICE} in ${ENV} → ${REVISION}"
+
+      - name: Verify rollback health
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          SERVICE="${{ matrix.service }}"
+          APP_NAME="${SERVICE}-${ENV}"
+
+          # Check app health status
+          STATUS=$(argocd app get "${APP_NAME}" -o json | jq -r '.status.health.status')
+          if [ "$STATUS" != "Healthy" ]; then
+            echo "WARNING: ${APP_NAME} health status is ${STATUS}"
+            exit 1
+          fi
+          echo "${APP_NAME} is Healthy"

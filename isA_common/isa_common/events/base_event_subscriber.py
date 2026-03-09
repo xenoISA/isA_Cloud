@@ -14,7 +14,7 @@ Provides reusable event subscription infrastructure with:
 import logging
 import asyncio
 from typing import Optional, Callable, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from abc import ABC, abstractmethod
 from decimal import Decimal
 
@@ -55,18 +55,56 @@ class IdempotencyChecker:
     Checks if an event has already been processed.
 
     This prevents duplicate processing of the same event.
+    Supports three storage backends: memory, redis, and postgres.
     """
 
-    def __init__(self, storage_backend: str = "memory"):
+    # Redis key prefix for idempotency entries
+    REDIS_KEY_PREFIX = "isa:idempotency:"
+    # Default TTL for Redis entries (24 hours)
+    DEFAULT_TTL_SECONDS = 86400
+    # PostgreSQL table for idempotency records
+    PG_TABLE = "event_idempotency"
+
+    def __init__(
+        self,
+        storage_backend: str = "memory",
+        redis_client: Optional[Any] = None,
+        postgres_client: Optional[Any] = None,
+        ttl_seconds: int = 86400,
+    ):
         """
         Initialize idempotency checker.
 
         Args:
             storage_backend: "memory", "redis", or "postgres"
+            redis_client: AsyncRedisClient instance (required for redis backend)
+            postgres_client: AsyncPostgresClient instance (required for postgres backend)
+            ttl_seconds: TTL for processed event records (default: 24h)
         """
         self.storage = storage_backend
         self._memory_cache: Dict[str, datetime] = {}
         self._max_cache_size = 10000
+        self._redis = redis_client
+        self._postgres = postgres_client
+        self._ttl_seconds = ttl_seconds
+        self._pg_table_ensured = False
+
+    async def _ensure_pg_table(self) -> None:
+        """Create the idempotency table if it doesn't exist."""
+        if self._pg_table_ensured:
+            return
+        await self._postgres.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.PG_TABLE} (
+                event_id TEXT PRIMARY KEY,
+                processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                result JSONB
+            )
+        """)
+        await self._postgres.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_{self.PG_TABLE}_processed_at
+            ON {self.PG_TABLE} (processed_at)
+        """)
+        self._pg_table_ensured = True
 
     async def is_processed(self, event_id: str) -> bool:
         """
@@ -81,11 +119,15 @@ class IdempotencyChecker:
         if self.storage == "memory":
             return event_id in self._memory_cache
         elif self.storage == "redis":
-            # TODO: Implement Redis check
-            return False
+            key = f"{self.REDIS_KEY_PREFIX}{event_id}"
+            return await self._redis.exists(key)
         elif self.storage == "postgres":
-            # TODO: Implement PostgreSQL check
-            return False
+            await self._ensure_pg_table()
+            row = await self._postgres.query_one(
+                f"SELECT 1 FROM {self.PG_TABLE} WHERE event_id = $1",
+                event_id,
+            )
+            return row is not None
         return False
 
     async def mark_processed(self, event_id: str, result: Any = None):
@@ -103,13 +145,27 @@ class IdempotencyChecker:
                 oldest_key = next(iter(self._memory_cache))
                 del self._memory_cache[oldest_key]
 
-            self._memory_cache[event_id] = datetime.utcnow()
+            self._memory_cache[event_id] = datetime.now(timezone.utc)
         elif self.storage == "redis":
-            # TODO: Store in Redis with TTL
-            pass
+            import json
+            key = f"{self.REDIS_KEY_PREFIX}{event_id}"
+            value = json.dumps({
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "result": str(result) if result else None,
+            })
+            await self._redis.set(key, value, ex=self._ttl_seconds)
         elif self.storage == "postgres":
-            # TODO: Store in PostgreSQL
-            pass
+            import json
+            await self._ensure_pg_table()
+            result_json = json.dumps(result) if result else None
+            await self._postgres.execute(
+                f"""INSERT INTO {self.PG_TABLE} (event_id, processed_at, result)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (event_id) DO NOTHING""",
+                event_id,
+                datetime.now(timezone.utc),
+                result_json,
+            )
 
 
 class RetryPolicy:
@@ -179,7 +235,10 @@ class BaseEventSubscriber:
         service_name: str,
         nats_client: NATSClient,
         idempotency_storage: str = "memory",
-        retry_policy: Optional[RetryPolicy] = None
+        retry_policy: Optional[RetryPolicy] = None,
+        redis_client: Optional[Any] = None,
+        postgres_client: Optional[Any] = None,
+        idempotency_ttl: int = 86400,
     ):
         """
         Initialize event subscriber.
@@ -187,12 +246,20 @@ class BaseEventSubscriber:
         Args:
             service_name: Name of the service (for logging)
             nats_client: NATS client instance
-            idempotency_storage: Storage backend for idempotency
+            idempotency_storage: Storage backend for idempotency ("memory", "redis", "postgres")
             retry_policy: Retry policy (uses default if None)
+            redis_client: AsyncRedisClient instance (required when idempotency_storage="redis")
+            postgres_client: AsyncPostgresClient instance (required when idempotency_storage="postgres")
+            idempotency_ttl: TTL for processed event records in seconds (default: 24h)
         """
         self.service_name = service_name
         self.nats_client = nats_client
-        self.idempotency = IdempotencyChecker(idempotency_storage)
+        self.idempotency = IdempotencyChecker(
+            storage_backend=idempotency_storage,
+            redis_client=redis_client,
+            postgres_client=postgres_client,
+            ttl_seconds=idempotency_ttl,
+        )
         self.retry_policy = retry_policy or RetryPolicy()
 
         # Event handlers registry
@@ -422,7 +489,7 @@ class BaseEventSubscriber:
         Returns:
             True if processed successfully
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         self.metrics["events_received"] += 1
 
         try:
@@ -468,7 +535,7 @@ class BaseEventSubscriber:
                 self.metrics["events_processed"] += 1
 
                 # Record processing time
-                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
                 self.metrics["total_processing_time"] += elapsed
 
                 logger.info(
@@ -601,7 +668,7 @@ class BaseEventSubscriber:
                 "original_event": event.model_dump() if hasattr(event, 'model_dump') else {},
                 "original_subject": original_subject,
                 "failure_reason": reason,
-                "failed_at": datetime.utcnow().isoformat(),
+                "failed_at": datetime.now(timezone.utc).isoformat(),
                 "service": self.service_name
             }
 

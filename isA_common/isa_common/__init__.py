@@ -47,6 +47,13 @@ from .async_loki_client import AsyncLokiClient
 from .loki_handler import LokiHandler, setup_loki_logging
 
 # =============================================================================
+# Observability (Metrics, Tracing, Unified Setup)
+# =============================================================================
+from .metrics import setup_metrics, create_counter, create_histogram, create_gauge, metrics_text
+from .tracing import setup_tracing, get_tracer
+from .observability import setup_observability
+
+# =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
 # =============================================================================
 from .async_sqlite_client import AsyncSQLiteClient
@@ -80,6 +87,15 @@ __all__ = [
     'AsyncLokiClient',
     'LokiHandler',
     'setup_loki_logging',
+    # Observability
+    'setup_metrics',
+    'create_counter',
+    'create_histogram',
+    'create_gauge',
+    'metrics_text',
+    'setup_tracing',
+    'get_tracer',
+    'setup_observability',
     # Local-mode alternative clients
     'AsyncSQLiteClient',
     'AsyncLocalStorageClient',
@@ -105,8 +121,11 @@ NATIVE_PORTS: Dict[str, int] = {
     'minio': 9000,
     'consul': 8500,
     'loki': 3100,
+    'tempo_otlp_grpc': 4317,
+    'tempo_otlp_http': 4318,
+    'prometheus': 9090,
     'grafana': 3000,
     'duckdb': 0,  # Embedded, no port
 }
 
-__version__ = '0.3.1'
+__version__ = '0.4.0'
