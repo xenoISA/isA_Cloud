@@ -17,7 +17,7 @@ import asyncio
 import json
 import uuid
 from typing import List, Dict, Optional, AsyncIterator, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiomqtt
 
@@ -83,7 +83,8 @@ class AsyncMQTTClient(AsyncBaseClient):
         self._logger.info(f"MQTT client ready for {self._host}:{self._port}")
 
     async def _disconnect(self) -> None:
-        """Close MQTT connection state."""
+        """Close MQTT connection state and clean up subscriptions."""
+        self._subscriptions.clear()
         self._sessions.clear()
 
     def _get_client_config(self) -> Dict:
@@ -135,7 +136,7 @@ class AsyncMQTTClient(AsyncBaseClient):
             self._sessions[session_id] = {
                 'client_id': client_id,
                 'username': username,
-                'connected_at': datetime.utcnow().isoformat(),
+                'connected_at': datetime.now(timezone.utc).isoformat(),
                 'messages_sent': 0,
                 'messages_received': 0
             }
@@ -288,7 +289,7 @@ class AsyncMQTTClient(AsyncBaseClient):
                         'payload': message.payload,
                         'qos': message.qos,
                         'retained': message.retain,
-                        'timestamp': datetime.utcnow().isoformat()
+                        'timestamp': datetime.now(timezone.utc).isoformat()
                     }
 
         except Exception as e:
@@ -324,7 +325,7 @@ class AsyncMQTTClient(AsyncBaseClient):
                         'payload': message.payload,
                         'qos': message.qos,
                         'retained': message.retain,
-                        'timestamp': datetime.utcnow().isoformat()
+                        'timestamp': datetime.now(timezone.utc).isoformat()
                     }
 
         except Exception as e:
@@ -374,8 +375,8 @@ class AsyncMQTTClient(AsyncBaseClient):
                 'device_name': device_name,
                 'device_type': device_type,
                 'status': 1,  # online
-                'registered_at': datetime.utcnow().isoformat(),
-                'last_seen': datetime.utcnow().isoformat(),
+                'registered_at': datetime.now(timezone.utc).isoformat(),
+                'last_seen': datetime.now(timezone.utc).isoformat(),
                 'metadata': metadata or {},
                 'subscribed_topics': [],
                 'messages_sent': 0,
@@ -440,7 +441,7 @@ class AsyncMQTTClient(AsyncBaseClient):
         try:
             if device_id in self._devices:
                 self._devices[device_id]['status'] = status
-                self._devices[device_id]['last_seen'] = datetime.utcnow().isoformat()
+                self._devices[device_id]['last_seen'] = datetime.now(timezone.utc).isoformat()
                 if metadata:
                     self._devices[device_id]['metadata'].update(metadata)
 
@@ -546,7 +547,7 @@ class AsyncMQTTClient(AsyncBaseClient):
                                     'topic': str(message.topic),
                                     'payload': message.payload,
                                     'qos': message.qos,
-                                    'timestamp': datetime.utcnow().isoformat()
+                                    'timestamp': datetime.now(timezone.utc).isoformat()
                                 }
                             break
                 except asyncio.TimeoutError:

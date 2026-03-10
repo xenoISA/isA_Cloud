@@ -107,10 +107,22 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         return self._get_user_path() / safe_bucket
 
     def _get_object_path(self, bucket_name: str, object_key: str) -> Path:
-        """Get full path for an object."""
+        """Get full path for an object.
+
+        Validates that the resolved path stays within the bucket directory
+        to prevent path traversal attacks.
+        """
         bucket_path = self._get_bucket_path(bucket_name)
         # Preserve object key path structure
-        return bucket_path / object_key
+        object_path = bucket_path / object_key
+        # Prevent path traversal (e.g. ../../etc/passwd)
+        try:
+            object_path.resolve().relative_to(bucket_path.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Invalid object key '{object_key}': path traversal detected"
+            )
+        return object_path
 
     def _get_metadata_path(self, object_path: Path) -> Path:
         """Get metadata sidecar file path."""
