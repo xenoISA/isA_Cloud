@@ -8,7 +8,6 @@ Fixes #118.
 
 import os
 import pytest
-from pathlib import Path
 
 from isa_common.async_local_storage_client import AsyncLocalStorageClient
 
