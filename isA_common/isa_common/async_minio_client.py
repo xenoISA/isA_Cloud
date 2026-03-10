@@ -99,7 +99,7 @@ class AsyncMinIOClient(AsyncBaseClient):
     async def _connect(self) -> None:
         """Create aioboto3 session."""
         self._session = aioboto3.Session()
-        self._self._logger.info(f"Created aioboto3 session for {self._endpoint_url}")
+        self._logger.info(f"Created aioboto3 session for {self._endpoint_url}")
 
     async def _disconnect(self) -> None:
         """Close aioboto3 session."""
