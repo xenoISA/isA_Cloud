@@ -4,7 +4,7 @@ Unit test fixtures — all tests use mocked backends, no infrastructure required
 import logging
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 
 # ============================================================================
@@ -192,3 +192,107 @@ async def loki_client():
     yield client
     client._batch = []
     client._connected = False
+
+
+# ============================================================================
+# SQLite
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def sqlite_client(tmp_path):
+    """AsyncSQLiteClient with a real temp database (no external deps)."""
+    from isa_common import AsyncSQLiteClient
+
+    client = AsyncSQLiteClient(
+        database="test.db",
+        db_path=str(tmp_path),
+        user_id="test_user", organization_id="org1",
+        lazy_connect=True,
+    )
+    # Mock _conn so tests don't need aiosqlite
+    client._conn = AsyncMock()
+    client._connected = True
+    yield client
+    client._connected = False
+
+
+# ============================================================================
+# LocalStorage
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def local_storage_client(tmp_path):
+    """AsyncLocalStorageClient with a real temp directory."""
+    from isa_common import AsyncLocalStorageClient
+
+    client = AsyncLocalStorageClient(
+        base_path=str(tmp_path),
+        user_id="test_user", organization_id="org1",
+        lazy_connect=True,
+    )
+    client._connected = True
+    yield client
+    client._connected = False
+
+
+# ============================================================================
+# ChromaDB
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def chroma_client(tmp_path):
+    """AsyncChromaClient with mocked chromadb backend."""
+    from isa_common import AsyncChromaClient
+
+    client = AsyncChromaClient(
+        persist_directory=str(tmp_path),
+        user_id="test_user", organization_id="org1",
+        lazy_connect=True,
+    )
+    client._client = MagicMock()
+    client._connected = True
+    yield client
+    client._connected = False
+
+
+# ============================================================================
+# Memory (In-memory cache)
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def memory_client():
+    """AsyncMemoryClient with instance-local store (no global bleed)."""
+    from isa_common import AsyncMemoryClient
+
+    client = AsyncMemoryClient(
+        use_global_store=False,
+        user_id="test_user", organization_id="org1",
+        lazy_connect=True,
+    )
+    client._connected = True
+    yield client
+    client._store.clear()
+    client._expiry.clear()
+    client._connected = False
+
+
+# ============================================================================
+# Consul
+# ============================================================================
+
+@pytest.fixture
+def consul_registry():
+    """ConsulRegistry with mocked consul backend."""
+    from isa_common.consul_client import ConsulRegistry
+
+    with patch("isa_common.consul_client.consul.Consul") as MockConsul:
+        mock_consul = MagicMock()
+        MockConsul.return_value = mock_consul
+        registry = ConsulRegistry(
+            service_name="test-service",
+            service_port=8080,
+            consul_host="localhost",
+            consul_port=8500,
+        )
+        registry.consul = mock_consul
+        yield registry
