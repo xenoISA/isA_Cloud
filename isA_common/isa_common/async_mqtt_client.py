@@ -82,6 +82,16 @@ class AsyncMQTTClient(AsyncBaseClient):
         """MQTT uses context manager for connections, just log ready state."""
         self._logger.info(f"MQTT client ready for {self._host}:{self._port}")
 
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up MQTT resources on context exit."""
+        try:
+            self._subscriptions.clear()
+            self._sessions.clear()
+            self._devices.clear()
+        except Exception as e:
+            self._logger.debug(f"MQTT cleanup during exit: {e}")
+        await self.close()
+
     async def _disconnect(self) -> None:
         """Close MQTT connection state and clean up subscriptions."""
         self._subscriptions.clear()

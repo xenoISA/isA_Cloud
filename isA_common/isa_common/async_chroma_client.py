@@ -100,7 +100,7 @@ class AsyncChromaClient(AsyncBaseClient):
             self._client = None
 
         if self._executor:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True, cancel_futures=True)
             self._executor = None
 
     def _run_sync(self, func, *args, **kwargs):

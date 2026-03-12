@@ -6,7 +6,7 @@ Base Event Models
 Generic event models that can be extended by business-specific implementations.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from decimal import Decimal
 from pydantic import BaseModel, Field
@@ -19,11 +19,11 @@ class EventMetadata(BaseModel):
     This provides consistent tracking across all event types.
     """
     event_id: str = Field(
-        default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}",
+        default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}",
         description="Unique event identifier"
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Event creation timestamp"
     )
     source_service: Optional[str] = Field(

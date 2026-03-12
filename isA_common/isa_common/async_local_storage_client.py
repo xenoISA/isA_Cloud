@@ -82,7 +82,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
     async def _disconnect(self) -> None:
         """Cleanup."""
         if self._executor:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True, cancel_futures=True)
             self._executor = None
 
     def _get_user_path(self) -> Path:

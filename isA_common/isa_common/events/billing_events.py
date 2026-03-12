@@ -7,7 +7,7 @@ This provides loose coupling, better scalability, and fault tolerance.
 
 from enum import Enum
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ class UsageEvent(BaseModel):
     Example: usage.recorded.gpt-4, usage.recorded.dall-e-3
     """
     event_type: str = EventType.USAGE_RECORDED
-    event_id: str = Field(default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}")
+    event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
     # User context
     user_id: str = Field(..., description="User who triggered the usage")
@@ -73,7 +73,7 @@ class UsageEvent(BaseModel):
 
     # Metadata
     usage_details: Dict[str, Any] = Field(default_factory=dict, description="Additional context")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         json_encoders = {
@@ -96,7 +96,7 @@ class BillingCalculatedEvent(BaseModel):
     NATS Subject: billing.calculated
     """
     event_type: str = EventType.COST_CALCULATED
-    event_id: str = Field(default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}")
+    event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
     # References
     user_id: str
@@ -123,7 +123,7 @@ class BillingCalculatedEvent(BaseModel):
     is_free_tier: bool = False
     is_included_in_subscription: bool = False
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         json_encoders = {
@@ -142,7 +142,7 @@ class BillingErrorEvent(BaseModel):
     NATS Subject: billing.failed
     """
     event_type: str = EventType.BILLING_FAILED
-    event_id: str = Field(default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}")
+    event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
     user_id: str
     usage_event_id: str
@@ -152,7 +152,7 @@ class BillingErrorEvent(BaseModel):
     error_message: str
     retry_count: int = 0
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         json_encoders = {
@@ -174,7 +174,7 @@ class TokensDeductedEvent(BaseModel):
     NATS Subject: wallet.tokens.deducted
     """
     event_type: str = EventType.TOKENS_DEDUCTED
-    event_id: str = Field(default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}")
+    event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
     # References
     user_id: str
@@ -191,7 +191,7 @@ class TokensDeductedEvent(BaseModel):
     monthly_used: Optional[Decimal] = Field(None, description="Tokens used this month")
     percentage_used: Optional[float] = Field(None, description="% of monthly quota used")
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         json_encoders = {
@@ -210,7 +210,7 @@ class TokensInsufficientEvent(BaseModel):
     NATS Subject: wallet.tokens.insufficient
     """
     event_type: str = EventType.TOKENS_INSUFFICIENT
-    event_id: str = Field(default_factory=lambda: f"evt_{datetime.utcnow().timestamp()}")
+    event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
     user_id: str
     billing_record_id: str
@@ -221,7 +221,7 @@ class TokensInsufficientEvent(BaseModel):
 
     suggested_action: str = "upgrade_plan"  # or "purchase_tokens"
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         json_encoders = {
