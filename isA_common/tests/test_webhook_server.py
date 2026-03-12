@@ -6,7 +6,7 @@
 
 from flask import Flask, request, jsonify
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 
@@ -24,7 +24,7 @@ def handle_mqtt_webhook():
         headers = dict(request.headers)
 
         # 记录时间
-        received_at = datetime.utcnow().isoformat()
+        received_at = datetime.now(timezone.utc).isoformat()
 
         # 保存消息
         webhook_message = {

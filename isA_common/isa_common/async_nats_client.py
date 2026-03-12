@@ -231,6 +231,20 @@ class AsyncNATSClient(AsyncBaseClient):
             self._js = None
         self._connected = False
 
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up NATS resources on context exit."""
+        try:
+            # Unsubscribe all active subscriptions
+            for subject, sub in list(self._subscriptions.items()):
+                try:
+                    await sub.unsubscribe()
+                except Exception as e:
+                    self._logger.debug(f"NATS unsubscribe {subject} during exit: {e}")
+            self._subscriptions.clear()
+        except Exception as e:
+            self._logger.debug(f"NATS subscription cleanup during exit: {e}")
+        await self.close()
+
     async def close(self) -> None:
         """Close NATS connection even if state flag is stale."""
         if self._nc is not None or self._connected:
