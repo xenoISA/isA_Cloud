@@ -138,7 +138,8 @@ kubectl exec -n isa-cloud-local deploy/postgresql -- \
    ```
 2. If corruption is severe, restore from backup:
    ```bash
-   ./scripts/restore-cluster-data.sh --service postgresql --backup-dir /path/to/backup
+   # Restore all services (PostgreSQL included) from backup
+   ./scripts/restore-cluster-data.sh /path/to/backup
    ```
 
 ## Backup & Restore

@@ -132,8 +132,8 @@ kubectl exec -n isa-cloud-local deploy/redis-master -- redis-cli --latency-histo
 # Create backup (uses backup-cluster-data.sh)
 ./scripts/backup-cluster-data.sh
 
-# Restore Redis only
-./scripts/restore-cluster-data.sh --service redis --backup-dir ./backups/latest
+# Restore all services (Redis included) from backup
+./scripts/restore-cluster-data.sh ./backups/cluster-backup-YYYYMMDD_HHMMSS
 
 # Manual RDB backup
 kubectl exec -n isa-cloud-local deploy/redis-master -- redis-cli BGSAVE
