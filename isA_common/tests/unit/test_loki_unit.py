@@ -166,7 +166,7 @@ class TestLokiPushBatch:
 
         result = await loki_client.push_batch([{"labels": {}, "message": "fail"}])
 
-        assert result is False
+        assert result is None
 
 
 class TestLokiQuery:

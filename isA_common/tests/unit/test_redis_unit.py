@@ -122,12 +122,12 @@ class TestRedisMultiTenant:
 
 
 class TestRedisErrorHandling:
-    async def test_set_connection_error_returns_false(self, redis_client):
+    async def test_set_connection_error_returns_none(self, redis_client):
         redis_client._client.set = AsyncMock(side_effect=ConnectionError("refused"))
 
         result = await redis_client.set("key", "value")
 
-        assert result is False
+        assert result is None
 
     async def test_get_connection_error_returns_none(self, redis_client):
         redis_client._client.get = AsyncMock(side_effect=ConnectionError("refused"))

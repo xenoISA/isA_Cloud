@@ -246,8 +246,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "delete bucket")
-            return False
+            return self.handle_error(e, "delete bucket")
 
     async def _empty_bucket(self, client, bucket_name: str):
         """Delete all objects in a bucket."""
@@ -461,8 +460,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                     raise e
 
         except Exception as e:
-            self.handle_error(e, "upload large file")
-            return False
+            return self.handle_error(e, "upload large file")
 
     # ============================================
     # Object Download
@@ -552,12 +550,10 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
             except Exception as e:
-                self.handle_error(e, "download to file")
-                return False
+                return self.handle_error(e, "download to file")
 
         except Exception as e:
-            self.handle_error(e, "download to file")
-            return False
+            return self.handle_error(e, "download to file")
 
     # ============================================
     # Object Management
@@ -608,8 +604,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "delete object")
-            return False
+            return self.handle_error(e, "delete object")
 
     async def delete_objects(self, bucket_name: str, object_keys: List[str]) -> bool:
         """Batch delete objects."""
@@ -625,8 +620,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "delete objects")
-            return False
+            return self.handle_error(e, "delete objects")
 
     async def copy_object(
         self,
@@ -649,8 +643,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "copy object")
-            return False
+            return self.handle_error(e, "copy object")
 
     async def get_object_metadata(self, bucket_name: str, object_key: str) -> Optional[Dict]:
         """Get object metadata without downloading content."""
@@ -754,8 +747,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "set bucket versioning")
-            return False
+            return self.handle_error(e, "set bucket versioning")
 
     async def set_bucket_tags(self, bucket_name: str, tags: Dict[str, str]) -> bool:
         """Set bucket tags."""
@@ -771,8 +763,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "set bucket tags")
-            return False
+            return self.handle_error(e, "set bucket tags")
 
     async def get_bucket_tags(self, bucket_name: str) -> Optional[Dict[str, str]]:
         """Get bucket tags."""
@@ -813,8 +804,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except Exception as e:
-            self.handle_error(e, "set object tags")
-            return False
+            return self.handle_error(e, "set object tags")
 
     async def get_object_tags(self, bucket_name: str, object_key: str) -> Optional[Dict[str, str]]:
         """Get object tags."""
