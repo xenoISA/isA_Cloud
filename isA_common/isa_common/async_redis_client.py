@@ -126,8 +126,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return result is True or result == 'OK'
 
         except Exception as e:
-            self.handle_error(e, "set")
-            return False
+            return self.handle_error(e, "set")
 
     async def get(self, key: str) -> Optional[str]:
         """Get value by key."""
@@ -146,8 +145,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return result > 0
 
         except Exception as e:
-            self.handle_error(e, "delete")
-            return False
+            return self.handle_error(e, "delete")
 
     async def exists(self, key: str) -> bool:
         """Check if key exists."""
@@ -194,8 +192,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "mset")
-            return False
+            return self.handle_error(e, "mset")
 
     async def mget(self, keys: List[str]) -> Dict[str, str]:
         """Batch get key-values."""
@@ -221,8 +218,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return await self._client.delete(*prefixed_keys)
 
         except Exception as e:
-            self.handle_error(e, "delete_multiple")
-            return 0
+            return self.handle_error(e, "delete_multiple")
 
     async def execute_batch(self, commands: List[Dict]) -> Optional[Dict]:
         """Execute batch commands using pipeline."""
@@ -295,8 +291,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return await self._client.expire(self._prefix_key(key), seconds)
 
         except Exception as e:
-            self.handle_error(e, "expire")
-            return False
+            return self.handle_error(e, "expire")
 
     async def ttl(self, key: str) -> Optional[int]:
         """Get time to live."""
@@ -318,8 +313,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "rename")
-            return False
+            return self.handle_error(e, "rename")
 
     async def list_keys(self, pattern: str = "*", limit: int = 100) -> List[str]:
         """List keys matching pattern."""
@@ -413,8 +407,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "hset")
-            return False
+            return self.handle_error(e, "hset")
 
     async def hget(self, key: str, field: str) -> Optional[str]:
         """Get hash field."""
@@ -441,8 +434,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return await self._client.hdel(self._prefix_key(key), *fields)
 
         except Exception as e:
-            self.handle_error(e, "hdelete")
-            return 0
+            return self.handle_error(e, "hdelete")
 
     async def hexists(self, key: str, field: str) -> bool:
         """Check if hash field exists."""
@@ -617,8 +609,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return result == 1
 
         except Exception as e:
-            self.handle_error(e, "release_lock")
-            return False
+            return self.handle_error(e, "release_lock")
 
     async def renew_lock(self, lock_key: str, lock_id: str, ttl_seconds: int = 10) -> bool:
         """Renew distributed lock TTL."""
@@ -638,8 +629,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return result == 1
 
         except Exception as e:
-            self.handle_error(e, "renew_lock")
-            return False
+            return self.handle_error(e, "renew_lock")
 
     # ============================================
     # Pub/Sub Operations
@@ -722,8 +712,7 @@ class AsyncRedisClient(AsyncBaseClient):
             return result > 0
 
         except Exception as e:
-            self.handle_error(e, "delete_session")
-            return False
+            return self.handle_error(e, "delete_session")
 
     # ============================================
     # Statistics

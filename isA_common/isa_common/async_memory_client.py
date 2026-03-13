@@ -163,8 +163,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "set")
-            return False
+            return self.handle_error(e, "set")
 
     async def get(self, key: str) -> Optional[str]:
         """Get value by key."""
@@ -197,8 +196,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return existed
 
         except Exception as e:
-            self.handle_error(e, "delete")
-            return False
+            return self.handle_error(e, "delete")
 
     async def exists(self, key: str) -> bool:
         """Check if key exists."""
@@ -249,8 +247,7 @@ class AsyncMemoryClient(AsyncBaseClient):
                 return False
 
         except Exception as e:
-            self.handle_error(e, "expire")
-            return False
+            return self.handle_error(e, "expire")
 
     async def incr(self, key: str, amount: int = 1) -> Optional[int]:
         """Increment value by amount."""
@@ -293,8 +290,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "mset")
-            return False
+            return self.handle_error(e, "mset")
 
     async def mget(self, keys: List[str]) -> List[Optional[str]]:
         """Get multiple values by keys."""
@@ -402,8 +398,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "flush")
-            return False
+            return self.handle_error(e, "flush")
 
     async def flush_all(self) -> Optional[bool]:
         """Clear all keys (globally)."""
@@ -417,8 +412,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "flush_all")
-            return False
+            return self.handle_error(e, "flush_all")
 
     # ============================================
     # Hash Operations
@@ -445,8 +439,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             return True
 
         except Exception as e:
-            self.handle_error(e, "hset")
-            return False
+            return self.handle_error(e, "hset")
 
     async def hget(self, name: str, key: str) -> Optional[str]:
         """Get hash field."""
@@ -503,8 +496,7 @@ class AsyncMemoryClient(AsyncBaseClient):
                 return False
 
         except Exception as e:
-            self.handle_error(e, "hdel")
-            return False
+            return self.handle_error(e, "hdel")
 
     # ============================================
     # List Operations

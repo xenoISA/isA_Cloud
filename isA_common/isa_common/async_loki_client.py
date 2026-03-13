@@ -156,8 +156,7 @@ class AsyncLokiClient(AsyncBaseClient):
 
             return True
         except Exception as e:
-            self.handle_error(e, "push_log")
-            return False
+            return self.handle_error(e, "push_log")
 
     async def push_batch(
         self,
@@ -208,8 +207,7 @@ class AsyncLokiClient(AsyncBaseClient):
                 return False
 
         except Exception as e:
-            self.handle_error(e, "push_batch")
-            return False
+            return self.handle_error(e, "push_batch")
 
     async def _flush_batch(self) -> bool:
         """Flush accumulated batch to Loki.
