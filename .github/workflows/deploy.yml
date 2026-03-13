@@ -19,13 +19,12 @@ on:
         - user
         - blockchain
       environment:
-        description: 'Environment to deploy to'
+        description: 'Environment to deploy to (production requires promote-to-production workflow)'
         required: true
         default: 'staging'
         type: choice
         options:
         - staging
-        - production
 
 env:
   AWS_REGION: us-east-1
