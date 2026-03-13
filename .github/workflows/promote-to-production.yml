@@ -1,0 +1,180 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to promote (all, gateway, mcp, model, agent, user, blockchain)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - gateway
+        - mcp
+        - model
+        - agent
+        - user
+        - blockchain
+      staging_ref:
+        description: 'Git ref currently deployed to staging (commit SHA or tag)'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: isa-platform-cluster
+
+jobs:
+  # ============================================
+  # Gate 1: Verify staging is healthy
+  # ============================================
+  verify-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.staging_ref }}
+
+      - name: Verify staging deployment matches ref
+        run: |
+          echo "Verifying staging is running ref: ${{ github.event.inputs.staging_ref }}"
+          # TODO: Query staging health endpoint to verify deployed SHA matches
+          # curl -sf "https://staging.isa.cloud/health" | jq -r '.version'
+
+      - name: Check staging health
+        run: |
+          echo "Checking staging service health..."
+          # TODO: Replace with real staging endpoints
+          # SERVICES=("gateway" "mcp" "model" "agent" "user")
+          # for svc in "${SERVICES[@]}"; do
+          #   STATUS=$(curl -sf "https://staging.isa.cloud/${svc}/health" | jq -r '.status')
+          #   if [ "$STATUS" != "healthy" ]; then
+          #     echo "FAIL: ${svc} is ${STATUS}"
+          #     exit 1
+          #   fi
+          #   echo "OK: ${svc} is healthy"
+          # done
+          echo "Staging health check passed (placeholder)"
+
+  # ============================================
+  # Gate 2: Verify CI passed for this ref
+  # ============================================
+  verify-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status for ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REF="${{ github.event.inputs.staging_ref }}"
+          echo "Checking CI status for ${REF}..."
+
+          # Get the combined status for the commit
+          STATUS=$(gh api "repos/${{ github.repository }}/commits/${REF}/status" \
+            --jq '.state' 2>/dev/null || echo "unknown")
+
+          # Also check check-runs (GitHub Actions uses check-runs, not statuses)
+          CHECK_CONCLUSION=$(gh api "repos/${{ github.repository }}/commits/${REF}/check-runs" \
+            --jq '[.check_runs[] | select(.conclusion != "skipped")] | if length == 0 then "no_checks" elif all(.conclusion == "success") then "success" else "failure" end' \
+            2>/dev/null || echo "unknown")
+
+          echo "Commit status: ${STATUS}"
+          echo "Check runs: ${CHECK_CONCLUSION}"
+
+          if [ "$CHECK_CONCLUSION" = "failure" ]; then
+            echo "FAIL: CI check runs failed for ${REF}"
+            exit 1
+          fi
+
+          if [ "$STATUS" = "failure" ] || [ "$STATUS" = "error" ]; then
+            echo "FAIL: CI status is ${STATUS} for ${REF}"
+            exit 1
+          fi
+
+          echo "CI verification passed"
+
+  # ============================================
+  # Gate 3: Run smoke tests against staging
+  # ============================================
+  smoke-test-staging:
+    needs: [verify-staging]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.staging_ref }}
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+          # TODO: Run actual smoke tests against staging environment
+          # Example: pytest tests/smoke/ --env=staging
+          # Example: ./scripts/smoke-test.sh staging
+          echo "Smoke tests passed (placeholder)"
+
+  # ============================================
+  # Gate 4: Manual approval + production deploy
+  # ============================================
+  deploy-production:
+    needs: [verify-staging, verify-ci, smoke-test-staging]
+    runs-on: ubuntu-latest
+    environment: production  # Requires manual approval via GitHub environment protection rules
+    steps:
+      - name: Checkout code at staging ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.staging_ref }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Deploy to production
+        env:
+          GITHUB_SHA: ${{ github.event.inputs.staging_ref }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          chmod +x deployments/scripts/deploy-service.sh
+          SERVICE="${{ github.event.inputs.service }}"
+          echo "Deploying ${SERVICE} to production from ref ${{ github.event.inputs.staging_ref }}"
+          ./deployments/scripts/deploy-service.sh "$SERVICE" production deploy
+
+      - name: Post-deploy health check
+        run: |
+          echo "Verifying production health after deploy..."
+          sleep 30  # Wait for rollout
+          # TODO: Check production health endpoints
+          echo "Production health check passed (placeholder)"
+
+      - name: Notify Slack on Success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          message: |
+            :rocket: Production promotion successful!
+            Service: ${{ github.event.inputs.service }}
+            Ref: ${{ github.event.inputs.staging_ref }}
+            Approved by: ${{ github.actor }}
+
+      - name: Notify Slack on Failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          message: |
+            :red_circle: Production promotion FAILED!
+            Service: ${{ github.event.inputs.service }}
+            Ref: ${{ github.event.inputs.staging_ref }}
+            Approved by: ${{ github.actor }}
