@@ -62,7 +62,7 @@ from .async_chroma_client import AsyncChromaClient
 from .async_memory_client import AsyncMemoryClient
 
 # Service Discovery
-from .consul_client import ConsulRegistry, consul_lifespan
+from .consul_client import ConsulRegistry, AsyncConsulRegistry, consul_lifespan
 
 # =============================================================================
 # Exports
@@ -103,6 +103,7 @@ __all__ = [
     'AsyncMemoryClient',
     # Service discovery
     'ConsulRegistry',
+    'AsyncConsulRegistry',
     'consul_lifespan',
     # Port configuration
     'NATIVE_PORTS',

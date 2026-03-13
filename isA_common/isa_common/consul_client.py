@@ -15,6 +15,8 @@ import ipaddress
 
 import consul
 
+from .async_base_client import AsyncBaseClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -654,6 +656,381 @@ class ConsulRegistry:
         if not endpoint:
             raise ValueError("Service duckdb-grpc-service not found in Consul")
         return endpoint
+
+
+class AsyncConsulRegistry(AsyncBaseClient):
+    """
+    Async-compatible Consul service registry — extends AsyncBaseClient.
+
+    Wraps the synchronous python-consul library with asyncio.to_thread()
+    so all calls are non-blocking. Supports ``async with`` context manager,
+    ``health_check()``, and the same registration / discovery / KV API as
+    the synchronous ConsulRegistry.
+
+    Usage::
+
+        async with AsyncConsulRegistry(
+            service_name="my-service",
+            service_port=8080,
+        ) as registry:
+            await registry.register()
+            endpoint = await registry.get_service_endpoint("other-service")
+    """
+
+    SERVICE_NAME = "Consul"
+    DEFAULT_HOST = "localhost"
+    DEFAULT_PORT = 8500
+    ENV_PREFIX = "CONSUL"
+
+    def __init__(
+        self,
+        service_name: Optional[str] = None,
+        service_port: Optional[int] = None,
+        consul_host: str = "localhost",
+        consul_port: int = 8500,
+        service_host: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        meta: Optional[Dict[str, str]] = None,
+        health_check_type: str = "ttl",
+        **kwargs,
+    ):
+        super().__init__(host=consul_host, port=consul_port, **kwargs)
+
+        self.service_name = service_name
+        self.service_port = service_port
+        self.meta = meta or {}
+        self.tags = tags or []
+        self.health_check_type = health_check_type
+        self.check_interval = "15s"
+        self.deregister_after = "90s"
+        self.ttl_interval = 30
+        self._consul = None
+        self._health_check_task = None
+
+        # Resolve service host (same logic as sync ConsulRegistry)
+        import os
+
+        def _usable(addr: str | None) -> bool:
+            return bool(addr) and addr != "0.0.0.0" and not _is_loopback(addr)
+
+        if service_name and service_port is not None:
+            if _usable(service_host):
+                self.service_host = service_host
+            else:
+                env_host = os.getenv("SERVICE_HOST")
+                if _usable(env_host):
+                    self.service_host = env_host
+                else:
+                    self.service_host = os.getenv("HOSTNAME", socket.gethostname())
+
+            if _is_loopback(self.service_host):
+                logger.warning(
+                    f"Consul will register {service_name} at loopback address "
+                    f"'{self.service_host}'. Set SERVICE_HOST to a routable address."
+                )
+            self.service_id = f"{service_name}-{self.service_host}-{service_port}"
+        else:
+            self.service_host = service_host or os.getenv(
+                "HOSTNAME", socket.gethostname()
+            )
+            self.service_id = None
+
+    # ------------------------------------------------------------------
+    # AsyncBaseClient contract
+    # ------------------------------------------------------------------
+
+    async def _connect(self) -> None:
+        self._consul = consul.Consul(host=self._host, port=self._port)
+        self._logger.info(f"Consul client connected to {self._host}:{self._port}")
+
+    async def _disconnect(self) -> None:
+        if self._health_check_task:
+            self._health_check_task.cancel()
+            try:
+                await self._health_check_task
+            except asyncio.CancelledError:
+                pass
+            self._health_check_task = None
+        self._consul = None
+
+    async def health_check(self) -> Optional[Dict]:
+        try:
+            await self._ensure_connected()
+            info = await asyncio.to_thread(self._consul.agent.self)
+            return {
+                "healthy": True,
+                "node": info.get("Config", {}).get("NodeName", "unknown"),
+                "consul_host": self._host,
+                "consul_port": self._port,
+            }
+        except Exception as e:
+            return self.handle_error(e, "health check")
+
+    # ------------------------------------------------------------------
+    # Registration (async wrappers around sync consul calls)
+    # ------------------------------------------------------------------
+
+    async def register(self, cleanup_stale: bool = True) -> bool:
+        try:
+            await self._ensure_connected()
+            if cleanup_stale:
+                await self.cleanup_stale_registrations()
+
+            if self.health_check_type == "ttl":
+                check = consul.Check.ttl(f"{self.ttl_interval}s")
+            else:
+                check = consul.Check.http(
+                    f"http://{self.service_host}:{self.service_port}/health",
+                    interval=self.check_interval,
+                    timeout="5s",
+                    deregister=self.deregister_after,
+                )
+
+            await asyncio.to_thread(
+                self._consul.agent.service.register,
+                name=self.service_name,
+                service_id=self.service_id,
+                address=self.service_host,
+                port=self.service_port,
+                tags=self.tags,
+                meta=self.meta,
+                check=check,
+            )
+
+            if self.health_check_type == "ttl":
+                await asyncio.to_thread(
+                    self._consul.agent.check.ttl_pass,
+                    f"service:{self.service_id}",
+                )
+
+            logger.info(
+                f"✅ Service registered: {self.service_name} "
+                f"({self.service_id}) at {self.service_host}:{self.service_port}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to register service: {e}")
+            return False
+
+    async def deregister(self) -> bool:
+        try:
+            await self._ensure_connected()
+            await asyncio.to_thread(
+                self._consul.agent.service.deregister, self.service_id
+            )
+            logger.info(f"✅ Service deregistered: {self.service_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to deregister service: {e}")
+            return False
+
+    async def cleanup_stale_registrations(self) -> int:
+        try:
+            await self._ensure_connected()
+            services = await asyncio.to_thread(self._consul.agent.services)
+            removed = 0
+            for sid, info in services.items():
+                if (
+                    info["Service"] == self.service_name
+                    and info["Port"] == self.service_port
+                    and sid != self.service_id
+                ):
+                    await asyncio.to_thread(
+                        self._consul.agent.service.deregister, sid
+                    )
+                    removed += 1
+            return removed
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to cleanup stale registrations: {e}")
+            return 0
+
+    # ------------------------------------------------------------------
+    # Maintenance
+    # ------------------------------------------------------------------
+
+    async def maintain_registration(self):
+        """Background task: re-register and TTL-pass periodically."""
+        retry_count = 0
+        max_retries = 3
+        while True:
+            try:
+                services = await asyncio.to_thread(self._consul.agent.services)
+                if self.service_id not in services:
+                    logger.warning(f"Re-registering {self.service_id}")
+                    if await self.register():
+                        retry_count = 0
+
+                if self.health_check_type == "ttl":
+                    try:
+                        await asyncio.to_thread(
+                            self._consul.agent.check.ttl_pass,
+                            f"service:{self.service_id}",
+                            f"Healthy - {self.service_name}",
+                        )
+                        retry_count = 0
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count >= max_retries:
+                            await self.register()
+                            retry_count = 0
+
+                sleep_time = (
+                    5
+                    if retry_count > 0
+                    else (self.ttl_interval / 2 if self.health_check_type == "ttl" else 30)
+                )
+                await asyncio.sleep(sleep_time)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                retry_count += 1
+                await asyncio.sleep(min(10 * (2 ** (retry_count - 1)), 60))
+
+    def start_maintenance(self):
+        loop = asyncio.get_event_loop()
+        self._health_check_task = loop.create_task(self.maintain_registration())
+
+    def stop_maintenance(self):
+        if self._health_check_task:
+            self._health_check_task.cancel()
+            self._health_check_task = None
+
+    # ------------------------------------------------------------------
+    # KV Configuration
+    # ------------------------------------------------------------------
+
+    async def get_config(self, key: str, default: Any = None) -> Any:
+        try:
+            await self._ensure_connected()
+            full_key = f"{self.service_name}/{key}"
+            _, data = await asyncio.to_thread(self._consul.kv.get, full_key)
+            if data and data.get("Value"):
+                value = data["Value"].decode("utf-8")
+                try:
+                    return json.loads(value)
+                except json.JSONDecodeError:
+                    return value
+            return default
+        except Exception as e:
+            logger.error(f"Failed to get config {key}: {e}")
+            return default
+
+    async def set_config(self, key: str, value: Any) -> bool:
+        try:
+            await self._ensure_connected()
+            full_key = f"{self.service_name}/{key}"
+            if not isinstance(value, str):
+                value = json.dumps(value)
+            return await asyncio.to_thread(self._consul.kv.put, full_key, value)
+        except Exception as e:
+            logger.error(f"Failed to set config {key}: {e}")
+            return False
+
+    async def get_all_config(self) -> Dict[str, Any]:
+        try:
+            await self._ensure_connected()
+            prefix = f"{self.service_name}/"
+            _, data = await asyncio.to_thread(
+                self._consul.kv.get, prefix, recurse=True
+            )
+            if not data:
+                return {}
+            config = {}
+            for item in data:
+                if item["Value"]:
+                    key = item["Key"].replace(prefix, "")
+                    value = item["Value"].decode("utf-8")
+                    try:
+                        config[key] = json.loads(value)
+                    except json.JSONDecodeError:
+                        config[key] = value
+            return config
+        except Exception as e:
+            logger.error(f"Failed to get all config: {e}")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Service Discovery
+    # ------------------------------------------------------------------
+
+    async def discover_service(self, service_name: str) -> List[Dict[str, Any]]:
+        try:
+            await self._ensure_connected()
+            _, services = await asyncio.to_thread(
+                self._consul.health.service, service_name, passing=True
+            )
+            return [
+                {
+                    "id": s["Service"]["ID"],
+                    "address": s["Service"]["Address"],
+                    "port": s["Service"]["Port"],
+                    "tags": s["Service"].get("Tags", []),
+                    "meta": s["Service"].get("Meta", {}),
+                }
+                for s in services
+            ]
+        except Exception as e:
+            logger.error(f"Failed to discover service {service_name}: {e}")
+            return []
+
+    async def get_service_endpoint(
+        self, service_name: str, strategy: str = "health_weighted"
+    ) -> Optional[str]:
+        instances = await self.discover_service(service_name)
+        if not instances:
+            return None
+        if len(instances) == 1:
+            inst = instances[0]
+            return f"http://{inst['address']}:{inst['port']}"
+
+        import random
+
+        if strategy == "round_robin":
+            inst = self._get_round_robin_instance(service_name, instances)
+        else:
+            inst = random.choice(instances)
+        return f"http://{inst['address']}:{inst['port']}"
+
+    async def get_service_address(
+        self,
+        service_name: str,
+        fallback_url: Optional[str] = None,
+        max_retries: int = 3,
+    ) -> str:
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                endpoint = await self.get_service_endpoint(service_name)
+                if endpoint:
+                    return endpoint
+                last_error = f"Service {service_name} not found in Consul registry"
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.1 * (attempt + 1))
+
+        if fallback_url:
+            logger.warning(
+                f"All discovery attempts failed for {service_name}: {last_error}, "
+                f"using fallback: {fallback_url}"
+            )
+            return fallback_url
+
+        raise ValueError(
+            f"Service {service_name} not found after {max_retries} attempts "
+            f"and no fallback provided. Last error: {last_error}"
+        )
+
+    def _get_round_robin_instance(
+        self, service_name: str, instances: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        if not hasattr(self, "_round_robin_counters"):
+            self._round_robin_counters = {}
+        if service_name not in self._round_robin_counters:
+            self._round_robin_counters[service_name] = 0
+        counter = self._round_robin_counters[service_name]
+        self._round_robin_counters[service_name] = (counter + 1) % len(instances)
+        return instances[counter]
 
 
 @asynccontextmanager
