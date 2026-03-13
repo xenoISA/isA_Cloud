@@ -32,6 +32,19 @@ class AsyncBaseClient(ABC):
     - DEFAULT_PORT: Default port if not provided
     - ENV_PREFIX: Environment variable prefix (e.g., 'REDIS' for REDIS_HOST)
     - TENANT_SEPARATOR: Separator for multi-tenant key prefixing
+
+    Error Return Convention:
+        All methods use handle_error() in except blocks. Return values on error
+        follow these type-preserving defaults:
+
+        - Query (returns data)     → None   (caller checks: if result is None)
+        - Boolean (exists/is_*)    → False  (semantically correct: "not confirmed")
+        - Collection (list_*/keys) → []     (safe to iterate over)
+        - Scalar (count/execute)   → None   (0 is a valid count; None = error)
+        - Mutation (create/delete) → None   (None = "operation didn't happen")
+
+        This convention ensures callers can distinguish errors from valid empty
+        results (e.g., 0 items vs. failed query).
     """
 
     # Class-level config (override in subclasses)
@@ -159,6 +172,15 @@ class AsyncBaseClient(ABC):
     def handle_error(self, error: Exception, operation: str) -> None:
         """
         Log error and return None.
+
+        Always returns None. Callers should use this in except blocks::
+
+            except Exception as e:
+                return self.handle_error(e, "query")
+
+        For boolean methods (exists, etc.), call handle_error() for logging,
+        then explicitly return False. For collection methods, return [].
+        See the Error Return Convention in the class docstring.
 
         Args:
             error: The exception that occurred
