@@ -296,3 +296,28 @@ def consul_registry():
         )
         registry.consul = mock_consul
         yield registry
+
+
+# ============================================================================
+# AsyncConsulRegistry
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def async_consul_registry():
+    """AsyncConsulRegistry with mocked consul backend."""
+    from isa_common.consul_client import AsyncConsulRegistry
+
+    with patch("isa_common.consul_client.consul.Consul") as MockConsul:
+        mock_consul = MagicMock()
+        MockConsul.return_value = mock_consul
+        registry = AsyncConsulRegistry(
+            service_name="test-service",
+            service_port=8080,
+            consul_host="localhost",
+            consul_port=8500,
+            lazy_connect=True,
+        )
+        registry._consul = mock_consul
+        registry._connected = True
+        yield registry
+        registry._connected = False
