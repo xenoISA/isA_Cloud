@@ -127,12 +127,7 @@ class AsyncMQTTClient(AsyncBaseClient):
                 }
 
         except Exception as e:
-            return {
-                'healthy': False,
-                'broker_status': 'disconnected',
-                'active_connections': 0,
-                'message': str(e)
-            }
+            return self.handle_error(e, "health check")
 
     # ============================================
     # Connection Management

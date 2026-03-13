@@ -28,17 +28,15 @@ class TestMQTTHealthCheck:
         assert result is not None
         assert result.get("healthy") is True
 
-    async def test_health_check_error_returns_unhealthy(self, mqtt_client):
-        # MQTT health_check returns a dict with healthy=False on error (not None)
+    async def test_health_check_error_returns_none(self, mqtt_client):
+        # MQTT health_check now returns None on error (consistent with all other clients)
         mock_mqtt = AsyncMock()
         mock_mqtt.__aenter__ = AsyncMock(side_effect=Exception("connection refused"))
 
         with patch("isa_common.async_mqtt_client.aiomqtt.Client", return_value=mock_mqtt):
             result = await mqtt_client.health_check()
 
-        assert result is not None
-        assert result.get("healthy") is False
-        assert result.get("broker_status") == "disconnected"
+        assert result is None
 
 
 class TestMQTTSessionManagement:

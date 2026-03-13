@@ -297,8 +297,10 @@ class AsyncMinIOClient(AsyncBaseClient):
             error_code = e.response.get('Error', {}).get('Code', '')
             if error_code in ('404', 'NoSuchBucket'):
                 return False
+            self.handle_error(e, "bucket_exists")
             return False
-        except Exception:
+        except Exception as e:
+            self.handle_error(e, "bucket_exists")
             return False
 
     async def get_bucket_info(self, bucket_name: str) -> Optional[Dict]:
