@@ -288,6 +288,63 @@ data:
         print_success "Deleted route: $route_name"
     }
 
+    # Create static route for frontend zones (not Consul-discovered)
+    create_frontend_zone_route() {
+        local route_name=$1
+        local uri_path=$2
+        local upstream_host=$3
+        local upstream_port=$4
+
+        print_info "Syncing frontend zone: $route_name → ${upstream_host}:${upstream_port}${uri_path}"
+
+        local response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"name\": \"${route_name}\",
+                \"uris\": [\"${uri_path}\", \"${uri_path}/*\"],
+                \"priority\": 5,
+                \"status\": 1,
+                \"plugins\": {
+                    \"cors\": {
+                        \"allow_origins\": \"**\",
+                        \"allow_methods\": \"GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD\",
+                        \"allow_headers\": \"*\",
+                        \"max_age\": 86400,
+                        \"allow_credential\": true
+                    },
+                    \"request-id\": {
+                        \"algorithm\": \"uuid\",
+                        \"include_in_response\": true
+                    },
+                    \"prometheus\": {}
+                },
+                \"upstream\": {
+                    \"type\": \"roundrobin\",
+                    \"scheme\": \"http\",
+                    \"nodes\": {
+                        \"${upstream_host}:${upstream_port}\": 1
+                    },
+                    \"timeout\": {
+                        \"connect\": 5,
+                        \"send\": 30,
+                        \"read\": 30
+                    }
+                }
+            }")
+
+        local http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "Frontend zone synced: $route_name"
+            return 0
+        else
+            print_error "Failed to sync frontend zone: $route_name (HTTP $http_code)"
+            echo "$response" | head -n -1
+            return 1
+        fi
+    }
+
     # Main sync function
     main() {
         print_info "Starting Consul → APISIX route synchronization (K8s)..."
@@ -326,6 +383,20 @@ data:
                 processed_services+=("${service_name}_health_route")
             fi
         done
+
+        # Sync frontend zone routes (static upstreams, not Consul-discovered)
+        local FRONTEND_HOST="${FRONTEND_HOST:-isa-app.isa-cloud-local.svc.cluster.local}"
+        local CONSOLE_HOST="${CONSOLE_HOST:-isa-console.isa-cloud-local.svc.cluster.local}"
+        local DOCS_HOST="${DOCS_HOST:-isa-docs.isa-cloud-local.svc.cluster.local}"
+
+        create_frontend_zone_route "frontend_app_route" "/" "$FRONTEND_HOST" "4100"
+        processed_services+=("frontend_app_route")
+
+        create_frontend_zone_route "frontend_console_route" "/console" "$CONSOLE_HOST" "4200"
+        processed_services+=("frontend_console_route")
+
+        create_frontend_zone_route "frontend_docs_route" "/docs" "$DOCS_HOST" "4300"
+        processed_services+=("frontend_docs_route")
 
         print_info "Cleaning up stale routes..."
 
