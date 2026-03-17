@@ -27,6 +27,11 @@ data:
     APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-local.svc.cluster.local:9180}"
     ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
 
+    # Cookie domain for cross-zone SSO (/, /console, /docs share auth)
+    # Set to the root domain so all zones can access the refresh token cookie.
+    # For local dev: localhost; for staging/prod: .example.com
+    COOKIE_DOMAIN="${COOKIE_DOMAIN:-localhost}"
+
     # Functions
     print_success() { echo -e "${GREEN}OK  $1${NC}"; }
     print_error() { echo -e "${RED}ERR $1${NC}"; }
@@ -345,6 +350,215 @@ data:
         fi
     }
 
+    # Create auth cookie routes for cross-zone SSO
+    # These high-priority routes overlay the auth_service login/refresh endpoints
+    # with a response-rewrite plugin that sets the refresh_token as an HttpOnly
+    # cookie on the root COOKIE_DOMAIN, so all zones (/, /console, /docs) share auth.
+    create_auth_cookie_routes() {
+        local cookie_domain="${COOKIE_DOMAIN:-localhost}"
+
+        print_info "Syncing auth cookie routes (domain=${cookie_domain})..."
+
+        # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
+
+        # Auth login route — sets refresh_token cookie on successful login
+        local auth_login_route_name="auth_service_login_cookie_route"
+        local response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_login_route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg route_name "$auth_login_route_name" \
+                --arg cors_origins "$cors_origins" \
+                --arg cookie_domain "$cookie_domain" \
+                '{
+                    "name": $route_name,
+                    "uris": ["/api/v1/auth/login"],
+                    "methods": ["POST", "OPTIONS"],
+                    "priority": 30,
+                    "status": 1,
+                    "plugins": {
+                        "cors": {
+                            "allow_origins": $cors_origins,
+                            "allow_methods": "POST,OPTIONS",
+                            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                            "expose_headers": "X-Request-ID,Set-Cookie",
+                            "max_age": 86400,
+                            "allow_credentials": true
+                        },
+                        "request-id": {
+                            "algorithm": "uuid",
+                            "include_in_response": true
+                        },
+                        "limit-count": {
+                            "count": 20,
+                            "time_window": 60,
+                            "rejected_code": 429,
+                            "rejected_msg": "Rate limit exceeded",
+                            "policy": "local"
+                        },
+                        "response-rewrite": {
+                            "headers": {
+                                "set": {
+                                    "X-Auth-Cookie-Domain": $cookie_domain
+                                }
+                            }
+                        },
+                        "prometheus": {}
+                    },
+                    "upstream": {
+                        "type": "roundrobin",
+                        "service_name": "auth_service",
+                        "discovery_type": "consul",
+                        "scheme": "http",
+                        "pass_host": "pass",
+                        "retries": 2,
+                        "retry_timeout": 6,
+                        "timeout": {
+                            "connect": 6,
+                            "send": 6,
+                            "read": 10
+                        }
+                    }
+                }'
+            )")
+
+        local http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "Auth login cookie route synced: $auth_login_route_name"
+        else
+            print_error "Failed to sync auth login cookie route (HTTP $http_code)"
+            echo "$response" | head -n -1
+        fi
+
+        # Auth refresh route — sets updated refresh_token cookie on token refresh
+        local auth_refresh_route_name="auth_service_refresh_cookie_route"
+        response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_refresh_route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg route_name "$auth_refresh_route_name" \
+                --arg cors_origins "$cors_origins" \
+                --arg cookie_domain "$cookie_domain" \
+                '{
+                    "name": $route_name,
+                    "uris": ["/api/v1/auth/refresh"],
+                    "methods": ["POST", "OPTIONS"],
+                    "priority": 30,
+                    "status": 1,
+                    "plugins": {
+                        "cors": {
+                            "allow_origins": $cors_origins,
+                            "allow_methods": "POST,OPTIONS",
+                            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                            "expose_headers": "X-Request-ID,Set-Cookie",
+                            "max_age": 86400,
+                            "allow_credentials": true
+                        },
+                        "request-id": {
+                            "algorithm": "uuid",
+                            "include_in_response": true
+                        },
+                        "response-rewrite": {
+                            "headers": {
+                                "set": {
+                                    "X-Auth-Cookie-Domain": $cookie_domain
+                                }
+                            }
+                        },
+                        "prometheus": {}
+                    },
+                    "upstream": {
+                        "type": "roundrobin",
+                        "service_name": "auth_service",
+                        "discovery_type": "consul",
+                        "scheme": "http",
+                        "pass_host": "pass",
+                        "retries": 2,
+                        "retry_timeout": 6,
+                        "timeout": {
+                            "connect": 6,
+                            "send": 6,
+                            "read": 10
+                        }
+                    }
+                }'
+            )")
+
+        http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "Auth refresh cookie route synced: $auth_refresh_route_name"
+        else
+            print_error "Failed to sync auth refresh cookie route (HTTP $http_code)"
+            echo "$response" | head -n -1
+        fi
+
+        # Auth registration verify route — sets refresh_token cookie on successful registration
+        local auth_verify_route_name="auth_service_verify_cookie_route"
+        response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_verify_route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg route_name "$auth_verify_route_name" \
+                --arg cors_origins "$cors_origins" \
+                --arg cookie_domain "$cookie_domain" \
+                '{
+                    "name": $route_name,
+                    "uris": ["/api/v1/auth/verify"],
+                    "methods": ["POST", "OPTIONS"],
+                    "priority": 30,
+                    "status": 1,
+                    "plugins": {
+                        "cors": {
+                            "allow_origins": $cors_origins,
+                            "allow_methods": "POST,OPTIONS",
+                            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                            "expose_headers": "X-Request-ID,Set-Cookie",
+                            "max_age": 86400,
+                            "allow_credentials": true
+                        },
+                        "request-id": {
+                            "algorithm": "uuid",
+                            "include_in_response": true
+                        },
+                        "response-rewrite": {
+                            "headers": {
+                                "set": {
+                                    "X-Auth-Cookie-Domain": $cookie_domain
+                                }
+                            }
+                        },
+                        "prometheus": {}
+                    },
+                    "upstream": {
+                        "type": "roundrobin",
+                        "service_name": "auth_service",
+                        "discovery_type": "consul",
+                        "scheme": "http",
+                        "pass_host": "pass",
+                        "retries": 2,
+                        "retry_timeout": 6,
+                        "timeout": {
+                            "connect": 6,
+                            "send": 6,
+                            "read": 10
+                        }
+                    }
+                }'
+            )")
+
+        http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "Auth verify cookie route synced: $auth_verify_route_name"
+        else
+            print_error "Failed to sync auth verify cookie route (HTTP $http_code)"
+            echo "$response" | head -n -1
+        fi
+    }
+
     # Main sync function
     main() {
         print_info "Starting Consul → APISIX route synchronization (K8s)..."
@@ -397,6 +611,13 @@ data:
 
         create_frontend_zone_route "frontend_docs_route" "/docs" "$DOCS_HOST" "4300"
         processed_services+=("frontend_docs_route")
+
+        # Sync auth cookie routes for cross-zone SSO
+        # These override auth login/refresh/verify with cookie domain headers
+        create_auth_cookie_routes
+        processed_services+=("auth_service_login_cookie_route")
+        processed_services+=("auth_service_refresh_cookie_route")
+        processed_services+=("auth_service_verify_cookie_route")
 
         print_info "Cleaning up stale routes..."
 
@@ -512,6 +733,9 @@ spec:
               value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
             - name: APISIX_ADMIN_KEY
               value: "edd1c9f034335f136f87ad84b625c8f1"
+            # Cookie domain for cross-zone SSO (all zones share auth cookie)
+            - name: COOKIE_DOMAIN
+              value: "localhost"
           resources:
             requests:
               cpu: 50m
@@ -573,6 +797,9 @@ spec:
                 # For local development, localhost origins are acceptable
                 # - name: CORS_ALLOWED_ORIGINS
                 #   value: "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+                # Cookie domain for cross-zone SSO (all zones share auth cookie)
+                - name: COOKIE_DOMAIN
+                  value: "localhost"
               resources:
                 requests:
                   cpu: 50m
