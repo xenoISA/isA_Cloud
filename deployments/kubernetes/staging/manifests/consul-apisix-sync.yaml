@@ -340,6 +340,32 @@ data:
                         \"connect\": 5,
                         \"send\": 30,
                         \"read\": 30
+                    },
+                    \"checks\": {
+                        \"active\": {
+                            \"type\": \"http\",
+                            \"http_path\": \"/\",
+                            \"healthy\": {
+                                \"interval\": 10,
+                                \"successes\": 2
+                            },
+                            \"unhealthy\": {
+                                \"interval\": 5,
+                                \"http_failures\": 3,
+                                \"timeouts\": 2
+                            }
+                        },
+                        \"passive\": {
+                            \"healthy\": {
+                                \"http_statuses\": [200, 301, 302],
+                                \"successes\": 3
+                            },
+                            \"unhealthy\": {
+                                \"http_statuses\": [500, 502, 503, 504],
+                                \"http_failures\": 3,
+                                \"timeouts\": 3
+                            }
+                        }
                     }
                 }
             }")
