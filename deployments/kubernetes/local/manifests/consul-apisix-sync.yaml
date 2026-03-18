@@ -598,6 +598,11 @@ data:
             fi
         done
 
+        # Sync Mate service route (static upstream, not Consul-discovered)
+        local MATE_HOST="${MATE_HOST:-isa-mate.isa-cloud-local.svc.cluster.local}"
+        create_frontend_zone_route "mate_service_route" "/mate" "$MATE_HOST" "18789"
+        processed_services+=("mate_service_route")
+
         # Sync frontend zone routes (static upstreams, not Consul-discovered)
         local FRONTEND_HOST="${FRONTEND_HOST:-isa-app.isa-cloud-local.svc.cluster.local}"
         local CONSOLE_HOST="${CONSOLE_HOST:-isa-console.isa-cloud-local.svc.cluster.local}"
