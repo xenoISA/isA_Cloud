@@ -41,6 +41,15 @@ scrape_configs:
       - targets: ['isa-os:8086']
         labels:
           app: isa-os
+      - targets: ['isa-pool-manager:8090']
+        labels:
+          app: isa-pool-manager
+      - targets: ['isa-mcp-worker:8091']
+        labels:
+          app: isa-mcp-worker
+      - targets: ['isa-data:8084']
+        labels:
+          app: isa-data
 
   # Infrastructure exporters
   - job_name: 'redis'

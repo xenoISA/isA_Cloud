@@ -1,0 +1,110 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Browser Pool Utilization",
+      "description": "Active/idle/max browser sessions",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "fieldConfig": {
+        "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20}},
+        "overrides": []
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_active{pool_type=\"browser\"}", "legendFormat": "Active", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_idle{pool_type=\"browser\"}", "legendFormat": "Idle", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_max{pool_type=\"browser\"}", "legendFormat": "Max", "refId": "C"}
+      ]
+    },
+    {
+      "title": "VM Pool Utilization",
+      "description": "Active/idle/max VM instances",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "fieldConfig": {
+        "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20}},
+        "overrides": []
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_active{pool_type=\"vm\"}", "legendFormat": "Active", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_idle{pool_type=\"vm\"}", "legendFormat": "Idle", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_max{pool_type=\"vm\"}", "legendFormat": "Max", "refId": "C"}
+      ]
+    },
+    {
+      "title": "REPL Pool Utilization",
+      "description": "Active/idle/max REPL sessions",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20}},
+        "overrides": []
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_active{pool_type=\"repl\"}", "legendFormat": "Active", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_idle{pool_type=\"repl\"}", "legendFormat": "Idle", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "pool_resources_max{pool_type=\"repl\"}", "legendFormat": "Max", "refId": "C"}
+      ]
+    },
+    {
+      "title": "Pool Acquisition Latency (P95)",
+      "description": "Time to acquire a resource from each pool",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "histogram_quantile(0.95, rate(pool_acquisition_duration_seconds_bucket[5m])) > 0",
+          "legendFormat": "{{pool_type}} P95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Pool Queue Depth",
+      "description": "Pending resource acquisition requests",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 50}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "pool_queue_depth",
+          "legendFormat": "{{pool_type}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["isA", "pools", "resources", "observability"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "isA Resource Pools",
+  "uid": "isa-resource-pools",
+  "version": 1
+}

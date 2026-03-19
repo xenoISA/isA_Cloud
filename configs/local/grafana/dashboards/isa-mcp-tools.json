@@ -1,0 +1,148 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Top 20 Tools by Call Volume",
+      "description": "Most frequently called MCP tools",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "fieldConfig": {
+        "defaults": {"unit": "ops", "custom": {"drawStyle": "bars", "fillOpacity": 50, "stacking": {"mode": "normal"}}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "topk(20, sum by (tool_name) (rate(tool_executions_total{job=\"isa-mcp\"}[5m])))",
+          "legendFormat": "{{tool_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Tool Execution Duration Heatmap",
+      "description": "Latency distribution across all tools",
+      "type": "heatmap",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(increase(tool_execution_duration_seconds_bucket{job=\"isa-mcp\"}[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "title": "Tool Failure Rate by Tool",
+      "description": "Error rate per tool",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {"unit": "percentunit", "custom": {"drawStyle": "line", "fillOpacity": 10}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.1}]}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (tool_name) (rate(tool_executions_total{job=\"isa-mcp\", status=\"error\"}[5m])) / sum by (tool_name) (rate(tool_executions_total{job=\"isa-mcp\"}[5m])) > 0",
+          "legendFormat": "{{tool_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Worker vs Gateway Execution",
+      "description": "Tool execution split between gateway (I/O-bound) and worker (CPU-bound)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {"unit": "ops", "custom": {"drawStyle": "bars", "fillOpacity": 50}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(tool_executions_total{job=\"isa-mcp\", tier=\"gateway\"}[5m]))",
+          "legendFormat": "Gateway (I/O-bound)",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(tool_executions_total{job=\"isa-mcp-worker\"}[5m]))",
+          "legendFormat": "Worker (CPU-bound)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Cache Hit/Miss by Tool Category",
+      "description": "Tool result cache effectiveness",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {"unit": "ops", "custom": {"drawStyle": "line", "fillOpacity": 10}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(cache_hits_total{job=\"isa-mcp\"}[5m]))",
+          "legendFormat": "Cache Hits",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(cache_misses_total{job=\"isa-mcp\"}[5m]))",
+          "legendFormat": "Cache Misses",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Task Queue Depth",
+      "description": "NATS JetStream pending messages for worker dispatch",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 100}, {"color": "red", "value": 500}]}},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "nats_consumer_num_pending{stream_name=\"TOOL_EXECUTION\"}",
+          "legendFormat": "Pending Tasks",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["isA", "MCP", "tools", "observability"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "isA MCP Tool Analytics",
+  "uid": "isa-mcp-tools",
+  "version": 1
+}
