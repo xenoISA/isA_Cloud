@@ -24,6 +24,9 @@ spec:
       target:
         type: Utilization
         averageUtilization: {{ .Values.autoscaling.targetMemoryUtilization }}
+  {{- with .Values.autoscaling.customMetrics }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 300
