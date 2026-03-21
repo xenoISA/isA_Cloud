@@ -10,6 +10,7 @@ kind: Kustomization
 resources:
   # Core services
   - mcp-service.yaml
+  - mcp-worker-service.yaml
   - model-service.yaml
   - agent-service.yaml
   - data-service.yaml
