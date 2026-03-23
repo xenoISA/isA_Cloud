@@ -75,7 +75,7 @@ data:
         # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
         # For local development, localhost is acceptable but still explicit
         # WARNING: Wildcard (*) with credentials is dangerous and allows any site to make authenticated requests
-        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000}"
         local plugins=$(jq -n \
             --arg rate_limit "$rate_limit" \
             --arg cors_origins "$cors_origins" \
@@ -86,7 +86,7 @@ data:
                     "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                     "expose_headers": "X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
                     "max_age": 86400,
-                    "allow_credentials": true
+                    "allow_credential": true
                 },
                 "limit-count": {
                     "count": ($rate_limit | tonumber),
@@ -215,7 +215,7 @@ data:
         print_info "Syncing health route: $route_name ($health_uri -> $service_name:/health)"
 
         # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
-        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000}"
         local plugins=$(jq -n --arg cors_origins "$cors_origins" '{
             "cors": {
                 "allow_origins": $cors_origins,
@@ -223,7 +223,7 @@ data:
                 "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                 "expose_headers": "X-Request-ID",
                 "max_age": 86400,
-                "allow_credentials": true
+                "allow_credential": true
             },
             "request-id": {
                 "algorithm": "uuid",
@@ -386,7 +386,7 @@ data:
         print_info "Syncing auth cookie routes (domain=${cookie_domain})..."
 
         # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
-        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000}"
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000}"
 
         # Auth login route — sets refresh_token cookie on successful login
         local auth_login_route_name="auth_service_login_cookie_route"
@@ -411,7 +411,7 @@ data:
                             "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                             "expose_headers": "X-Request-ID,Set-Cookie",
                             "max_age": 86400,
-                            "allow_credentials": true
+                            "allow_credential": true
                         },
                         "request-id": {
                             "algorithm": "uuid",
@@ -481,7 +481,7 @@ data:
                             "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                             "expose_headers": "X-Request-ID,Set-Cookie",
                             "max_age": 86400,
-                            "allow_credentials": true
+                            "allow_credential": true
                         },
                         "request-id": {
                             "algorithm": "uuid",
@@ -544,7 +544,7 @@ data:
                             "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
                             "expose_headers": "X-Request-ID,Set-Cookie",
                             "max_age": 86400,
-                            "allow_credentials": true
+                            "allow_credential": true
                         },
                         "request-id": {
                             "algorithm": "uuid",
