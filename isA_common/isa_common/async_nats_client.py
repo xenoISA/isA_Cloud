@@ -190,10 +190,13 @@ class AsyncNATSClient(AsyncBaseClient):
 
         async def _on_error(error):
             self._consecutive_errors += 1
-            self._logger.warning(
-                f"NATS async error: {error} "
-                f"(consecutive_errors={self._consecutive_errors})"
-            )
+            # Log at exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128, ...
+            n = self._consecutive_errors
+            if n == 1 or (n & (n - 1)) == 0:
+                self._logger.warning(
+                    f"NATS async error: {error} "
+                    f"(consecutive_errors={self._consecutive_errors})"
+                )
 
         connect_opts = {
             'servers': [server_url],
