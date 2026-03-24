@@ -594,6 +594,132 @@ data:
         fi
     }
 
+    # Create OAuth .well-known discovery routes (public, no auth)
+    # These endpoints are required by RFC 9728 (OAuth Protected Resource Metadata)
+    # and RFC 8414 (OAuth Authorization Server Metadata) for OAuth/MCP discovery.
+    create_oauth_wellknown_routes() {
+        print_info "Syncing OAuth .well-known discovery routes..."
+
+        # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+
+        # Route 1: /.well-known/oauth-protected-resource → mcp_service
+        local pr_route_name="oauth_protected_resource_route"
+        local response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${pr_route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg route_name "$pr_route_name" \
+                --arg cors_origins "$cors_origins" \
+                '{
+                    "name": $route_name,
+                    "uris": ["/.well-known/oauth-protected-resource"],
+                    "methods": ["GET", "OPTIONS"],
+                    "priority": 20,
+                    "status": 1,
+                    "plugins": {
+                        "cors": {
+                            "allow_origins": $cors_origins,
+                            "allow_methods": "GET,OPTIONS",
+                            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                            "expose_headers": "X-Request-ID",
+                            "max_age": 86400,
+                            "allow_credentials": true
+                        },
+                        "request-id": {
+                            "algorithm": "uuid",
+                            "include_in_response": true
+                        },
+                        "proxy-rewrite": {
+                            "uri": "/.well-known/oauth-protected-resource"
+                        },
+                        "prometheus": {}
+                    },
+                    "upstream": {
+                        "type": "roundrobin",
+                        "service_name": "mcp_service",
+                        "discovery_type": "consul",
+                        "scheme": "http",
+                        "pass_host": "pass",
+                        "retries": 2,
+                        "retry_timeout": 6,
+                        "timeout": {
+                            "connect": 6,
+                            "send": 6,
+                            "read": 10
+                        }
+                    }
+                }'
+            )")
+
+        local http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "OAuth route synced: $pr_route_name"
+        else
+            print_error "Failed to sync OAuth route: $pr_route_name (HTTP $http_code)"
+            echo "$response" | head -n -1
+        fi
+
+        # Route 2: /.well-known/oauth-authorization-server → auth_service
+        local as_route_name="oauth_authorization_server_route"
+        response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${as_route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg route_name "$as_route_name" \
+                --arg cors_origins "$cors_origins" \
+                '{
+                    "name": $route_name,
+                    "uris": ["/.well-known/oauth-authorization-server"],
+                    "methods": ["GET", "OPTIONS"],
+                    "priority": 20,
+                    "status": 1,
+                    "plugins": {
+                        "cors": {
+                            "allow_origins": $cors_origins,
+                            "allow_methods": "GET,OPTIONS",
+                            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                            "expose_headers": "X-Request-ID",
+                            "max_age": 86400,
+                            "allow_credentials": true
+                        },
+                        "request-id": {
+                            "algorithm": "uuid",
+                            "include_in_response": true
+                        },
+                        "proxy-rewrite": {
+                            "uri": "/.well-known/oauth-authorization-server"
+                        },
+                        "prometheus": {}
+                    },
+                    "upstream": {
+                        "type": "roundrobin",
+                        "service_name": "auth_service",
+                        "discovery_type": "consul",
+                        "scheme": "http",
+                        "pass_host": "pass",
+                        "retries": 2,
+                        "retry_timeout": 6,
+                        "timeout": {
+                            "connect": 6,
+                            "send": 6,
+                            "read": 10
+                        }
+                    }
+                }'
+            )")
+
+        http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "OAuth route synced: $as_route_name"
+        else
+            print_error "Failed to sync OAuth route: $as_route_name (HTTP $http_code)"
+            echo "$response" | head -n -1
+        fi
+    }
+
     # Main sync function
     main() {
         print_info "Starting Consul → APISIX route synchronization (K8s)..."
@@ -658,6 +784,11 @@ data:
         processed_services+=("auth_service_login_cookie_route")
         processed_services+=("auth_service_refresh_cookie_route")
         processed_services+=("auth_service_verify_cookie_route")
+
+        # Sync OAuth .well-known discovery routes (public, no auth)
+        create_oauth_wellknown_routes
+        processed_services+=("oauth_protected_resource_route")
+        processed_services+=("oauth_authorization_server_route")
 
         print_info "Cleaning up stale routes..."
 
