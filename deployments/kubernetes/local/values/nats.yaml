@@ -28,13 +28,15 @@ config:
 
 # Container resources
 container:
+  image:
+    tag: "2.10.22-alpine"
   resources:
     requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 250m
+      cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # Service - use merge to set NodePort
 service:
@@ -64,6 +66,12 @@ podTemplate:
       labels:
         tier: infrastructure
         environment: local
+
+# Startup probe — allow 300s for JetStream recovery
+startupProbe:
+  enabled: true
+  periodSeconds: 10
+  failureThreshold: 30
 
 # Single replica for local
 replicaCount: 1
