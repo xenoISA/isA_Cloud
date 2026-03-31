@@ -97,6 +97,18 @@ service:
 consul:
   enabled: true
 
+# Topology spread constraints (spread pods across nodes/zones)
+topologySpreadConstraints: []
+# - maxSkew: 1
+#   topologyKey: kubernetes.io/hostname
+#   whenUnsatisfiable: DoNotSchedule
+#   labelSelector:
+#     matchLabels:
+#       app: my-service
+
+# Affinity rules (pod anti-affinity, node affinity, etc.)
+affinity: {}
+
 # Optional volumes
 volumes: []
 # - name: models
