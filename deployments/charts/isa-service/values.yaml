@@ -97,6 +97,11 @@ service:
 consul:
   enabled: true
 
+# Custom pod annotations (e.g. Prometheus scrape config, Datadog, Vault)
+podAnnotations: {}
+# prometheus.io/scrape: "true"
+# prometheus.io/port: "8080"
+
 # Topology spread constraints (spread pods across nodes/zones)
 topologySpreadConstraints: []
 # - maxSkew: 1
