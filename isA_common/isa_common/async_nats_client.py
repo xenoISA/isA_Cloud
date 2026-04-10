@@ -15,6 +15,7 @@ providing full support for all NATS operations including:
 import os
 import time
 import asyncio
+import re
 from typing import List, Dict, Optional, AsyncIterator, Any
 
 import nats
@@ -89,6 +90,12 @@ class AsyncNATSClient(AsyncBaseClient):
         if subject.startswith(prefix):
             return subject
         return f"{prefix}{subject}"
+
+    @staticmethod
+    def _sanitize_consumer_name(name: str) -> str:
+        """Normalize durable consumer names to JetStream-safe characters."""
+        sanitized = re.sub(r"[^A-Za-z0-9_-]+", "-", name).strip("-")
+        return sanitized or "consumer"
 
     def _connection_healthy(self) -> bool:
         """Check if the underlying NATS connection can be used safely."""
@@ -555,6 +562,8 @@ class AsyncNATSClient(AsyncBaseClient):
                 'last': DeliverPolicy.LAST,
             }
             deliver = deliver_policy_map.get(delivery_policy.lower(), DeliverPolicy.ALL)
+
+            consumer_name = self._sanitize_consumer_name(consumer_name)
 
             config = ConsumerConfig(
                 durable_name=consumer_name,

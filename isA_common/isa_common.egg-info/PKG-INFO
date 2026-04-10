@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: isa-common
-Version: 0.3.1
+Version: 0.4.0
 Summary: Shared Python infrastructure library for isA platform
 Home-page: https://github.com/isa-platform/isA_Cloud
 Author: isA Platform
@@ -27,9 +27,25 @@ Requires-Dist: aioboto3>=12.0.0
 Requires-Dist: aiofiles>=23.0.0
 Requires-Dist: redis>=5.0.0
 Requires-Dist: nats-py>=2.6.0
-Requires-Dist: qdrant-client>=1.7.0
+Requires-Dist: qdrant-client>=1.9.0
 Requires-Dist: aiomqtt>=2.0.0
+Requires-Dist: aiosqlite>=0.19.0
 Requires-Dist: duckdb>=0.10.0
+Requires-Dist: aiohttp>=3.9.0
+Provides-Extra: metrics
+Requires-Dist: prometheus-client>=0.20.0; extra == "metrics"
+Requires-Dist: starlette>=0.27.0; extra == "metrics"
+Provides-Extra: tracing
+Requires-Dist: opentelemetry-sdk>=1.20.0; extra == "tracing"
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc>=1.20.0; extra == "tracing"
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.41b0; extra == "tracing"
+Provides-Extra: tracing-extras
+Requires-Dist: opentelemetry-instrumentation-aiohttp-client>=0.41b0; extra == "tracing-extras"
+Requires-Dist: opentelemetry-instrumentation-asyncpg>=0.41b0; extra == "tracing-extras"
+Requires-Dist: opentelemetry-instrumentation-redis>=0.41b0; extra == "tracing-extras"
+Requires-Dist: opentelemetry-instrumentation-httpx>=0.41b0; extra == "tracing-extras"
+Provides-Extra: observability
+Requires-Dist: isa-common[metrics,tracing]; extra == "observability"
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
@@ -42,23 +58,39 @@ Dynamic: requires-python
 
 # isA Common
 
-Shared Python infrastructure library for the isA platform.
+Shared async Python client library for the isA platform.
 
 ## Overview
 
-`isa-common` provides Python client libraries and utilities for interacting with various infrastructure services in the isA Cloud platform, including:
+`isa-common` provides async Python clients for interacting with isA Cloud infrastructure services. All clients use `async with` context managers and share a common base class (`AsyncBaseClient`).
 
-- **DuckDB Client** - Analytics database integration
-- **Loki Client** - Log aggregation and querying
-- **MinIO Client** - Object storage operations
-- **MQTT Client** - Message broker for IoT
-- **NATS Client** - Cloud-native messaging system
-- **Redis Client** - Caching and data structures
-- **Supabase Client** - Backend-as-a-Service integration
+### Infrastructure Clients (require running services)
+
+| Client | Service | Default Port | Protocol |
+|--------|---------|-------------|----------|
+| `AsyncRedisClient` | Redis | 6379 | gRPC proxy |
+| `AsyncPostgresClient` | PostgreSQL | 5432 | gRPC proxy |
+| `AsyncNeo4jClient` | Neo4j | 7687 | gRPC proxy |
+| `AsyncNATSClient` | NATS | 4222 | gRPC proxy |
+| `AsyncMQTTClient` | MQTT | 1883 | gRPC proxy |
+| `AsyncMinioClient` | MinIO | 9000 | gRPC proxy |
+| `AsyncQdrantClient` | Qdrant | 6333 | gRPC proxy |
+| `AsyncDuckDBClient` | DuckDB | embedded | native |
+
+### Local-Mode Clients (no external services needed)
+
+Drop-in alternatives for desktop/offline use. Same API surface, backed by local storage:
+
+| Local Client | Replaces | Backed By |
+|-------------|----------|-----------|
+| `AsyncSQLiteClient` | `AsyncPostgresClient` | SQLite file |
+| `AsyncLocalStorageClient` | `AsyncMinioClient` | Local filesystem |
+| `AsyncChromaClient` | `AsyncQdrantClient` | ChromaDB (embedded) |
+| `AsyncMemoryClient` | `AsyncRedisClient` | In-memory dict |
+
+**When to use local clients:** Use local-mode clients when running on desktop/ICP without cloud infrastructure, for development/testing without Docker, or when you need offline-capable storage.
 
 ## Installation
-
-Install from PyPI:
 
 ```bash
 pip install isa-common
@@ -66,96 +98,49 @@ pip install isa-common
 
 ## Quick Start
 
-### DuckDB Client Example
-
 ```python
-from isa_common.duckdb_client import DuckDBClient
+from isa_common import AsyncRedisClient
 
-client = DuckDBClient(host="localhost", port=50051)
-client.connect()
-
-# Execute query
-result = client.execute_query("SELECT * FROM my_table")
-print(result)
+async with AsyncRedisClient(host="localhost", port=6379, user_id="my-user") as client:
+    health = await client.health_check()
+    await client.set("key", "value")
+    value = await client.get("key")
 ```
 
-### NATS Client Example
+### Using Local-Mode Clients
 
 ```python
-from isa_common.nats_client import NATSClient
+from isa_common import AsyncSQLiteClient, AsyncLocalStorageClient
 
-client = NATSClient(host="localhost", port=50054)
-client.connect()
+# SQLite instead of PostgreSQL
+async with AsyncSQLiteClient(database="app.db", user_id="my-user") as db:
+    await db.query("SELECT * FROM users")
 
-# Publish message
-client.publish("my.subject", b"Hello World")
-
-# Subscribe to subject
-messages = client.subscribe("my.subject")
+# Local filesystem instead of MinIO
+async with AsyncLocalStorageClient(base_path="./storage", user_id="my-user") as storage:
+    await storage.put_object("my-bucket", "file.txt", b"contents")
 ```
-
-### MinIO Client Example
-
-```python
-from isa_common.minio_client import MinIOClient
-
-client = MinIOClient(host="localhost", port=50052)
-client.connect()
-
-# Upload file
-client.put_object("my-bucket", "file.txt", b"file contents")
-
-# Download file
-data = client.get_object("my-bucket", "file.txt")
-```
-
-## Features
-
-- **gRPC-based** communication with backend services
-- **Service Discovery** integration with Consul
-- **Automatic Reconnection** with configurable retry policies
-- **Type Safety** with Pydantic models
-- **Comprehensive Examples** included in the package
-
-## Requirements
-
-- Python 3.8+
-- grpcio >= 1.50.0
-- pydantic >= 2.0.0
-- tenacity >= 8.0.0
-
-## Documentation
-
-For detailed documentation and more examples, see:
-- [DuckDB Client Examples](examples/duck_client_examples.py)
-- [Loki Client Examples](examples/loki_client_examples.py)
-- [MinIO Client Examples](examples/minio_client_examples.py)
-- [MQTT Client Examples](examples/mqtt_client_examples.py)
-- [NATS Client Examples](examples/nats_client_examples.py)
-- [Redis Client Examples](examples/redis_client_examples.py)
-- [Supabase Client Examples](examples/supa_client_examples.py)
 
 ## Development
 
-Install development dependencies:
+Run tests (requires services or use local clients):
 
 ```bash
-pip install isa-common[dev]
+# Run individual service tests
+python tests/redis/test_async_redis.py
+python tests/duck/test_async_duckdb.py
+
+# Run all tests via Makefile
+make test
 ```
 
-Run tests:
+## Contract Coverage
 
-```bash
-pytest
-```
+See [tests/contract_coverage.md](tests/contract_coverage.md) for the mapping between CDD contract IDs (BR/EC/ER) and test functions.
 
 ## License
 
 Copyright © 2024 isA Platform
-
-## Support
-
-For issues and questions, please visit: https://github.com/isa-platform/isA_Cloud
 
 
 

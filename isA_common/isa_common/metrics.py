@@ -364,7 +364,7 @@ def setup_metrics(
     version: str = "unknown",
     registry: Optional[object] = None,
     excluded_paths: Optional[set] = None,
-) -> None:
+) -> bool:
     """
     One-liner to add Prometheus metrics to any FastAPI/Starlette app.
 
@@ -380,10 +380,14 @@ def setup_metrics(
         registry: Custom CollectorRegistry (default: prometheus default)
         excluded_paths: Paths to exclude from metrics (default: /health, /metrics, etc.)
 
+    Returns:
+        ``True`` when middleware and the ``/metrics`` route were installed,
+        otherwise ``False`` when Prometheus support is unavailable.
+
     Example:
         from isa_common.metrics import setup_metrics
         app = FastAPI()
-        setup_metrics(app, service_name="isA_user", version="1.0.0")
+        enabled = setup_metrics(app, service_name="isA_user", version="1.0.0")
     """
     global _service_name, _registry
 
@@ -395,7 +399,7 @@ def setup_metrics(
 
     if not _PROMETHEUS_AVAILABLE:
         logger.warning(f"Metrics disabled for {service_name} — install prometheus_client")
-        return
+        return False
 
     # Initialize standard metrics
     _init_common_metrics()
@@ -415,6 +419,7 @@ def setup_metrics(
     app.routes.append(Route("/metrics", _create_metrics_endpoint()))
 
     logger.info(f"Prometheus metrics initialized for {service_name}")
+    return True
 
 
 def metrics_text() -> bytes:

@@ -33,6 +33,7 @@ setup(
         "grpcio>=1.50.0",
         "grpcio-tools>=1.50.0",
         "pydantic>=2.0.0",
+        "prometheus-client>=0.20.0",
         "tenacity>=8.0.0",
         "python-consul2>=0.1.5",
         "asyncpg>=0.29.0",  # PostgreSQL async client

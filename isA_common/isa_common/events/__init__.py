@@ -12,7 +12,11 @@ from .base_event_subscriber import BaseEventSubscriber, EventHandler, Idempotenc
 # Billing-specific event implementations
 from .billing_events import (
     EventType,
+    BillingAccountType,
+    BillingSurface,
+    CostComponentType,
     UnitType,
+    CostComponent,
     UsageEvent,
     BillingCalculatedEvent,
     TokensDeductedEvent,
@@ -42,9 +46,13 @@ __all__ = [
 
     # Billing event types
     'EventType',
+    'BillingAccountType',
+    'BillingSurface',
+    'CostComponentType',
     'UnitType',
 
     # Billing event models
+    'CostComponent',
     'UsageEvent',
     'BillingCalculatedEvent',
     'TokensDeductedEvent',

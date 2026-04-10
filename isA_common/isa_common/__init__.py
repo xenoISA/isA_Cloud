@@ -56,10 +56,27 @@ from .observability import setup_observability
 # =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
 # =============================================================================
-from .async_sqlite_client import AsyncSQLiteClient
-from .async_local_storage_client import AsyncLocalStorageClient
-from .async_chroma_client import AsyncChromaClient
-from .async_memory_client import AsyncMemoryClient
+# Keep isa_common importable in lean producer runtimes even when local-mode
+# optional dependencies are not installed.
+try:
+    from .async_sqlite_client import AsyncSQLiteClient
+except ModuleNotFoundError:
+    AsyncSQLiteClient = None  # type: ignore[assignment]
+
+try:
+    from .async_local_storage_client import AsyncLocalStorageClient
+except ModuleNotFoundError:
+    AsyncLocalStorageClient = None  # type: ignore[assignment]
+
+try:
+    from .async_chroma_client import AsyncChromaClient
+except ModuleNotFoundError:
+    AsyncChromaClient = None  # type: ignore[assignment]
+
+try:
+    from .async_memory_client import AsyncMemoryClient
+except ModuleNotFoundError:
+    AsyncMemoryClient = None  # type: ignore[assignment]
 
 # Service Discovery
 from .consul_client import ConsulRegistry, AsyncConsulRegistry, consul_lifespan

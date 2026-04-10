@@ -172,3 +172,31 @@ class TestReturnValue:
             tempo_port=4318,
         )
         assert isinstance(result, dict)
+
+    def test_metrics_result_tracks_setup_metrics_return_value(self):
+        """Metrics should stay disabled when setup_metrics returns False."""
+        from isa_common.observability import setup_observability
+
+        app = MagicMock()
+        with patch("isa_common.metrics.setup_metrics", return_value=False):
+            result = setup_observability(
+                app,
+                service_name="test",
+                enable_logging=False,
+                enable_tracing=False,
+            )
+        assert result == {"metrics": False, "logging": False, "tracing": False}
+
+    def test_metrics_result_enabled_when_setup_metrics_succeeds(self):
+        """Metrics should reflect a successful setup_metrics call."""
+        from isa_common.observability import setup_observability
+
+        app = MagicMock()
+        with patch("isa_common.metrics.setup_metrics", return_value=True):
+            result = setup_observability(
+                app,
+                service_name="test",
+                enable_logging=False,
+                enable_tracing=False,
+            )
+        assert result == {"metrics": True, "logging": False, "tracing": False}

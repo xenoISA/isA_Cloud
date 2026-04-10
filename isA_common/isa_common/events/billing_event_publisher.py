@@ -10,12 +10,13 @@ import json
 import logging
 import asyncio
 import warnings
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from decimal import Decimal
 from datetime import datetime
 
 from ..nats_client import NATSClient
 from .billing_events import (
+    EventType,
     UsageEvent,
     BillingCalculatedEvent,
     TokensDeductedEvent,
@@ -128,7 +129,23 @@ class BillingEventPublisher:
         subscription_id: Optional[str] = None,
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        usage_details: Optional[Dict[str, Any]] = None
+        usage_details: Optional[Dict[str, Any]] = None,
+        *,
+        actor_user_id: Optional[str] = None,
+        billing_account_type: Optional[str] = None,
+        billing_account_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        service_type: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        source_service: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        meter_type: Optional[str] = None,
+        schema_version: str = "1.0",
+        billing_surface: str = "abstract_service",
+        cost_components: Optional[List[Dict[str, Any]]] = None,
+        credits_used: Optional[Decimal] = None,
+        cost_usd: Optional[Decimal] = None,
+        credit_consumption_handled: bool = False,
     ) -> bool:
         """
         Publish a usage event.
@@ -162,16 +179,47 @@ class BillingEventPublisher:
             )
         """
         try:
+            details = dict(usage_details or {})
+            resolved_actor_user_id = actor_user_id or user_id
+            resolved_billing_account_type = billing_account_type or (
+                "organization" if (organization_id or self.default_org_id) else "user"
+            )
+            resolved_billing_account_id = billing_account_id or (
+                (organization_id or self.default_org_id)
+                if resolved_billing_account_type == "organization"
+                else resolved_actor_user_id
+            )
+
             event = UsageEvent(
                 user_id=user_id,
+                actor_user_id=resolved_actor_user_id,
+                billing_account_type=resolved_billing_account_type,
+                billing_account_id=resolved_billing_account_id,
                 product_id=product_id,
                 usage_amount=usage_amount,
                 unit_type=unit_type,
                 organization_id=organization_id or self.default_org_id,
+                agent_id=agent_id,
                 subscription_id=subscription_id,
+                service_type=service_type or details.get("service_type"),
+                operation_type=operation_type
+                or details.get("operation_type")
+                or details.get("operation"),
+                source_service=source_service or details.get("source_service"),
+                resource_name=resource_name
+                or details.get("resource_name")
+                or details.get("tool_name")
+                or details.get("model"),
+                meter_type=meter_type or details.get("meter_type"),
                 session_id=session_id,
                 request_id=request_id,
-                usage_details=usage_details or {}
+                usage_details=details,
+                schema_version=schema_version,
+                billing_surface=billing_surface,
+                cost_components=cost_components or [],
+                credits_used=credits_used,
+                cost_usd=cost_usd,
+                credit_consumption_handled=credit_consumption_handled,
             )
 
             subject = get_nats_subject(event)
@@ -180,11 +228,18 @@ class BillingEventPublisher:
             result = await self.nats_client.publish(
                 subject=subject,
                 data=data,
-                headers={"event_type": "usage.recorded"}
+                headers={"event_type": EventType.USAGE_RECORDED.value}
             )
 
             if result and result.get('success'):
-                logger.info(f"Published usage event: {product_id} for user {user_id}")
+                logger.info(
+                    "Published billing usage event: product=%s user=%s payer=%s:%s subject=%s",
+                    product_id,
+                    user_id,
+                    resolved_billing_account_type,
+                    resolved_billing_account_id,
+                    subject,
+                )
                 return True
             else:
                 logger.error(f"Failed to publish usage event: {result}")

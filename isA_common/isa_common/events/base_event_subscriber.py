@@ -630,6 +630,7 @@ class BaseEventSubscriber:
 
             # Map event types to classes
             event_classes = {
+                "billing.usage.recorded": UsageEvent,
                 "usage.recorded": UsageEvent,
                 "billing.calculated": BillingCalculatedEvent,
                 "wallet.tokens.deducted": TokensDeductedEvent,

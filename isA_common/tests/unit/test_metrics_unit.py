@@ -324,7 +324,8 @@ class TestSetupMetrics:
 
         old_svc, old_reg = m._service_name, m._registry
         try:
-            m.setup_metrics(app, service_name="isA_test", registry=registry)
+            result = m.setup_metrics(app, service_name="isA_test", registry=registry)
+            assert result is True
             assert m._service_name == "isA_test"
             assert m._registry is registry
         finally:
@@ -373,7 +374,8 @@ class TestSetupMetrics:
         try:
             app = MagicMock()
             app.routes = []
-            m.setup_metrics(app, service_name="isA_test")
+            result = m.setup_metrics(app, service_name="isA_test")
+            assert result is False
             # Should not add middleware or routes
             app.add_middleware.assert_not_called()
             assert len(app.routes) == 0
