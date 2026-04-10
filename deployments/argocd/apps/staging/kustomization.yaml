@@ -16,6 +16,8 @@ resources:
   - data-service.yaml
   # OS services
   - os-services.yaml
+  # Domain services
+  - blockchain-service.yaml
   # User microservices (ApplicationSet)
   - user-services-appset.yaml
 

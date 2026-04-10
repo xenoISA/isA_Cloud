@@ -1,0 +1,213 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blockchain-apisix-route-script
+  namespace: isa-cloud-local
+  labels:
+    app: blockchain-apisix-route
+    tier: domain
+data:
+  register_routes.sh: |
+    #!/bin/bash
+    # Register blockchain_node APISIX routes
+    # Mirrors the pattern used by consul-apisix-sync.yaml for domain services.
+    # Run once on deploy or re-run idempotently to reconcile.
+
+    set -e
+
+    APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-local.svc.cluster.local:9180}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    CORS_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000}"
+
+    GREEN='\033[0;32m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+    ok()   { echo -e "${GREEN}OK  $1${NC}"; }
+    err()  { echo -e "${RED}ERR $1${NC}"; }
+    info() { echo -e "${BLUE}INFO $1${NC}"; }
+
+    # -------------------------------------------------------------------------
+    # Main blockchain node route  — /api/v1/chain  and  /api/v1/chain/*
+    # -------------------------------------------------------------------------
+    info "Registering blockchain_node_route (/api/v1/chain[/*] → blockchain_node)..."
+
+    PLUGINS=$(jq -n --arg cors "$CORS_ORIGINS" '{
+      "cors": {
+        "allow_origins": $cors,
+        "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+        "expose_headers": "X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
+        "max_age": 86400,
+        "allow_credential": true
+      },
+      "limit-count": {
+        "count": 100,
+        "time_window": 60,
+        "rejected_code": 429,
+        "rejected_msg": "Rate limit exceeded",
+        "policy": "local"
+      },
+      "request-id": {
+        "algorithm": "uuid",
+        "include_in_response": true
+      },
+      "api-breaker": {
+        "break_response_code": 502,
+        "max_breaker_sec": 20,
+        "unhealthy": {
+          "http_statuses": [500, 502, 503, 504],
+          "failures": 3
+        },
+        "healthy": {
+          "successes": 2
+        }
+      },
+      "prometheus": {}
+    }')
+
+    UPSTREAM=$(jq -n '{
+      "type": "roundrobin",
+      "service_name": "blockchain_node",
+      "discovery_type": "consul",
+      "scheme": "http",
+      "pass_host": "pass",
+      "retries": 2,
+      "retry_timeout": 6,
+      "timeout": { "connect": 6, "send": 6, "read": 30 },
+      "keepalive_pool": { "size": 320, "idle_timeout": 60, "requests": 1000 },
+      "checks": {
+        "active": {
+          "http_path": "/health",
+          "timeout": 3,
+          "healthy": { "interval": 5, "successes": 3 },
+          "unhealthy": { "interval": 2, "http_failures": 2 }
+        },
+        "passive": {
+          "healthy": { "http_statuses": [200, 201, 204], "successes": 3 },
+          "unhealthy": { "http_statuses": [500, 502, 503, 504], "http_failures": 3, "timeouts": 3 }
+        }
+      }
+    }')
+
+    RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/routes/blockchain_node_route" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --argjson plugins "$PLUGINS" \
+          --argjson upstream "$UPSTREAM" \
+          '{
+            "name": "blockchain_node_route",
+            "uris": ["/api/v1/chain", "/api/v1/chain/*"],
+            "priority": 10,
+            "status": 1,
+            "plugins": $plugins,
+            "upstream": $upstream
+          }')")
+
+    HTTP=$(echo "$RESP" | tail -n1)
+    if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+      ok "blockchain_node_route registered"
+    else
+      err "Failed to register blockchain_node_route (HTTP $HTTP)"
+      echo "$RESP" | head -n -1
+      exit 1
+    fi
+
+    # -------------------------------------------------------------------------
+    # Health alias route — /api/v1/chain/health → blockchain_node:/health
+    # Higher priority (20) so it resolves before the wildcard route above.
+    # -------------------------------------------------------------------------
+    info "Registering blockchain_node_health_route (/api/v1/chain/health → /health)..."
+
+    HEALTH_PLUGINS=$(jq -n --arg cors "$CORS_ORIGINS" '{
+      "cors": {
+        "allow_origins": $cors,
+        "allow_methods": "GET,OPTIONS,HEAD",
+        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+        "expose_headers": "X-Request-ID",
+        "max_age": 86400,
+        "allow_credential": true
+      },
+      "request-id": { "algorithm": "uuid", "include_in_response": true },
+      "proxy-rewrite": { "regex_uri": ["^/api/v1/chain/health$", "/health"] },
+      "prometheus": {}
+    }')
+
+    RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/routes/blockchain_node_health_route" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --argjson plugins "$HEALTH_PLUGINS" \
+          --argjson upstream "$UPSTREAM" \
+          '{
+            "name": "blockchain_node_health_route",
+            "uris": ["/api/v1/chain/health"],
+            "priority": 20,
+            "status": 1,
+            "plugins": $plugins,
+            "upstream": $upstream
+          }')")
+
+    HTTP=$(echo "$RESP" | tail -n1)
+    if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+      ok "blockchain_node_health_route registered"
+    else
+      err "Failed to register blockchain_node_health_route (HTTP $HTTP)"
+      echo "$RESP" | head -n -1
+      exit 1
+    fi
+
+    info "Blockchain APISIX routes registered successfully."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: blockchain-apisix-route-register
+  namespace: isa-cloud-local
+  labels:
+    app: blockchain-apisix-route
+    tier: domain
+  annotations:
+    # Re-run this Job whenever routes need to be reconciled:
+    #   kubectl delete job blockchain-apisix-route-register -n isa-cloud-local
+    #   kubectl apply -f blockchain-apisix-route.yaml
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: blockchain-apisix-route
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache bash curl jq > /dev/null 2>&1
+              bash /scripts/register_routes.sh
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          env:
+            - name: APISIX_ADMIN_URL
+              value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
+            - name: APISIX_ADMIN_KEY
+              value: "edd1c9f034335f136f87ad84b625c8f1"
+            # Uncomment to restrict CORS origins:
+            # - name: CORS_ALLOWED_ORIGINS
+            #   value: "http://localhost:3000,http://localhost:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: blockchain-apisix-route-script
+            defaultMode: 0755

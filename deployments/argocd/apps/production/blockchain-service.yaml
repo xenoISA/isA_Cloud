@@ -1,0 +1,45 @@
+# =============================================================================
+# Blockchain Service - Production
+# =============================================================================
+# IMPORTANT: Auto-sync DISABLED. Manual sync required for all changes.
+# Uses production values with HA configuration.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blockchain-service-production
+  namespace: argocd
+  labels:
+    app: blockchain-service
+    environment: production
+    tier: domain
+    critical: "true"
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
+    targetRevision: production
+    path: deployments/charts/isa-service
+    helm:
+      valueFiles:
+        - ../../../isA_Chain/deployment/helm/values.yaml
+        - ../../../isA_Chain/deployment/helm/values-production.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-cloud-production
+  syncPolicy:
+    # NO automated sync for production - manual approval required
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
