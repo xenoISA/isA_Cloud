@@ -1,0 +1,102 @@
+# isA_Data — Big Data Platform Service
+# FastAPI service on port 8084
+
+image:
+  repository: harbor.isa.io/isa/isa-data
+  tag: "latest"
+  pullPolicy: Always
+
+replicaCount: 2
+
+# Resources
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+
+# Service
+service:
+  type: ClusterIP
+  port: 8084
+
+# Configuration
+config:
+  # Database
+  postgresHost: postgresql-pgpool.isa-cloud-production.svc.cluster.local
+  postgresPort: "5432"
+  postgresDb: isa_data
+  # Storage
+  minioEndpoint: minio.isa-cloud-production.svc.cluster.local:9000
+  minioBucket: isa-data
+  # Cache
+  redisUrl: redis://redis-cluster.isa-cloud-production.svc.cluster.local:6379
+  # Vector
+  qdrantHost: qdrant.isa-cloud-production.svc.cluster.local
+  qdrantPort: "6333"
+  # Graph
+  neo4jUri: bolt://neo4j.isa-cloud-production.svc.cluster.local:7687
+  # Events
+  natsUrl: nats://nats.isa-cloud-production.svc.cluster.local:4222
+  # Service discovery
+  consulHost: consul-server.isa-cloud-production.svc.cluster.local
+  consulPort: "8500"
+  # Ray
+  rayAddress: ray-data-head-svc.isa-cloud-production.svc.cluster.local:10001
+
+# Init container for DB migrations
+initContainers:
+  - name: db-migrate
+    image: harbor.isa.io/isa/isa-data:latest
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    envFrom:
+      - secretRef:
+          name: data-infra-secrets
+          optional: true
+
+# Pod scheduling
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: isa-data
+          topologyKey: kubernetes.io/hostname
+
+# Health probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8084
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8084
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+
+# PDB
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policy
+networkPolicy:
+  enabled: true

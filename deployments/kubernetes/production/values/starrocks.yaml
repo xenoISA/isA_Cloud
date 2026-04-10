@@ -1,0 +1,48 @@
+# StarRocks — Optional real-time OLAP database
+# Chart: starrocks/starrocks-ce
+# Only deploy if DuckDB proves insufficient for real-time analytics
+# Install: helm install starrocks starrocks/starrocks-ce -n isa-cloud-production -f values/starrocks.yaml
+
+# Frontend (FE) nodes — query planning and metadata
+fe:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "1000m"
+      memory: "4Gi"
+  persistence:
+    enabled: true
+    storageClass: ""  # Uses provider profile
+    size: 20Gi
+
+# Backend (BE) nodes — storage and compute
+be:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "4Gi"
+    limits:
+      cpu: "2000m"
+      memory: "8Gi"
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 100Gi
+
+# Compute Node (CN) — stateless compute for scaling
+cn:
+  enabled: false  # Enable when you need elastic compute
+
+# Service
+service:
+  type: ClusterIP
+  fePort: 9030
+  bePort: 9060
+
+# Monitoring
+metrics:
+  enabled: true

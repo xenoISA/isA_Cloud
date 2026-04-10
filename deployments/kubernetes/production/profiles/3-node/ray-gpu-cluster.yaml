@@ -1,0 +1,15 @@
+# Ray GPU Cluster — 3-node override
+workerGroups:
+  - groupName: gpu-workers
+    replicas: 1
+    minReplicas: 0
+    maxReplicas: 2
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "4Gi"
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "1000m"
+        memory: "8Gi"
+        nvidia.com/gpu: "1"

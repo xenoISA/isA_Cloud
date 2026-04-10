@@ -1,0 +1,47 @@
+# KVM/Ignite Prerequisites DaemonSet
+# Validates and configures KVM on each node for Firecracker support
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kvm-device-plugin
+  namespace: isa-cloud-production
+  labels:
+    app: kvm-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app: kvm-device-plugin
+  template:
+    metadata:
+      labels:
+        app: kvm-device-plugin
+    spec:
+      hostNetwork: true
+      containers:
+        - name: kvm-device-plugin
+          image: kubevirt/device-plugin-kvm:latest
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+          volumeMounts:
+            - name: device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev
+              mountPath: /dev
+      volumes:
+        - name: device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev
+          hostPath:
+            path: /dev
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule

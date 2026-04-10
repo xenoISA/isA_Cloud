@@ -1,0 +1,56 @@
+# Ignite DaemonSet — installs and manages Ignite (Firecracker frontend) on each node
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ignite-manager
+  namespace: isa-cloud-production
+  labels:
+    app: ignite-manager
+spec:
+  selector:
+    matchLabels:
+      app: ignite-manager
+  template:
+    metadata:
+      labels:
+        app: ignite-manager
+    spec:
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: ignite
+          image: weaveworks/ignite:v0.10.0
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: lib-ignite
+              mountPath: /var/lib/firecracker
+            - name: run-containerd
+              mountPath: /run/containerd
+            - name: dev-kvm
+              mountPath: /dev/kvm
+          env:
+            - name: IGNITE_RUNTIME
+              value: "containerd"
+      volumes:
+        - name: lib-ignite
+          hostPath:
+            path: /var/lib/firecracker
+            type: DirectoryOrCreate
+        - name: run-containerd
+          hostPath:
+            path: /run/containerd
+        - name: dev-kvm
+          hostPath:
+            path: /dev/kvm
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule

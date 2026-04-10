@@ -1,0 +1,37 @@
+# Apache Flink Kubernetes Operator — Optional
+# Chart: flink-operator/flink-kubernetes-operator
+# Only deploy if Ray+Polars+DuckDB proves insufficient for stream processing
+# Install: helm install flink-operator flink-operator/flink-kubernetes-operator -n isa-cloud-production -f values/flink-operator.yaml
+
+image:
+  repository: apache/flink-kubernetes-operator
+  tag: "1.9.0"
+
+# Operator resources
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "500m"
+    memory: "1Gi"
+
+# Default Flink configuration for session clusters
+defaultConfiguration:
+  flink-conf.yaml: |
+    taskmanager.numberOfTaskSlots: 2
+    state.backend: rocksdb
+    state.checkpoints.dir: s3://isa-data/flink/checkpoints
+    state.savepoints.dir: s3://isa-data/flink/savepoints
+    s3.endpoint: http://minio.isa-cloud-production.svc.cluster.local:9000
+    s3.access-key: ${MINIO_ACCESS_KEY}
+    s3.secret-key: ${MINIO_SECRET_KEY}
+    s3.path-style-access: true
+
+# Webhook (for session/application CR validation)
+webhook:
+  create: true
+
+# RBAC
+rbac:
+  create: true

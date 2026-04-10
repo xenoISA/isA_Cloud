@@ -1,0 +1,9 @@
+# Container Service — 3-node override
+replicaCount: 1
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"

@@ -1,0 +1,58 @@
+# Data Platform Monitoring — Grafana Dashboard + Prometheus Alerts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-data
+  namespace: isa-cloud-production
+  labels:
+    grafana_dashboard: "true"
+data:
+  data-platform.json: |
+    {
+      "dashboard": {
+        "title": "Data Platform Overview",
+        "uid": "data-platform-overview",
+        "panels": [
+          {"title": "CDC Events/sec", "type": "timeseries", "targets": [{"expr": "rate(streaming_etl_events_processed_total[5m])"}]},
+          {"title": "CDC Lag (sec)", "type": "timeseries", "targets": [{"expr": "streaming_etl_processing_lag_seconds"}]},
+          {"title": "Delta Lake Zone Sizes", "type": "bargauge", "targets": [{"expr": "delta_lake_zone_size_bytes"}]},
+          {"title": "View Freshness", "type": "table", "targets": [{"expr": "time() - materialized_view_last_refresh_timestamp"}]},
+          {"title": "DuckDB Query p99", "type": "timeseries", "targets": [{"expr": "histogram_quantile(0.99, rate(query_duration_seconds_bucket[5m]))"}]},
+          {"title": "Dagster Runs", "type": "stat", "targets": [{"expr": "dagster_runs_total"}]}
+        ]
+      }
+    }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: data-platform-alerts
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: data.rules
+      rules:
+        - alert: CDCLagHigh
+          expr: streaming_etl_processing_lag_seconds > 300
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CDC processing lag above 5 minutes"
+        - alert: MaterializedViewStale
+          expr: (time() - materialized_view_last_refresh_timestamp) > 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Materialized view {{ $labels.view }} stale >1hr"
+        - alert: StreamingETLDown
+          expr: up{job="streaming-etl"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Streaming ETL processor is down"

@@ -1,0 +1,102 @@
+# VM Image Build Pipeline — builds and caches rootfs images for Firecracker
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vm-image-builder
+  namespace: isa-cloud-production
+  labels:
+    app: vm-image-pipeline
+spec:
+  schedule: "0 4 * * 0"  # Weekly at 4 AM Sunday
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: vm-image-pipeline
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: vm-image-builder
+          containers:
+            - name: builder
+              image: harbor.isa.io/isa/vm-image-builder:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  echo "Building VM images..."
+
+                  # Build Python REPL image
+                  echo "Building python-repl rootfs..."
+                  docker build -t harbor.isa.io/isa/vm-python-repl:latest \
+                    -f /workspace/vm-images/python-repl/Dockerfile /workspace/vm-images/python-repl/
+                  docker push harbor.isa.io/isa/vm-python-repl:latest
+
+                  # Build Playwright browser image
+                  echo "Building playwright rootfs..."
+                  docker build -t harbor.isa.io/isa/vm-playwright:latest \
+                    -f /workspace/vm-images/playwright/Dockerfile /workspace/vm-images/playwright/
+                  docker push harbor.isa.io/isa/vm-playwright:latest
+
+                  # Import into Ignite on each node (via DaemonSet trigger)
+                  echo "Images pushed to Harbor. Ignite will pull on next VM creation."
+                  echo "To pre-cache: ignite image import harbor.isa.io/isa/vm-python-repl:latest"
+              env:
+                - name: DOCKER_HOST
+                  value: "unix:///var/run/docker.sock"
+              volumeMounts:
+                - name: docker-sock
+                  mountPath: /var/run/docker.sock
+                - name: workspace
+                  mountPath: /workspace
+              resources:
+                requests:
+                  cpu: "1000m"
+                  memory: "2Gi"
+                limits:
+                  cpu: "2000m"
+                  memory: "4Gi"
+          volumes:
+            - name: docker-sock
+              hostPath:
+                path: /var/run/docker.sock
+            - name: workspace
+              emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vm-image-builder
+  namespace: isa-cloud-production
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vm-image-builder
+  namespace: isa-cloud-production
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vm-image-builder
+  namespace: isa-cloud-production
+subjects:
+  - kind: ServiceAccount
+    name: vm-image-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vm-image-builder

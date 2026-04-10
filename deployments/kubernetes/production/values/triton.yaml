@@ -1,0 +1,93 @@
+# Triton Inference Server - Production Values
+# Chart: custom deployment (no official Helm chart)
+# Supports: TensorRT, ONNX, PyTorch, TensorFlow backends
+
+image:
+  repository: nvcr.io/nvidia/tritonserver
+  tag: "24.01-py3"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# GPU Resources
+resources:
+  requests:
+    cpu: "2000m"
+    memory: "8Gi"
+    nvidia.com/gpu: "1"
+  limits:
+    cpu: "4000m"
+    memory: "16Gi"
+    nvidia.com/gpu: "1"
+
+# Triton configuration
+config:
+  modelRepositoryPath: /models
+  modelControlMode: poll
+  modelControlPollInterval: 30
+  strictModelConfig: false
+  logVerbose: 0
+  logInfo: true
+  logWarning: true
+  logError: true
+
+# Model cache persistence
+persistence:
+  enabled: true
+  existingClaim: model-cache-triton
+  mountPath: /models
+
+# Service ports
+service:
+  type: ClusterIP
+  ports:
+    http: 8000
+    grpc: 8001
+    metrics: 8002
+
+# Pod scheduling
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: nvidia.com/gpu.present
+              operator: In
+              values: ["true"]
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /v2/health/live
+    port: 8000
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /v2/health/ready
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+    interval: 15s
+
+# PDB
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 0
+
+# Network Policy
+networkPolicy:
+  enabled: true

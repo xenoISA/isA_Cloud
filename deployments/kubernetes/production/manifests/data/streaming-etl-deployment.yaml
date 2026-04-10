@@ -1,0 +1,125 @@
+# Streaming ETL Pipeline — NATS CDC → Delta Lake on MinIO
+# Deploys the isA_Data streaming processor as a separate deployment
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streaming-etl-config
+  namespace: isa-cloud-production
+  labels:
+    app: streaming-etl
+data:
+  config.yaml: |
+    # CDC Source
+    cdc:
+      nats_url: nats://nats.isa-cloud-production.svc.cluster.local:4222
+      consumer_name: streaming-etl
+      subjects:
+        - "cdc.>"
+      batch_size: 100
+      batch_timeout_ms: 5000
+
+    # Delta Lake Target
+    delta_lake:
+      storage_backend: s3
+      s3_endpoint: http://minio.isa-cloud-production.svc.cluster.local:9000
+      s3_bucket: isa-data
+      base_path: delta-lake
+
+    # Processing
+    processing:
+      micro_batch_interval_ms: 1000
+      max_batch_size: 500
+      zones:
+        raw:
+          retention_days: 90
+          partition_by: ["date"]
+        curated:
+          scd_type: 2
+          dedup_window_minutes: 5
+        gold:
+          refresh_interval_minutes: 15
+
+    # Monitoring
+    metrics:
+      enabled: true
+      port: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streaming-etl
+  namespace: isa-cloud-production
+  labels:
+    app: streaming-etl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: streaming-etl
+  template:
+    metadata:
+      labels:
+        app: streaming-etl
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      containers:
+        - name: streaming-etl
+          image: harbor.isa.io/isa/isa-data:latest
+          command: ["python", "-m", "src.services.data_infra_service.streaming.processor"]
+          envFrom:
+            - configMapRef:
+                name: streaming-etl-config
+            - secretRef:
+                name: data-infra-secrets
+                optional: true
+          env:
+            - name: MINIO_ENDPOINT
+              value: "minio.isa-cloud-production.svc.cluster.local:9000"
+            - name: NATS_URL
+              value: "nats://nats.isa-cloud-production.svc.cluster.local:4222"
+            - name: POSTGRES_HOST
+              value: "postgresql-pgpool.isa-cloud-production.svc.cluster.local"
+            - name: REDIS_URL
+              value: "redis://redis-cluster.isa-cloud-production.svc.cluster.local:6379"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: streaming-etl
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: streaming-etl-pdb
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: streaming-etl

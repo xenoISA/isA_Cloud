@@ -1,0 +1,137 @@
+# vLLM Inference Engine - Production Values
+# Deployed as StatefulSet for persistent model cache
+# Requires: NVIDIA GPU Operator, model-cache PVC
+
+# Image
+image:
+  repository: vllm/vllm-openai
+  tag: "v0.6.6.post1"
+  pullPolicy: IfNotPresent
+
+# Replicas
+replicaCount: 1
+
+# GPU Resources
+resources:
+  requests:
+    cpu: "2000m"
+    memory: "16Gi"
+    nvidia.com/gpu: "1"
+  limits:
+    cpu: "4000m"
+    memory: "32Gi"
+    nvidia.com/gpu: "1"
+
+# vLLM configuration
+config:
+  modelId: "meta-llama/Llama-3.1-8B-Instruct"
+  tensorParallelSize: 1
+  gpuMemoryUtilization: "0.9"
+  maxModelLen: "32768"
+  maxNumSeqs: "256"
+  blockSize: "16"
+  enablePrefixCaching: true
+  enableChunkedPrefill: true
+  speculativeModel: "meta-llama/Llama-3.2-1B-Instruct"
+  numSpeculativeTokens: "5"
+
+# Model cache persistence
+persistence:
+  enabled: true
+  existingClaim: model-cache-vllm
+  mountPath: /root/.cache/huggingface
+
+# Service
+service:
+  type: ClusterIP
+  port: 8000
+
+# Pod scheduling — GPU topology constraint
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: nvidia.com/gpu.present
+              operator: In
+              values: ["true"]
+  # For TP>1: ensure all GPUs on same node
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: vllm
+          topologyKey: kubernetes.io/hostname
+
+# Topology spread
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: vllm
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 120
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60  # Allow up to 10 min for model loading
+
+# Security
+securityContext:
+  runAsNonRoot: false  # vLLM needs root for GPU access in some configs
+
+# Metrics
+metrics:
+  enabled: true
+  port: 8000
+  path: /metrics
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+    interval: 15s
+
+# HuggingFace token
+huggingfaceToken:
+  existingSecret: huggingface-token
+  key: token
+
+# PDB
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 0  # Allow full drain for GPU maintenance
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: isa-cloud-production

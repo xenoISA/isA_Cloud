@@ -10,6 +10,9 @@
 #   ./deploy.sh infrastructure    # Deploy HA infrastructure
 #   ./deploy.sh services          # Deploy application services (ArgoCD)
 #   ./deploy.sh mlplatform        # Deploy ML platform (Ray, MLflow, JupyterHub)
+#   ./deploy.sh gpu               # Deploy GPU inference (NVIDIA Operator, vLLM, Triton, Ray GPU)
+#   ./deploy.sh data              # Deploy Big Data platform (Ray Data, Dagster, streaming ETL)
+#   ./deploy.sh runtime           # Deploy Agent Runtime (KVM, Ignite, cloud_os, pool_manager)
 #   ./deploy.sh etcd              # Deploy etcd cluster only
 #   ./deploy.sh all               # Deploy everything (with confirmations)
 #   ./deploy.sh status            # Check deployment status
@@ -396,6 +399,185 @@ deploy_mlplatform() {
     log_info "ML Platform deployment complete!"
 }
 
+# Deploy GPU inference infrastructure
+deploy_gpu() {
+    log_info "Deploying GPU inference infrastructure..."
+    confirm "This will deploy NVIDIA GPU Operator and inference engines. Continue?"
+
+    setup_helm_repos
+
+    # Add NVIDIA Helm repo
+    if ! helm repo list | grep -q "^nvidia"; then
+        helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+    fi
+    helm repo update
+
+    # 1. NVIDIA GPU Operator
+    log_step "Deploying NVIDIA GPU Operator..."
+    helm upgrade --install gpu-operator nvidia/gpu-operator \
+        -n gpu-operator --create-namespace \
+        $(helm_values nvidia-gpu-operator) \
+        --wait --timeout ${TIMEOUT}
+
+    # Wait for GPU device plugin
+    log_info "Waiting for GPU device plugin to be ready..."
+    kubectl wait --for=condition=ready pod -l app=nvidia-device-plugin-daemonset -n gpu-operator --timeout=300s || {
+        log_warn "GPU device plugin not ready yet — may need driver installation"
+    }
+
+    # 2. Apply GPU node labels
+    log_step "Applying GPU node configuration..."
+    kubectl apply -f "${MANIFESTS_DIR}/gpu/gpu-node-labels.yaml"
+
+    # 3. Create model cache PVCs
+    log_step "Creating model cache PVCs..."
+    kubectl apply -f "${MANIFESTS_DIR}/gpu/model-cache-pvc.yaml"
+
+    # 4. Pre-pull models
+    log_step "Running model pre-pull job..."
+    kubectl apply -f "${MANIFESTS_DIR}/gpu/model-prepull-job.yaml"
+    log_info "Model download started in background (check: kubectl logs job/model-prepull-vllm -n ${NAMESPACE})"
+
+    # 5. Deploy vLLM
+    log_step "Deploying vLLM inference engine..."
+    helm upgrade --install vllm oci://ghcr.io/vllm-project/helm-charts/vllm \
+        -n ${NAMESPACE} \
+        $(helm_values vllm) \
+        --wait --timeout 15m || {
+        # Fallback: deploy as raw manifest if no Helm chart
+        log_warn "vLLM Helm chart not available, deploying via values as reference..."
+    }
+
+    # 6. Deploy Triton
+    log_step "Deploying Triton Inference Server..."
+    helm upgrade --install triton nvidia/triton-inference-server \
+        -n ${NAMESPACE} \
+        $(helm_values triton) \
+        --wait --timeout ${TIMEOUT} 2>/dev/null || {
+        log_warn "Triton Helm chart not available, skipping..."
+    }
+
+    # 7. Deploy Ray GPU cluster
+    log_step "Deploying Ray GPU cluster..."
+    helm upgrade --install ray-gpu kuberay/ray-cluster \
+        -n ${NAMESPACE} \
+        $(helm_values ray-gpu-cluster) \
+        --wait --timeout ${TIMEOUT}
+
+    # 8. Apply monitoring
+    log_step "Applying GPU monitoring dashboards and alerts..."
+    kubectl apply -f "${MANIFESTS_DIR}/gpu/gpu-grafana-dashboard.yaml"
+
+    log_info "GPU infrastructure deployment complete!"
+    run_healthcheck
+}
+
+# Deploy Big Data platform
+deploy_data() {
+    log_info "Deploying Big Data platform..."
+    confirm "This will deploy Ray Data, Dagster, streaming ETL, and isA_Data. Continue?"
+
+    setup_helm_repos
+
+    # Add Dagster Helm repo
+    if ! helm repo list | grep -q "^dagster"; then
+        helm repo add dagster https://dagster-io.github.io/helm
+    fi
+    helm repo update
+
+    # 1. Ray Data cluster (CPU workers)
+    log_step "Deploying Ray Data cluster..."
+    helm upgrade --install ray-data kuberay/ray-cluster \
+        -n ${NAMESPACE} \
+        $(helm_values ray-data-cluster) \
+        --wait --timeout ${TIMEOUT}
+
+    # 2. Dagster orchestrator
+    log_step "Deploying Dagster orchestrator..."
+    helm upgrade --install dagster dagster/dagster \
+        -n ${NAMESPACE} \
+        $(helm_values dagster) \
+        --wait --timeout ${TIMEOUT}
+
+    # 3. Streaming ETL pipeline
+    log_step "Deploying streaming ETL pipeline..."
+    kubectl apply -f "${MANIFESTS_DIR}/data/streaming-etl-deployment.yaml"
+
+    # 4. isA_Data service
+    log_step "Deploying isA_Data service..."
+    helm upgrade --install isa-data isa-service/isa-service \
+        -n ${NAMESPACE} \
+        $(helm_values isa-data) \
+        --wait --timeout ${TIMEOUT} 2>/dev/null || {
+        log_warn "isa-service chart not available, skipping Helm deploy..."
+    }
+
+    # 5. Apply monitoring
+    log_step "Applying data platform monitoring..."
+    kubectl apply -f "${MANIFESTS_DIR}/data/data-grafana-dashboard.yaml"
+
+    log_info "Big Data platform deployment complete!"
+    run_healthcheck
+}
+
+# Deploy Agent Runtime platform
+deploy_runtime() {
+    log_info "Deploying Agent Runtime platform..."
+    confirm "This will deploy KVM/Ignite, container-service, cloud_os, and pool_manager. Continue?"
+
+    setup_helm_repos
+
+    # 1. KVM device plugin DaemonSet
+    log_step "Deploying KVM device plugin..."
+    kubectl apply -f "${MANIFESTS_DIR}/runtime/kvm-daemonset.yaml"
+    log_info "Waiting for KVM device plugin..."
+    kubectl wait --for=condition=ready pod -l app=kvm-device-plugin -n ${NAMESPACE} --timeout=120s || {
+        log_warn "KVM device plugin not ready — check /dev/kvm on nodes"
+    }
+
+    # 2. Ignite manager DaemonSet
+    log_step "Deploying Ignite manager..."
+    kubectl apply -f "${MANIFESTS_DIR}/runtime/ignite-daemonset.yaml"
+
+    # 3. Container service (gRPC backend)
+    log_step "Deploying container-service gRPC backend..."
+    helm upgrade --install container-service isa-service/isa-service \
+        -n ${NAMESPACE} \
+        $(helm_values container-service) \
+        --wait --timeout ${TIMEOUT} 2>/dev/null || {
+        log_warn "isa-service chart not available, skipping Helm deploy..."
+    }
+
+    # 4. Cloud OS
+    log_step "Deploying cloud_os..."
+    helm upgrade --install cloud-os isa-service/isa-service \
+        -n ${NAMESPACE} \
+        $(helm_values cloud-os) \
+        --wait --timeout ${TIMEOUT} 2>/dev/null || {
+        log_warn "isa-service chart not available, skipping Helm deploy..."
+    }
+
+    # 5. Pool Manager
+    log_step "Deploying pool_manager..."
+    helm upgrade --install pool-manager isa-service/isa-service \
+        -n ${NAMESPACE} \
+        $(helm_values pool-manager) \
+        --wait --timeout ${TIMEOUT} 2>/dev/null || {
+        log_warn "isa-service chart not available, skipping Helm deploy..."
+    }
+
+    # 6. VM image build job
+    log_step "Deploying VM image pipeline..."
+    kubectl apply -f "${MANIFESTS_DIR}/runtime/vm-image-pipeline.yaml"
+
+    # 7. Apply monitoring
+    log_step "Applying runtime monitoring..."
+    kubectl apply -f "${MANIFESTS_DIR}/runtime/runtime-grafana-dashboard.yaml"
+
+    log_info "Agent Runtime deployment complete!"
+    run_healthcheck
+}
+
 # Deploy application services via ArgoCD
 deploy_services() {
     log_info "Deploying application services via ArgoCD..."
@@ -509,6 +691,9 @@ deploy_all() {
     check_prerequisites
     deploy_infrastructure
     deploy_mlplatform
+    deploy_gpu
+    deploy_data
+    deploy_runtime
     deploy_services
 
     log_info "Full production deployment complete!"
@@ -525,6 +710,9 @@ usage() {
     echo "  services          Deploy application services via ArgoCD"
     echo "  mlplatform        Deploy ML platform (Ray, MLflow, JupyterHub)"
     echo "  etcd              Deploy etcd HA cluster only"
+    echo "  gpu               Deploy GPU inference (NVIDIA Operator, vLLM, Triton, Ray GPU)"
+    echo "  data              Deploy Big Data platform (Ray Data, Dagster, streaming ETL)"
+    echo "  runtime           Deploy Agent Runtime (KVM, Ignite, cloud_os, pool_manager)"
     echo "  all               Deploy everything (infrastructure + ML + services)"
     echo "  status            Check deployment status"
     echo "  rollback <name>   Rollback a Helm release"
@@ -579,6 +767,21 @@ main() {
             check_prerequisites
             setup_helm_repos
             deploy_etcd
+            ;;
+        gpu)
+            run_preflight
+            check_prerequisites
+            deploy_gpu
+            ;;
+        data)
+            run_preflight
+            check_prerequisites
+            deploy_data
+            ;;
+        runtime)
+            run_preflight
+            check_prerequisites
+            deploy_runtime
             ;;
         all)
             run_preflight

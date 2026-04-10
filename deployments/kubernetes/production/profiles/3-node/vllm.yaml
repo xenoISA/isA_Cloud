@@ -1,0 +1,19 @@
+# vLLM — 3-node override
+# Single replica per node, reduced resources
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "8Gi"
+    nvidia.com/gpu: "1"
+  limits:
+    cpu: "2000m"
+    memory: "16Gi"
+    nvidia.com/gpu: "1"
+
+config:
+  gpuMemoryUtilization: "0.85"
+  maxNumSeqs: "128"
+
+persistence:
+  # Use smaller cache on 3-node
+  size: 100Gi

@@ -1,0 +1,22 @@
+# GPU Node Labels — apply after GPU Operator deployment
+# These are reference examples; GFD auto-labels most of these
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-node-config
+  namespace: isa-cloud-production
+  labels:
+    app: gpu-config
+data:
+  # Manual node labeling script (run if GFD doesn't detect properly)
+  label-nodes.sh: |
+    #!/bin/bash
+    # Auto-detect and label GPU nodes
+    for node in $(kubectl get nodes -o name); do
+      gpu_count=$(kubectl get ${node} -o jsonpath='{.status.capacity.nvidia\.com/gpu}' 2>/dev/null)
+      if [[ -n "$gpu_count" ]] && [[ "$gpu_count" -gt 0 ]]; then
+        kubectl label ${node} gpu-enabled=true --overwrite
+        echo "Labeled ${node}: gpu-enabled=true, ${gpu_count} GPUs"
+      fi
+    done
