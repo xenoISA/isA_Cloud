@@ -472,6 +472,322 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
+## Epic 10: GPU Inference Platform (isA_Model on IEC)
+
+> Deploy GPU inference infrastructure on IEC K8s — NVIDIA GPU Operator, model serving engines (vLLM, Triton), persistent model cache, GPU monitoring, and autoscaling.
+
+### E10-US1: NVIDIA GPU Operator Deployment
+
+**As a** cluster admin
+**I want** the NVIDIA GPU Operator deployed with device plugin, DCGM exporter, and driver manager
+**So that** K8s can schedule GPU workloads and monitor GPU health
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | GPU Operator Helm chart deployed with node-specific driver config | Planned |
+| AC-1.2 | nvidia.com/gpu resource visible in kubectl describe node | Planned |
+| AC-1.3 | DCGM exporter scraping GPU metrics (VRAM, utilization, temperature) | Planned |
+| AC-1.4 | GPU nodes labeled with gpu-model and gpu-memory | Planned |
+
+### E10-US2: Persistent Model Cache with Storage Tiers
+
+**As a** ML engineer
+**I want** models cached on persistent SSD volumes with pre-pull init containers
+**So that** pod restarts don't require re-downloading multi-GB models
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | StatefulSet with PVC for model cache (fast storage class) | Planned |
+| AC-2.2 | Init container pre-pulls configured models before inference starts | Planned |
+| AC-2.3 | Model version pinning via ConfigMap (no implicit latest) | Planned |
+| AC-2.4 | Cache survives pod restarts and node drains | Planned |
+
+### E10-US3: vLLM Engine Production Deployment
+
+**As a** platform operator
+**I want** vLLM deployed with GPU topology constraints and speculative decoding
+**So that** LLM inference runs at maximum throughput on local GPUs
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | vLLM StatefulSet with nvidia.com/gpu resource requests | Planned |
+| AC-3.2 | Tensor parallelism constrained to same-node GPUs (topology affinity) | Planned |
+| AC-3.3 | Prefix caching and speculative decoding enabled | Planned |
+| AC-3.4 | GPU memory utilization target configurable (default 0.9) | Planned |
+
+### E10-US4: Triton Inference Server Deployment
+
+**As a** ML engineer
+**I want** Triton deployed with TensorRT and ONNX backend support
+**So that** non-LLM models (vision, embedding, TTS) run optimally
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | Triton deployed with model repository on persistent storage | Planned |
+| AC-4.2 | Dynamic model loading via model-control-mode=poll | Planned |
+| AC-4.3 | gRPC and HTTP endpoints exposed via ClusterIP | Planned |
+
+### E10-US5: GPU Monitoring and Autoscaling
+
+**As a** SRE
+**I want** GPU utilization dashboards and GPU-aware HPA
+**So that** inference scales with demand and I can monitor GPU health
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | DCGM Prometheus metrics scraped by cluster Prometheus | Planned |
+| AC-5.2 | Grafana dashboard for VRAM %, GPU utilization, temperature | Planned |
+| AC-5.3 | HPA scales vLLM replicas based on GPU queue depth or VRAM pressure | Planned |
+| AC-5.4 | Alerts for GPU thermal throttling and OOM | Planned |
+
+### E10-US6: Ray Cluster Deployment for Distributed Inference
+
+**As a** platform operator
+**I want** a KubeRay-managed Ray cluster with GPU worker nodes
+**So that** the RAY_SERVE backend router can distribute inference across GPUs
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | KubeRay Operator deployed (reuse from isA_Cloud ML platform) | Planned |
+| AC-6.2 | RayCluster CR with GPU worker nodegroup | Planned |
+| AC-6.3 | Ray Serve deployments for vLLM and SGLang backends | Planned |
+| AC-6.4 | Ray autoscaler scales GPU workers 0→N based on pending tasks | Planned |
+
+### E10-US7: GPU Deploy Script and 3-Node Profile
+
+**As a** DevOps engineer
+**I want** deploy.sh extended with a `gpu` command and 3-node GPU profiles
+**So that** GPU infrastructure deploys alongside the general stack
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-7.1 | deploy.sh gpu command deploys GPU Operator + engines in order | Planned |
+| AC-7.2 | 3-node GPU profile allocates GPUs across nodes (no oversubscription) | Planned |
+| AC-7.3 | Preflight script validates GPU availability and driver version | Planned |
+| AC-7.4 | Health check verifies GPU pods, DCGM metrics, model loaded | Planned |
+
+---
+
+## Epic 11: Big Data Platform (isA_Data on IEC)
+
+> Deploy distributed data processing on IEC K8s — Ray/Dask for distributed Polars/DuckDB, DAG orchestrator, streaming ETL pipeline, and data lake management.
+
+### E11-US1: Ray Cluster for Distributed Data Processing
+
+**As a** data engineer
+**I want** Ray deployed as a distributed compute backend for Polars and DuckDB
+**So that** data processing scales horizontally across 3 nodes
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | RayCluster CR with CPU worker pools across all 3 nodes | Planned |
+| AC-1.2 | Ray Data integration for distributed Polars DataFrames | Planned |
+| AC-1.3 | DuckDB-on-Ray for distributed OLAP queries | Planned |
+| AC-1.4 | Resource isolation between data and inference Ray workloads | Planned |
+
+### E11-US2: DAG Orchestrator Deployment
+
+**As a** data engineer
+**I want** a DAG scheduler (Dagster or Airflow) for pipeline orchestration
+**So that** ETL pipelines have dependency management, retries, and scheduling
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | Orchestrator Helm chart deployed with PostgreSQL backend | Planned |
+| AC-2.2 | K8s executor for running pipeline tasks as pods | Planned |
+| AC-2.3 | Integration with MinIO for artifact storage | Planned |
+| AC-2.4 | Scheduled and event-triggered pipeline runs | Planned |
+
+### E11-US3: Streaming ETL Pipeline Deployment
+
+**As a** data engineer
+**I want** the NATS CDC → Delta Lake streaming pipeline deployed
+**So that** data flows from source databases to the data lake in near-real-time
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | CDC listener deployed consuming NATS JetStream subjects | Planned |
+| AC-3.2 | Micro-batch processor writing to Delta Lake on MinIO | Planned |
+| AC-3.3 | SCD Type 1/2 support for upserts in curated zone | Planned |
+| AC-3.4 | Incremental materialized view refresh for gold zone | Planned |
+
+### E11-US4: Data Service Production Deployment
+
+**As a** platform operator
+**I want** isA_Data deployed as a Helm release with HA and proper resource sizing
+**So that** the data platform is production-ready on 3 nodes
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | Data service Helm chart with StatefulSet (2+ replicas) | Planned |
+| AC-4.2 | Init container for DB schema migrations | Planned |
+| AC-4.3 | PDB and network policies configured | Planned |
+| AC-4.4 | 3-node resource profile with storage for local caching | Planned |
+
+### E11-US5: Data Platform Monitoring
+
+**As a** SRE
+**I want** data pipeline dashboards and SLO alerts
+**So that** I can monitor pipeline health, latency, and data freshness
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | Prometheus metrics for pipeline throughput, latency, errors | Planned |
+| AC-5.2 | Grafana dashboard for Delta Lake zone sizes, CDC lag, query perf | Planned |
+| AC-5.3 | Alerts for stale materialized views and pipeline failures | Planned |
+
+### E11-US6: Optional Flink/StarRocks Tier (Future)
+
+**As a** platform architect
+**I want** an optional Flink + StarRocks deployment for complex stream processing and real-time OLAP
+**So that** the platform can serve advanced analytics workloads if needed
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | Flink Operator Helm chart and session cluster values | Planned |
+| AC-6.2 | StarRocks Helm chart with FE/BE/CN node config | Planned |
+| AC-6.3 | Integration with MinIO (Iceberg catalog) and NATS (Flink source) | Planned |
+| AC-6.4 | 3-node resource profile (co-located with existing infra) | Planned |
+
+---
+
+## Epic 12: Agent Runtime Platform (isA_OS on IEC)
+
+> Deploy Firecracker-based agent runtime on IEC K8s — KVM/Ignite setup, container-service gRPC backend, VM image pipeline, pool manager HA, and sandboxed execution.
+
+### E12-US1: KVM and Firecracker Prerequisites
+
+**As a** cluster admin
+**I want** KVM enabled and validated on all IEC nodes
+**So that** Firecracker microVMs can run with hardware virtualization
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | KVM kernel modules loaded and verified on all nodes | Planned |
+| AC-1.2 | /dev/kvm accessible to pods with appropriate security context | Planned |
+| AC-1.3 | Ignite installed on each node (DaemonSet or node-level) | Planned |
+| AC-1.4 | Preflight script validates KVM, nested virt, and Ignite readiness | Planned |
+
+### E12-US2: Container Service gRPC Backend Deployment
+
+**As a** platform operator
+**I want** the Go container-service deployed as the Firecracker VM management backend
+**So that** cloud_os can create/manage microVMs via gRPC
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | container-service Helm chart deployed with privileged security context | Planned |
+| AC-2.2 | gRPC service reachable from cloud_os pods | Planned |
+| AC-2.3 | VM lifecycle operations (create, start, stop, delete) functional | Planned |
+| AC-2.4 | Health check verifies gRPC connectivity and Ignite backend | Planned |
+
+### E12-US3: Cloud OS Production Deployment
+
+**As a** platform operator
+**I want** cloud_os deployed with HA, proper Helm chart, and Ignite backend
+**So that** agents can request and manage sandboxed VMs
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | cloud_os Helm chart with Deployment (2+ replicas) | Planned |
+| AC-3.2 | ConfigMap switches backend from Docker to Ignite in production | Planned |
+| AC-3.3 | Compute tier quotas enforced per namespace | Planned |
+| AC-3.4 | Network policies restrict VM egress to approved endpoints | Planned |
+
+### E12-US4: Pool Manager HA Deployment
+
+**As a** platform operator
+**I want** pool_manager deployed with HA and auto-scaling
+**So that** agent VM requests are handled reliably
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | pool_manager Helm chart with 2+ replicas | Planned |
+| AC-4.2 | Redis-backed state for VM pool allocation | Planned |
+| AC-4.3 | NATS integration for async VM lifecycle events | Planned |
+| AC-4.4 | Auto-scaler for VM pool based on demand | Planned |
+
+### E12-US5: VM Image Build Pipeline
+
+**As a** platform operator
+**I want** automated VM image builds for Python REPL and Playwright runtimes
+**So that** microVM rootfs images are versioned, cached, and deployable
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | CI pipeline builds rootfs images from Dockerfiles in vm-images/ | Planned |
+| AC-5.2 | Images pushed to Harbor registry with version tags | Planned |
+| AC-5.3 | Ignite image pull from Harbor on VM creation | Planned |
+| AC-5.4 | Image cache on each node to avoid repeated pulls | Planned |
+
+### E12-US6: Agent Runtime Monitoring
+
+**As a** SRE
+**I want** VM lifecycle dashboards and resource utilization metrics
+**So that** I can monitor agent sandbox health and capacity
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | Prometheus metrics for active VMs, creation latency, failures | Planned |
+| AC-6.2 | Grafana dashboard for VM pool utilization and compute tier usage | Planned |
+| AC-6.3 | Alerts for VM pool exhaustion and creation failures | Planned |
+| AC-6.4 | Resource quotas preventing VM sprawl | Planned |
+
+### E12-US7: Agent Runtime Deploy Script and 3-Node Profile
+
+**As a** DevOps engineer
+**I want** deploy.sh extended with a `runtime` command
+**So that** the agent runtime deploys alongside general infrastructure
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-7.1 | deploy.sh runtime command deploys container-service → cloud_os → pool_manager | Planned |
+| AC-7.2 | 3-node profile allocates VM capacity across nodes | Planned |
+| AC-7.3 | Preflight validates KVM/Ignite on target nodes | Planned |
+| AC-7.4 | Health check verifies VM creation end-to-end | Planned |
+
+---
+
 ## Priority Matrix
 
 | Epic | Priority | Status | Notes |
@@ -484,7 +800,10 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E6: Loki | P1 | Done | Observability |
 | E7: Cross-cutting | P0 | Partial | Tracing planned |
 | E8: Unified Observability | P1 | Partial | Shared clients done, migrations + tracing remaining |
-| E9: Production K8s Deployment | P0 | Planned | Provider-agnostic, first target: Infotrend 3-node |
+| E9: Production K8s Deployment | P0 | Done | Provider-agnostic, Infotrend 3-node |
+| E10: GPU Inference Platform | P0 | Planned | NVIDIA GPU Operator, vLLM, Triton, model cache |
+| E11: Big Data Platform | P1 | Planned | Ray distributed compute, DAG orchestrator, streaming ETL |
+| E12: Agent Runtime Platform | P0 | Planned | Firecracker/KVM, container-service, VM pool management |
 
 ---
 
@@ -496,5 +815,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.2.0
+**Version**: 2.3.0
 **Last Updated**: 2026-04-10
