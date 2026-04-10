@@ -1,0 +1,58 @@
+# Ray Data Cluster — CPU workers for distributed Polars/DuckDB
+# Separate from GPU inference Ray cluster (ray-cluster.yaml)
+# Chart: kuberay/ray-cluster
+
+# Cluster name
+fullnameOverride: ray-data
+
+# Head node
+head:
+  rayStartParams:
+    dashboard-host: "0.0.0.0"
+    num-cpus: "0"  # Head is coordinator only
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  serviceType: ClusterIP
+
+# Worker group — CPU workers for data processing
+workerGroups:
+  - groupName: data-workers
+    replicas: 3
+    minReplicas: 1
+    maxReplicas: 6
+    rayStartParams:
+      num-cpus: "4"
+    resources:
+      requests:
+        cpu: "2000m"
+        memory: "4Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+    # Spread across nodes
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  ray.io/group: data-workers
+              topologyKey: kubernetes.io/hostname
+
+# Autoscaler
+autoscalerOptions:
+  upscalingMode: Default
+  idleTimeoutSeconds: 300
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"

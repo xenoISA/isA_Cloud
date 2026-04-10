@@ -1,0 +1,58 @@
+# NVIDIA GPU Operator - Helm Chart Values
+# Chart: nvidia/gpu-operator
+# Docs: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/
+
+# Driver manager - manages NVIDIA driver lifecycle
+driver:
+  enabled: true
+  # Use pre-installed drivers on IEC nodes (set false if drivers already installed)
+  # If nodes have pre-installed drivers, set to false
+  usePreinstalled: false
+  version: "550.127.05"
+
+# Device Plugin - exposes nvidia.com/gpu to K8s scheduler
+devicePlugin:
+  enabled: true
+
+# DCGM Exporter - GPU metrics for Prometheus
+dcgmExporter:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+    interval: 15s
+
+# GFD (GPU Feature Discovery) - labels nodes with GPU properties
+gfd:
+  enabled: true
+
+# MIG Manager - Multi-Instance GPU (disable for consumer GPUs)
+migManager:
+  enabled: false
+
+# Node labeling
+nodeStatusExporter:
+  enabled: true
+
+# Validator - checks GPU stack health
+validator:
+  driver:
+    env:
+      - name: ENABLE_GPU_ADMIN
+        value: "true"
+
+# Toolkit
+toolkit:
+  enabled: true
+
+# Operator configuration
+operator:
+  defaultRuntime: containerd
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

@@ -1,0 +1,12 @@
+# Pool Manager — 3-node override
+replicaCount: 1
+config:
+  minPoolSize: "1"
+  maxPoolSize: "10"
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "250m"
+    memory: "256Mi"

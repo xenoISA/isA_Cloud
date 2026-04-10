@@ -1,0 +1,13 @@
+# GPU Operator — 3-node override
+# Assumes GPUs on all 3 nodes, use pre-installed drivers
+driver:
+  usePreinstalled: true  # IEC likely has drivers pre-installed
+
+operator:
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"

@@ -1,0 +1,9 @@
+# isA_Data — 3-node override
+replicaCount: 1
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"

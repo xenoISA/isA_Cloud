@@ -1,0 +1,108 @@
+# Container Service — Go gRPC backend for Ignite/Firecracker VM management
+# This is the production backend that cloud_os calls via gRPC
+
+image:
+  repository: harbor.isa.io/isa/container-service
+  tag: "latest"
+  pullPolicy: Always
+
+replicaCount: 2
+
+# Resources
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+# gRPC service
+service:
+  type: ClusterIP
+  port: 50051
+  name: grpc
+
+# Security — needs privileged for VM management
+securityContext:
+  privileged: true
+  capabilities:
+    add:
+      - SYS_ADMIN
+      - NET_ADMIN
+
+# Volume mounts for Ignite/Firecracker
+volumeMounts:
+  - name: dev-kvm
+    mountPath: /dev/kvm
+  - name: lib-firecracker
+    mountPath: /var/lib/firecracker
+  - name: run-containerd
+    mountPath: /run/containerd
+
+volumes:
+  - name: dev-kvm
+    hostPath:
+      path: /dev/kvm
+  - name: lib-firecracker
+    hostPath:
+      path: /var/lib/firecracker
+  - name: run-containerd
+    hostPath:
+      path: /run/containerd
+
+# Pod scheduling — spread across nodes
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: container-service
+          topologyKey: kubernetes.io/hostname
+
+# Node selector — only nodes with KVM
+nodeSelector:
+  kvm-enabled: "true"
+
+# Health probes
+livenessProbe:
+  grpc:
+    port: 50051
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  grpc:
+    port: 50051
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+
+# Metrics
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+
+# PDB
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: cloud-os
+      ports:
+        - port: 50051
+          protocol: TCP

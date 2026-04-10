@@ -1,0 +1,51 @@
+# Persistent Model Cache — shared across inference engine pods
+# Uses fast storage class for SSD-backed model storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-vllm
+  namespace: isa-cloud-production
+  labels:
+    app: model-cache
+    engine: vllm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # storageClassName resolved by deploy.sh from provider profile (fast tier)
+  storageClassName: infotrend-block-fast
+  resources:
+    requests:
+      storage: 200Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-triton
+  namespace: isa-cloud-production
+  labels:
+    app: model-cache
+    engine: triton
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: infotrend-block-fast
+  resources:
+    requests:
+      storage: 200Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-registry
+  namespace: isa-cloud-production
+  labels:
+    app: model-cache
+data:
+  # Model versions pinned here — no implicit "latest"
+  # Format: MODEL_ID=huggingface_id:revision
+  models.env: |
+    VLLM_MODEL_ID=meta-llama/Llama-3.1-8B-Instruct
+    VLLM_MODEL_REVISION=main
+    VLLM_DRAFT_MODEL_ID=meta-llama/Llama-3.2-1B-Instruct
+    TRITON_MODELS=all-MiniLM-L6-v2,whisper-large-v3

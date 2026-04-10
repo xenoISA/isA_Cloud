@@ -1,0 +1,65 @@
+# GPU Monitoring — Grafana Dashboard + Prometheus Alerts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-gpu
+  namespace: isa-cloud-production
+  labels:
+    grafana_dashboard: "true"
+data:
+  gpu-overview.json: |
+    {
+      "dashboard": {
+        "title": "GPU Inference Overview",
+        "uid": "gpu-inference-overview",
+        "panels": [
+          {"title": "GPU Utilization (%)", "type": "timeseries", "targets": [{"expr": "DCGM_FI_DEV_GPU_UTIL"}]},
+          {"title": "GPU Memory Used (GiB)", "type": "timeseries", "targets": [{"expr": "DCGM_FI_DEV_FB_USED / 1024"}]},
+          {"title": "GPU Temperature (°C)", "type": "gauge", "targets": [{"expr": "DCGM_FI_DEV_GPU_TEMP"}]},
+          {"title": "vLLM Request Queue", "type": "timeseries", "targets": [{"expr": "vllm:num_requests_waiting"}]},
+          {"title": "vLLM Tokens/sec", "type": "stat", "targets": [{"expr": "rate(vllm:generation_tokens_total[5m])"}]},
+          {"title": "Triton Latency p99 (ms)", "type": "timeseries", "targets": [{"expr": "histogram_quantile(0.99, rate(nv_inference_request_duration_us_bucket[5m]))/1000"}]}
+        ]
+      }
+    }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-alerts
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: gpu.rules
+      rules:
+        - alert: GPUTemperatureHigh
+          expr: DCGM_FI_DEV_GPU_TEMP > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU temperature above 85°C on {{ $labels.gpu }}"
+        - alert: GPUTemperatureCritical
+          expr: DCGM_FI_DEV_GPU_TEMP > 95
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "GPU temperature critical on {{ $labels.gpu }}"
+        - alert: GPUMemoryExhausted
+          expr: DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_FREE > 0.95
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU VRAM above 95% on {{ $labels.gpu }}"
+        - alert: VLLMQueueBacklog
+          expr: vllm:num_requests_waiting > 50
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM queue depth exceeds 50"

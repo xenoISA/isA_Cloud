@@ -1,0 +1,120 @@
+# Cloud OS — VM management API service (FastAPI)
+# Manages Firecracker/Ignite VMs via container-service gRPC backend
+
+image:
+  repository: harbor.isa.io/isa/cloud-os
+  tag: "latest"
+  pullPolicy: Always
+
+replicaCount: 2
+
+# Resources
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+# Service
+service:
+  type: ClusterIP
+  port: 8086
+
+# Configuration
+config:
+  # Backend selection: docker (dev) or ignite (production)
+  backend: ignite
+  containerServiceHost: container-service.isa-cloud-production.svc.cluster.local
+  containerServicePort: "50051"
+  # Compute tiers
+  maxVmsPerNode: 10
+  defaultTier: micro
+  # Consul registration
+  consulHost: consul-server.isa-cloud-production.svc.cluster.local
+  consulPort: "8500"
+
+# Environment from secrets
+envFrom:
+  - secretRef:
+      name: cloud-os-secret
+      optional: true
+
+# Pod scheduling
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: cloud-os
+          topologyKey: kubernetes.io/hostname
+
+# Health probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8086
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8086
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+
+# Metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+
+# PDB
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: pool-manager
+        - podSelector:
+            matchLabels:
+              app: isa-agent
+      ports:
+        - port: 8086
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: container-service
+      ports:
+        - port: 50051
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: consul
+      ports:
+        - port: 8500
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis-cluster
+      ports:
+        - port: 6379
+          protocol: TCP

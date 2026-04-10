@@ -1,0 +1,58 @@
+# Agent Runtime Monitoring — Grafana Dashboard + Prometheus Alerts
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-runtime
+  namespace: isa-cloud-production
+  labels:
+    grafana_dashboard: "true"
+data:
+  agent-runtime.json: |
+    {
+      "dashboard": {
+        "title": "Agent Runtime Overview",
+        "uid": "agent-runtime-overview",
+        "panels": [
+          {"title": "Active VMs", "type": "stat", "targets": [{"expr": "cloud_os_active_vms_total"}]},
+          {"title": "VM Create Latency p99", "type": "timeseries", "targets": [{"expr": "histogram_quantile(0.99, rate(cloud_os_vm_create_duration_seconds_bucket[5m]))"}]},
+          {"title": "Pool Utilization %", "type": "gauge", "targets": [{"expr": "pool_manager_active_vms / pool_manager_max_pool_size * 100"}]},
+          {"title": "VMs by Tier", "type": "piechart", "targets": [{"expr": "cloud_os_vms_by_tier"}]},
+          {"title": "Create Failures/sec", "type": "timeseries", "targets": [{"expr": "rate(cloud_os_vm_create_failures_total[5m])"}]},
+          {"title": "Pool Manager RPS", "type": "timeseries", "targets": [{"expr": "rate(pool_manager_requests_total[5m])"}]}
+        ]
+      }
+    }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: runtime-alerts
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: runtime.rules
+      rules:
+        - alert: VMPoolExhausted
+          expr: pool_manager_active_vms / pool_manager_max_pool_size > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VM pool utilization above 90%"
+        - alert: VMCreationFailing
+          expr: rate(cloud_os_vm_create_failures_total[5m]) > 0.1
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "VM creation failures >0.1/sec"
+        - alert: PoolManagerDown
+          expr: up{job="pool-manager"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pool manager is down"

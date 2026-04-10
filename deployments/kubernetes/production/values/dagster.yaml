@@ -1,0 +1,108 @@
+# Dagster — DAG orchestrator for data pipeline scheduling
+# Chart: dagster/dagster
+# Docs: https://docs.dagster.io/deployment/guides/kubernetes
+
+# Dagster webserver (Dagit UI)
+dagsterWebserver:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  service:
+    type: ClusterIP
+    port: 3000
+
+# Dagster daemon (scheduler + sensor)
+dagsterDaemon:
+  enabled: true
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Run launcher — K8s executor
+runLauncher:
+  type: K8sRunLauncher
+  config:
+    k8sRunLauncher:
+      envConfigMaps:
+        - dagster-pipeline-env
+      envSecrets:
+        - dagster-pipeline-secrets
+      jobNamespace: isa-cloud-production
+      loadInclusterConfig: true
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2000m"
+          memory: "4Gi"
+
+# PostgreSQL backend (use existing isA_Cloud PostgreSQL)
+postgresql:
+  enabled: false  # Disable bundled PostgreSQL
+  postgresqlHost: postgresql-pgpool.isa-cloud-production.svc.cluster.local
+  postgresqlPort: 5432
+  postgresqlUsername: dagster
+  postgresqlDatabase: dagster
+  postgresqlPassword: ""  # Via external secret
+
+# Use existing PostgreSQL for run storage
+dagsterInstance:
+  runStorage:
+    module: dagster_postgres.run_storage
+    class: PostgresRunStorage
+    config:
+      postgres_url:
+        env: DAGSTER_PG_URL
+  eventLogStorage:
+    module: dagster_postgres.event_log
+    class: PostgresEventLogStorage
+    config:
+      postgres_url:
+        env: DAGSTER_PG_URL
+  scheduleStorage:
+    module: dagster_postgres.schedule_storage
+    class: PostgresScheduleStorage
+    config:
+      postgres_url:
+        env: DAGSTER_PG_URL
+
+# Code location — isA_Data pipelines
+codeLocations:
+  - name: isa-data-pipelines
+    image:
+      repository: harbor.isa.io/isa/isa-data
+      tag: "latest"
+    port: 3030
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "2Gi"
+
+# ConfigMap for pipeline env vars
+env:
+  MINIO_ENDPOINT: "minio.isa-cloud-production.svc.cluster.local:9000"
+  NATS_URL: "nats://nats.isa-cloud-production.svc.cluster.local:4222"
+  REDIS_URL: "redis://redis-cluster.isa-cloud-production.svc.cluster.local:6379"
+  QDRANT_HOST: "qdrant.isa-cloud-production.svc.cluster.local"
+  QDRANT_PORT: "6333"
+
+# Metrics
+serviceAccount:
+  create: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
