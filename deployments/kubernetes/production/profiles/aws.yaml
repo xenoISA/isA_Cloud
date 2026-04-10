@@ -1,0 +1,9 @@
+# AWS EKS storage profile
+provider: aws
+description: "AWS EKS — gp3 block, io2 fast, efs NFS"
+
+storage:
+  block: gp3
+  fast: io2
+  nfs: efs-sc
+  object: ""         # S3 via IAM, not StorageClass

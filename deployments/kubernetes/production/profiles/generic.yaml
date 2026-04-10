@@ -1,0 +1,9 @@
+# Generic provider profile — uses default StorageClass
+provider: generic
+description: "Generic Kubernetes cluster — uses default StorageClass for all volumes"
+
+storage:
+  block: ""          # empty = default StorageClass
+  fast: ""
+  nfs: ""
+  object: ""

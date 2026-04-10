@@ -1,0 +1,31 @@
+# Neo4j Cluster — 3-node cluster override
+# Keep minimum 3 for cluster quorum, reduce resources
+neo4j:
+  resources:
+    cpu: "1000m"
+    memory: "2Gi"
+
+podSpec:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: neo4j
+          topologyKey: kubernetes.io/hostname
+
+volumes:
+  data:
+    dynamic:
+      requests:
+        storage: 20Gi
+  logs:
+    dynamic:
+      requests:
+        storage: 5Gi
+
+config:
+  dbms.memory.heap.initial_size: "512M"
+  dbms.memory.heap.max_size: "1G"
+  dbms.memory.pagecache.size: "512M"

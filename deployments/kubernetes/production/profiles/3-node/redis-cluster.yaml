@@ -1,0 +1,35 @@
+# Redis Cluster — 3-node cluster override
+# 3 masters, 0 replicas (minimum for Redis Cluster)
+cluster:
+  nodes: 3
+  replicas: 0
+
+redis:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  podAntiAffinityPreset: soft
+  configuration: |
+    maxmemory 768mb
+    maxmemory-policy allkeys-lru
+    appendonly yes
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    tcp-keepalive 300
+    timeout 0
+    cluster-require-full-coverage no
+    cluster-node-timeout 15000
+
+persistence:
+  size: 10Gi
+
+pdb:
+  create: true
+  minAvailable: 2
+  maxUnavailable: 1
