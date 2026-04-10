@@ -1,0 +1,62 @@
+# Infotrend Enterprise Cloud StorageClasses
+# Apply BEFORE running deploy.sh: kubectl apply -f storage-classes/infotrend-storage-classes.yaml
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-block
+  labels:
+    provider: infotrend
+    tier: standard
+provisioner: csi.infotrend.com
+parameters:
+  type: block
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-block-fast
+  labels:
+    provider: infotrend
+    tier: fast
+provisioner: csi.infotrend.com
+parameters:
+  type: block
+  mediaType: ssd
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-nfs
+  labels:
+    provider: infotrend
+    tier: shared
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: "${NFS_SERVER}"
+  share: "${NFS_SHARE}"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1
+  - hard
+  - nointr
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: infotrend-object
+  labels:
+    provider: infotrend
+    tier: object
+provisioner: csi.infotrend.com
+parameters:
+  type: object
+reclaimPolicy: Retain
+allowVolumeExpansion: true

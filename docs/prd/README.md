@@ -346,6 +346,132 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
+## Epic 9: Production K8s Deployment (Provider-Agnostic)
+
+> Pluggable production deployment supporting any K8s infrastructure (bare-metal, on-prem cloud, managed). First target: Infotrend Enterprise Cloud (3-node cluster).
+
+### E9-US1: Pluggable Storage Class Templates
+
+**As a** cluster admin
+**I want** provider-agnostic storage class templates with pluggable presets
+**So that** I can deploy on any infrastructure without modifying Helm values
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | Provider profile config maps logical names (block, fast, nfs, object) to provider-specific classes | Planned |
+| AC-1.2 | Infotrend preset maps to infotrend-block, infotrend-block-fast, infotrend-nfs, infotrend-object | Planned |
+| AC-1.3 | Generic preset uses standard/default storage class for cloud providers | Planned |
+| AC-1.4 | All Helm value files reference logical storage names, resolved at deploy time | Planned |
+
+### E9-US2: 3-Node Cluster Resource Profiles
+
+**As a** platform operator
+**I want** right-sized resource profiles for small clusters (3 nodes)
+**So that** infrastructure fits within constrained node capacity
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | PostgreSQL HA downsized to 2 replicas with anti-affinity soft rules | Planned |
+| AC-2.2 | Redis Cluster downsized to 3 masters + 0 replicas | Planned |
+| AC-2.3 | Pod topology spread constraints distribute across all 3 nodes | Planned |
+| AC-2.4 | Total resource requests fit within 3-node capacity (documented) | Planned |
+
+### E9-US3: Pre-Flight Verification
+
+**As a** SRE
+**I want** automated pre-flight checks before deployment
+**So that** issues are caught before any Helm install runs
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | Verify K8s version compatibility (≥1.27) | Planned |
+| AC-3.2 | Verify storage classes exist and are provisionable | Planned |
+| AC-3.3 | Verify node count and resource capacity meet minimum requirements | Planned |
+| AC-3.4 | Verify network connectivity (inter-node, DNS, external registries) | Planned |
+| AC-3.5 | Verify Vault is unsealed and ESO is syncing secrets | Planned |
+
+### E9-US4: Provider-Parameterized Deployment
+
+**As a** DevOps engineer
+**I want** deploy.sh to accept a provider profile and cluster size
+**So that** a single script handles any target environment
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | deploy.sh accepts --provider and --nodes flags | Planned |
+| AC-4.2 | Provider flag selects storage class preset and provider-specific config | Planned |
+| AC-4.3 | Nodes flag selects resource profile (3-node, 5-node, 10-node) | Planned |
+| AC-4.4 | Deployment order unchanged (secrets → etcd → databases → messaging → gateway → apps) | Planned |
+
+### E9-US5: Production Deployment Guide
+
+**As an** operator
+**I want** a step-by-step deployment guide with provider-specific examples
+**So that** I can deploy the full stack on any supported infrastructure
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | Guide covers end-to-end from clean cluster to running platform | Planned |
+| AC-5.2 | Infotrend example included as reference implementation | Planned |
+| AC-5.3 | Verification steps after each deployment phase | Planned |
+
+### E9-US6: Post-Deploy Health Verification
+
+**As an** on-call engineer
+**I want** a health check script that verifies full stack deployment
+**So that** I can confirm the platform is production-ready
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | All pods in Running/Ready state | Planned |
+| AC-6.2 | All services registered in Consul | Planned |
+| AC-6.3 | APISIX routes synced from Consul | Planned |
+| AC-6.4 | PodDisruptionBudgets satisfied | Planned |
+| AC-6.5 | Backup CronJobs configured and schedulable | Planned |
+
+### E9-US7: Rollback Procedures
+
+**As a** platform operator
+**I want** documented rollback procedures for each deployment phase
+**So that** I can recover from failed deployments
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-7.1 | Helm rollback commands documented per component | Planned |
+| AC-7.2 | Data recovery steps for stateful services | Planned |
+| AC-7.3 | Order of rollback (reverse of deployment) documented | Planned |
+
+### E9-US8: Portable Backup/Restore
+
+**As a** platform operator
+**I want** backup and restore procedures that work across storage providers
+**So that** data is protected regardless of infrastructure
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-8.1 | PostgreSQL backup via pg_dump CronJob (provider-independent) | Planned |
+| AC-8.2 | MinIO backup via mc mirror to secondary target | Planned |
+| AC-8.3 | NATS JetStream snapshot and restore documented | Planned |
+| AC-8.4 | Backup targets configurable per provider profile | Planned |
+
+---
+
 ## Priority Matrix
 
 | Epic | Priority | Status | Notes |
@@ -358,6 +484,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E6: Loki | P1 | Done | Observability |
 | E7: Cross-cutting | P0 | Partial | Tracing planned |
 | E8: Unified Observability | P1 | Partial | Shared clients done, migrations + tracing remaining |
+| E9: Production K8s Deployment | P0 | Planned | Provider-agnostic, first target: Infotrend 3-node |
 
 ---
 
@@ -369,5 +496,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.1.0
-**Last Updated**: 2026-03-09
+**Version**: 2.2.0
+**Last Updated**: 2026-04-10

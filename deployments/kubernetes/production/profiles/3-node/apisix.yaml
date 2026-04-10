@@ -1,0 +1,21 @@
+# 3-node cluster override for APISIX
+apisix:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: apisix
+            topologyKey: kubernetes.io/hostname

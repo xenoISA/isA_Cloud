@@ -1,0 +1,55 @@
+# PostgreSQL HA — 3-node cluster override
+# Reduces to 2 replicas with soft anti-affinity
+postgresql:
+  replicaCount: 2
+  podAntiAffinityPreset: soft
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  persistence:
+    size: 50Gi
+  extendedConfiguration: |
+    max_connections = 200
+    shared_buffers = 512MB
+    effective_cache_size = 1536MB
+    maintenance_work_mem = 128MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 32MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 2MB
+    min_wal_size = 512MB
+    max_wal_size = 2GB
+    max_worker_processes = 2
+    max_parallel_workers_per_gather = 1
+    max_parallel_workers = 2
+    max_parallel_maintenance_workers = 1
+    wal_level = replica
+    max_wal_senders = 5
+    max_replication_slots = 5
+    hot_standby = on
+
+pgpool:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+pdb:
+  create: true
+  minAvailable: 1
+  maxUnavailable: 1
+
+backup:
+  cronjob:
+    storage:
+      size: 50Gi

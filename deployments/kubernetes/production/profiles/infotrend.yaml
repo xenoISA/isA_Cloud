@@ -1,0 +1,9 @@
+# Infotrend Enterprise Cloud storage profile
+provider: infotrend
+description: "Infotrend Enterprise Cloud — block (iSCSI), fast (SSD), NFS, and S3-compatible object storage"
+
+storage:
+  block: infotrend-block
+  fast: infotrend-block-fast
+  nfs: infotrend-nfs
+  object: infotrend-object

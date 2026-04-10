@@ -14,6 +14,11 @@
 #   ./deploy.sh all               # Deploy everything (with confirmations)
 #   ./deploy.sh status            # Check deployment status
 #   ./deploy.sh rollback <name>   # Rollback a Helm release
+#
+# Provider & Sizing Flags (optional — apply to any command):
+#   --provider <name>    Select storage profile (infotrend, aws, generic)
+#   --nodes <count>      Select resource profile (3, 5, etc.)
+#   --skip-preflight     Skip pre-flight verification checks
 # =============================================================================
 
 set -e
@@ -23,7 +28,13 @@ NAMESPACE="isa-cloud-production"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VALUES_DIR="${SCRIPT_DIR}/../values"
 MANIFESTS_DIR="${SCRIPT_DIR}/../manifests"
+PROFILES_DIR="${SCRIPT_DIR}/../profiles"
 TIMEOUT="10m"
+
+# Provider & sizing (set via flags, see parse_global_flags)
+PROVIDER=""
+NODE_COUNT=""
+SKIP_PREFLIGHT=false
 
 # Colors
 RED='\033[0;31m'
@@ -44,6 +55,87 @@ confirm() {
     if [[ "$response" != "yes" ]]; then
         log_error "Deployment cancelled"
         exit 1
+    fi
+}
+
+# Parse global flags (--provider, --nodes, --skip-preflight)
+# Called from main() before dispatching to subcommands
+parse_global_flags() {
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --provider)       PROVIDER="$2"; shift 2 ;;
+            --nodes)          NODE_COUNT="$2"; shift 2 ;;
+            --skip-preflight) SKIP_PREFLIGHT=true; shift ;;
+            *)                args+=("$1"); shift ;;
+        esac
+    done
+    # Return remaining args
+    REMAINING_ARGS=("${args[@]}")
+}
+
+# Build Helm --values flags for a component
+# Usage: helm upgrade --install ... $(helm_values postgresql-ha)
+# Returns: -f values/postgresql-ha.yaml [-f profiles/3-node/postgresql-ha.yaml]
+helm_values() {
+    local component="$1"
+    local flags="-f ${VALUES_DIR}/${component}.yaml"
+
+    # Apply node-count profile override if it exists
+    if [[ -n "$NODE_COUNT" ]]; then
+        local node_override="${PROFILES_DIR}/${NODE_COUNT}-node/${component}.yaml"
+        if [[ -f "$node_override" ]]; then
+            flags="${flags} -f ${node_override}"
+            log_info "Applying ${NODE_COUNT}-node override for ${component}"
+        fi
+    fi
+
+    echo "$flags"
+}
+
+# Resolve storage class from provider profile
+# Usage: resolve_storage block => "infotrend-block" (or "" for default)
+resolve_storage() {
+    local tier="$1"
+    if [[ -n "$PROVIDER" ]]; then
+        local profile_file="${PROFILES_DIR}/${PROVIDER}.yaml"
+        if [[ -f "$profile_file" ]]; then
+            local sc
+            sc=$(grep "^  ${tier}:" "$profile_file" | sed 's/^.*: *//' | tr -d '"' | tr -d "'")
+            echo "$sc"
+            return
+        fi
+    fi
+    echo ""
+}
+
+# Run pre-flight checks
+run_preflight() {
+    if [[ "$SKIP_PREFLIGHT" == true ]]; then
+        log_warn "Pre-flight checks skipped (--skip-preflight)"
+        return 0
+    fi
+
+    if [[ -x "${SCRIPT_DIR}/preflight.sh" ]]; then
+        local pf_args=""
+        [[ -n "$PROVIDER" ]] && pf_args="${pf_args} --provider ${PROVIDER}"
+        [[ -n "$NODE_COUNT" ]] && pf_args="${pf_args} --nodes ${NODE_COUNT}"
+
+        log_step "Running pre-flight checks..."
+        "${SCRIPT_DIR}/preflight.sh" ${pf_args} || {
+            log_error "Pre-flight checks failed. Fix errors above or use --skip-preflight to bypass."
+            exit 1
+        }
+    fi
+}
+
+# Run post-deploy health check
+run_healthcheck() {
+    if [[ -x "${SCRIPT_DIR}/health-check.sh" ]]; then
+        log_step "Running post-deploy health check..."
+        "${SCRIPT_DIR}/health-check.sh" --quick || {
+            log_warn "Some health checks failed. Review output above."
+        }
     fi
 }
 
@@ -128,14 +220,14 @@ deploy_secrets() {
     log_step "Deploying HashiCorp Vault (HA with Consul backend)..."
     helm upgrade --install vault hashicorp/vault \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/vault.yaml \
+        $(helm_values vault) \
         --wait --timeout ${TIMEOUT}
 
     # 2. Deploy External Secrets Operator
     log_step "Deploying External Secrets Operator..."
     helm upgrade --install external-secrets external-secrets/external-secrets \
         -n external-secrets --create-namespace \
-        -f ${VALUES_DIR}/external-secrets.yaml \
+        $(helm_values external-secrets) \
         --wait --timeout ${TIMEOUT}
 
     # 3. Apply ClusterSecretStore and ExternalSecret CRs
@@ -185,63 +277,63 @@ deploy_infrastructure() {
     log_step "Deploying PostgreSQL HA cluster..."
     helm upgrade --install postgresql bitnami/postgresql-ha \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/postgresql-ha.yaml \
+        $(helm_values postgresql-ha) \
         --wait --timeout ${TIMEOUT}
 
     # 3. Redis Cluster
     log_step "Deploying Redis cluster..."
     helm upgrade --install redis bitnami/redis-cluster \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/redis-cluster.yaml \
+        $(helm_values redis-cluster) \
         --wait --timeout ${TIMEOUT}
 
     # 4. Neo4j Cluster
     log_step "Deploying Neo4j cluster..."
     helm upgrade --install neo4j neo4j/neo4j \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/neo4j-cluster.yaml \
+        $(helm_values neo4j-cluster) \
         --wait --timeout ${TIMEOUT}
 
     # 5. MinIO Distributed
     log_step "Deploying MinIO distributed..."
     helm upgrade --install minio minio/minio \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/minio-distributed.yaml \
+        $(helm_values minio-distributed) \
         --wait --timeout ${TIMEOUT}
 
     # 6. NATS JetStream
     log_step "Deploying NATS JetStream cluster..."
     helm upgrade --install nats nats/nats \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/nats-jetstream.yaml \
+        $(helm_values nats-jetstream) \
         --wait --timeout ${TIMEOUT}
 
     # 7. Qdrant Distributed
     log_step "Deploying Qdrant distributed..."
     helm upgrade --install qdrant qdrant/qdrant \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/qdrant-distributed.yaml \
+        $(helm_values qdrant-distributed) \
         --wait --timeout ${TIMEOUT}
 
     # 8. EMQX Cluster
     log_step "Deploying EMQX MQTT cluster..."
     helm upgrade --install emqx emqx/emqx \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/emqx-cluster.yaml \
+        $(helm_values emqx-cluster) \
         --wait --timeout ${TIMEOUT}
 
     # 9. Consul Cluster
     log_step "Deploying Consul cluster..."
     helm upgrade --install consul hashicorp/consul \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/consul.yaml \
+        $(helm_values consul) \
         --wait --timeout ${TIMEOUT}
 
     # 10. APISIX
     log_step "Deploying APISIX..."
     helm upgrade --install apisix apisix/apisix \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/apisix.yaml \
+        $(helm_values apisix) \
         --wait --timeout ${TIMEOUT}
 
     # 11. Apply Consul-APISIX sync CronJob
@@ -251,6 +343,7 @@ deploy_infrastructure() {
     fi
 
     log_info "Infrastructure deployment complete!"
+    run_healthcheck
 }
 
 # Deploy ML Platform
@@ -264,7 +357,7 @@ deploy_mlplatform() {
     log_step "Deploying KubeRay Operator..."
     helm upgrade --install kuberay-operator kuberay/kuberay-operator \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/kuberay-operator.yaml \
+        $(helm_values kuberay-operator) \
         --wait --timeout ${TIMEOUT}
 
     # Wait for operator to be ready
@@ -275,7 +368,7 @@ deploy_mlplatform() {
     log_step "Deploying Ray Cluster..."
     helm upgrade --install ray-cluster kuberay/ray-cluster \
         -n ${NAMESPACE} \
-        -f ${VALUES_DIR}/ray-cluster.yaml \
+        $(helm_values ray-cluster) \
         --wait --timeout ${TIMEOUT}
 
     # 3. MLflow
@@ -283,7 +376,7 @@ deploy_mlplatform() {
     if [ -f "${VALUES_DIR}/mlflow.yaml" ]; then
         helm upgrade --install mlflow bitnami/mlflow \
             -n ${NAMESPACE} \
-            -f ${VALUES_DIR}/mlflow.yaml \
+            $(helm_values mlflow) \
             --wait --timeout ${TIMEOUT} 2>/dev/null || {
             log_warn "MLflow Helm chart not available, skipping..."
         }
@@ -296,7 +389,7 @@ deploy_mlplatform() {
         helm repo update
         helm upgrade --install jupyterhub jupyterhub/jupyterhub \
             -n ${NAMESPACE} \
-            -f ${VALUES_DIR}/jupyterhub.yaml \
+            $(helm_values jupyterhub) \
             --wait --timeout ${TIMEOUT}
     fi
 
@@ -436,11 +529,17 @@ usage() {
     echo "  status            Check deployment status"
     echo "  rollback <name>   Rollback a Helm release"
     echo ""
+    echo "Flags:"
+    echo "  --provider <name>    Storage profile (infotrend, aws, generic)"
+    echo "  --nodes <count>      Resource profile (3, 5, etc.)"
+    echo "  --skip-preflight     Skip pre-flight verification"
+    echo ""
     echo "Examples:"
-    echo "  $0 status                    # Check current status"
-    echo "  $0 infrastructure            # Deploy databases and messaging"
-    echo "  $0 mlplatform                # Deploy ML components"
-    echo "  $0 rollback postgresql       # Rollback PostgreSQL"
+    echo "  $0 status                                     # Check current status"
+    echo "  $0 infrastructure                             # Deploy (default profile)"
+    echo "  $0 infrastructure --provider infotrend --nodes 3  # Infotrend 3-node"
+    echo "  $0 all --provider aws --nodes 5               # AWS 5-node cluster"
+    echo "  $0 rollback postgresql                        # Rollback PostgreSQL"
     echo ""
     echo "NOTE: Production deployments require explicit confirmation."
     echo "      For routine deployments, use ArgoCD GitOps workflow."
@@ -448,14 +547,23 @@ usage() {
 
 # Main
 main() {
+    # Parse global flags first (--provider, --nodes, --skip-preflight)
+    parse_global_flags "$@"
+    set -- "${REMAINING_ARGS[@]}"
+
     local command="${1:-}"
     shift || true
+
+    # Log provider/node config if set
+    [[ -n "$PROVIDER" ]] && log_info "Provider profile: ${PROVIDER}"
+    [[ -n "$NODE_COUNT" ]] && log_info "Node count profile: ${NODE_COUNT}-node"
 
     case "${command}" in
         secrets)
             deploy_secrets
             ;;
         infrastructure)
+            run_preflight
             check_prerequisites
             deploy_infrastructure
             ;;
@@ -463,6 +571,7 @@ main() {
             deploy_services
             ;;
         mlplatform)
+            run_preflight
             check_prerequisites
             deploy_mlplatform
             ;;
@@ -472,6 +581,7 @@ main() {
             deploy_etcd
             ;;
         all)
+            run_preflight
             deploy_all
             ;;
         status)

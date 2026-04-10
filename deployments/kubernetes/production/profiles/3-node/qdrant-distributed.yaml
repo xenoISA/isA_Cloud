@@ -1,0 +1,26 @@
+# Qdrant Distributed — 3-node cluster override
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+persistence:
+  size: 50Gi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: qdrant
+          topologyKey: kubernetes.io/hostname
+
+config:
+  collection:
+    replication_factor: 2
+    shard_number: 3

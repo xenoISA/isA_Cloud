@@ -1,0 +1,28 @@
+# NATS JetStream — 3-node cluster override
+config:
+  jetstream:
+    fileStore:
+      pvc:
+        size: 20Gi
+    maxMemory: 512Mi
+    maxFile: 20Gi
+
+container:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+podTemplate:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: nats
+            topologyKey: kubernetes.io/hostname

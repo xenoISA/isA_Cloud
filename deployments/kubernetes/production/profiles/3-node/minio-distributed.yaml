@@ -1,0 +1,28 @@
+# MinIO Distributed — 3-node cluster override
+# Keep 4 replicas (minimum for erasure coding), soft anti-affinity
+replicas: 4
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+persistence:
+  size: 100Gi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: minio
+          topologyKey: kubernetes.io/hostname
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

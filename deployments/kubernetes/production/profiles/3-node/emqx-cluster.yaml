@@ -1,0 +1,24 @@
+# EMQX Cluster — 3-node cluster override
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "500m"
+    memory: "1Gi"
+
+persistence:
+  size: 5Gi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: emqx
+          topologyKey: kubernetes.io/hostname
+
+podDisruptionBudget:
+  minAvailable: 2
