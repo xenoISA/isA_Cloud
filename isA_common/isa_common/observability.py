@@ -79,13 +79,12 @@ def setup_observability(
     if enable_metrics:
         try:
             from .metrics import setup_metrics
-            setup_metrics(
+            result["metrics"] = setup_metrics(
                 app,
                 service_name=service_name,
                 version=version,
                 registry=metrics_registry,
             )
-            result["metrics"] = True
         except Exception as e:
             logger.warning(f"Failed to setup metrics: {e}")
 
