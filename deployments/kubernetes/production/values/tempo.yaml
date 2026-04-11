@@ -1,0 +1,57 @@
+# Grafana Tempo — Distributed Tracing Backend
+# Chart: grafana/tempo
+# Docs: https://grafana.com/docs/tempo/latest/
+
+# Tempo configuration
+tempo:
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: isa-traces
+        endpoint: minio.isa-cloud-production.svc.cluster.local:9000
+        access_key: "${MINIO_ACCESS_KEY}"
+        secret_key: "${MINIO_SECRET_KEY}"
+        insecure: true
+
+  # Receivers
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  # Retention
+  compactor:
+    compaction:
+      block_retention: 72h  # 3 days
+
+  # Query limits
+  queryFrontend:
+    search:
+      max_duration: 1h
+
+# Resources
+resources:
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Persistence (WAL)
+persistence:
+  enabled: true
+  size: 10Gi
+
+# Service
+service:
+  type: ClusterIP
+
+# Metrics
+metricsGenerator:
+  enabled: true
+  remoteWriteUrl: "http://prometheus.isa-cloud-production.svc.cluster.local:9090/api/v1/write"

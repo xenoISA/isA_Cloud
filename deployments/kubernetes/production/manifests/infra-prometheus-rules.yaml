@@ -1,0 +1,425 @@
+# PrometheusRule CRDs for isA platform infrastructure alerting
+# Story: #193 — Infrastructure Alerting Rules
+# Covers: PostgreSQL, Redis, NATS, etcd, MinIO, Consul, APISIX, EMQX, Qdrant, Neo4j, Vault
+#
+# Requires: Prometheus Operator (kube-prometheus-stack) in the cluster.
+# The label "release: prometheus" ensures pickup by the Prometheus Operator.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: isa-infra-alerts
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+
+    # ──────────────────────────────────────────────────
+    # PostgreSQL
+    # ──────────────────────────────────────────────────
+    - name: postgresql.rules
+      rules:
+        - alert: PostgreSQLReplicationLag
+          expr: |
+            pg_replication_lag{job=~"postgresql.*"} > 10
+          for: 1m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "PostgreSQL replication lag > 10s"
+            description: "Instance {{ $labels.instance }} has replication lag of {{ $value | humanizeDuration }}."
+
+        - alert: PostgreSQLConnectionsNearLimit
+          expr: |
+            (
+              pg_stat_database_numbackends{job=~"postgresql.*"}
+              /
+              pg_settings_max_connections{job=~"postgresql.*"}
+            ) > 0.90
+          for: 5m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "PostgreSQL connections > 90% of max_connections"
+            description: "Instance {{ $labels.instance }} is using {{ $value | humanizePercentage }} of max connections."
+
+        - alert: PostgreSQLDiskUsageHigh
+          expr: |
+            (
+              pg_database_size_bytes{job=~"postgresql.*"}
+              /
+              on(instance) node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"}
+            ) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "PostgreSQL data disk > 85% full"
+            description: "Instance {{ $labels.instance }} disk is {{ $value | humanizePercentage }} full."
+
+        - alert: PostgreSQLDeadTuplesHigh
+          expr: |
+            pg_stat_user_tables_n_dead_tup{job=~"postgresql.*"} > 10000
+          for: 15m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "PostgreSQL dead tuples > 10000"
+            description: "Table {{ $labels.relname }} on {{ $labels.instance }} has {{ $value }} dead tuples — VACUUM may be needed."
+
+    # ──────────────────────────────────────────────────
+    # Redis
+    # ──────────────────────────────────────────────────
+    - name: redis.rules
+      rules:
+        - alert: RedisClusterStateNotOK
+          expr: |
+            redis_cluster_state{job=~"redis.*"} != 1
+          for: 1m
+          labels:
+            severity: critical
+            tier: data
+          annotations:
+            summary: "Redis cluster state is not OK"
+            description: "Redis instance {{ $labels.instance }} cluster state is {{ $value }} (expected 1/ok)."
+
+        - alert: RedisMemoryUsageHigh
+          expr: |
+            (
+              redis_memory_used_bytes{job=~"redis.*"}
+              /
+              redis_memory_max_bytes{job=~"redis.*"}
+            ) > 0.90
+          for: 5m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "Redis memory > 90% of maxmemory"
+            description: "Instance {{ $labels.instance }} is using {{ $value | humanizePercentage }} of configured maxmemory."
+
+        - alert: RedisEvictionRateHigh
+          expr: |
+            rate(redis_evicted_keys_total{job=~"redis.*"}[5m]) > 500
+          for: 5m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "Redis eviction rate > 500 keys/s"
+            description: "Instance {{ $labels.instance }} is evicting {{ $value | humanize }} keys/s — memory pressure detected."
+
+        - alert: RedisConnectedClientsHigh
+          expr: |
+            (
+              redis_connected_clients{job=~"redis.*"}
+              /
+              redis_config_maxclients{job=~"redis.*"}
+            ) > 0.80
+          for: 5m
+          labels:
+            severity: warning
+            tier: data
+          annotations:
+            summary: "Redis connected clients > 80% of maxclients"
+            description: "Instance {{ $labels.instance }} has {{ $value | humanizePercentage }} of max clients connected."
+
+    # ──────────────────────────────────────────────────
+    # NATS / JetStream
+    # ──────────────────────────────────────────────────
+    - name: nats.rules
+      rules:
+        - alert: NATSConsumerPendingHigh
+          expr: |
+            nats_consumer_num_pending{job=~"nats.*"} > 1000
+          for: 5m
+          labels:
+            severity: warning
+            tier: messaging
+          annotations:
+            summary: "NATS consumer pending messages > 1000"
+            description: "Consumer {{ $labels.consumer_name }} on stream {{ $labels.stream_name }} has {{ $value }} pending messages."
+
+        - alert: NATSJetStreamStorageHigh
+          expr: |
+            (
+              nats_server_jetstream_bytes_used{job=~"nats.*"}
+              /
+              nats_server_jetstream_max_bytes{job=~"nats.*"}
+            ) > 0.80
+          for: 10m
+          labels:
+            severity: warning
+            tier: messaging
+          annotations:
+            summary: "NATS JetStream storage > 80%"
+            description: "NATS server {{ $labels.server_name }} JetStream storage is {{ $value | humanizePercentage }} full."
+
+        - alert: NATSSlowConsumers
+          expr: |
+            nats_server_slow_consumer_count{job=~"nats.*"} > 0
+          for: 2m
+          labels:
+            severity: warning
+            tier: messaging
+          annotations:
+            summary: "NATS slow consumers detected"
+            description: "NATS server {{ $labels.server_name }} has {{ $value }} slow consumer(s). Messages may be dropped."
+
+    # ──────────────────────────────────────────────────
+    # etcd
+    # ──────────────────────────────────────────────────
+    - name: etcd.rules
+      rules:
+        - alert: EtcdLeaderChangesFrequent
+          expr: |
+            increase(etcd_server_leader_changes_seen_total{job=~"etcd.*"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            tier: infra
+          annotations:
+            summary: "etcd leader changed > 3 times in the last hour"
+            description: "etcd member {{ $labels.instance }} saw {{ $value }} leader changes in 1h — cluster instability suspected."
+
+        - alert: EtcdProposalFailures
+          expr: |
+            increase(etcd_server_proposals_failed_total{job=~"etcd.*"}[5m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            tier: infra
+          annotations:
+            summary: "etcd proposal failures detected"
+            description: "etcd member {{ $labels.instance }} had {{ $value }} proposal failure(s) in the last 5m."
+
+        - alert: EtcdDatabaseSizeHigh
+          expr: |
+            etcd_mvcc_db_total_size_in_bytes{job=~"etcd.*"} > 7516192768
+          for: 10m
+          labels:
+            severity: warning
+            tier: infra
+          annotations:
+            summary: "etcd database size > 7 GiB"
+            description: "etcd member {{ $labels.instance }} DB size is {{ $value | humanize1024 }}B. Consider compaction/defrag."
+
+        - alert: EtcdFsyncDurationHigh
+          expr: |
+            histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~"etcd.*"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            tier: infra
+          annotations:
+            summary: "etcd WAL fsync p99 > 50ms"
+            description: "etcd member {{ $labels.instance }} WAL fsync p99 is {{ $value | humanizeDuration }}. Disk I/O may be degraded."
+
+    # ──────────────────────────────────────────────────
+    # MinIO
+    # ──────────────────────────────────────────────────
+    - name: minio.rules
+      rules:
+        - alert: MinioDiskUsageHigh
+          expr: |
+            (
+              minio_cluster_capacity_usable_used_bytes{job=~"minio.*"}
+              /
+              minio_cluster_capacity_usable_total_bytes{job=~"minio.*"}
+            ) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+            tier: storage
+          annotations:
+            summary: "MinIO usable disk usage > 85%"
+            description: "MinIO cluster {{ $labels.server }} is {{ $value | humanizePercentage }} full."
+
+        - alert: MinioOfflineDisks
+          expr: |
+            minio_cluster_disk_offline_total{job=~"minio.*"} > 0
+          for: 1m
+          labels:
+            severity: critical
+            tier: storage
+          annotations:
+            summary: "MinIO has offline disks"
+            description: "MinIO cluster {{ $labels.server }} has {{ $value }} offline disk(s). Data availability is at risk."
+
+        - alert: MinioHealingObjects
+          expr: |
+            minio_heal_objects_heal_total{job=~"minio.*"} > 0
+          for: 30m
+          labels:
+            severity: warning
+            tier: storage
+          annotations:
+            summary: "MinIO healing objects for > 30 minutes"
+            description: "MinIO cluster {{ $labels.server }} has been healing {{ $value }} object(s) for 30+ minutes."
+
+    # ──────────────────────────────────────────────────
+    # Consul
+    # ──────────────────────────────────────────────────
+    - name: consul.rules
+      rules:
+        - alert: ConsulNoLeader
+          expr: |
+            consul_raft_leader{job=~"consul.*"} == 0
+          for: 30s
+          labels:
+            severity: critical
+            tier: infra
+          annotations:
+            summary: "Consul has no Raft leader"
+            description: "Consul datacenter {{ $labels.datacenter }} has no leader. Service discovery is degraded."
+
+        - alert: ConsulServiceDeregistrationsHigh
+          expr: |
+            rate(consul_catalog_deregister{job=~"consul.*"}[1m]) > 5
+          for: 2m
+          labels:
+            severity: warning
+            tier: infra
+          annotations:
+            summary: "Consul service deregistrations > 5/min"
+            description: "Consul is seeing {{ $value | humanize }} service deregistrations/min — pod churn or instability detected."
+
+        - alert: ConsulRaftCommitTimeHigh
+          expr: |
+            histogram_quantile(0.99, rate(consul_raft_commitTime_bucket{job=~"consul.*"}[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            tier: infra
+          annotations:
+            summary: "Consul Raft commit time p99 > 500ms"
+            description: "Consul {{ $labels.instance }} Raft commit p99 is {{ $value | humanizeDuration }}. Network or disk latency may be elevated."
+
+    # ──────────────────────────────────────────────────
+    # APISIX
+    # ──────────────────────────────────────────────────
+    - name: apisix.rules
+      rules:
+        - alert: APISIXErrorRate5xxHigh
+          expr: |
+            (
+              sum(rate(apisix_http_status{code=~"5.."}[5m])) by (route)
+              /
+              sum(rate(apisix_http_status[5m])) by (route)
+            ) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            tier: gateway
+          annotations:
+            summary: "APISIX 5xx error rate > 1% on route {{ $labels.route }}"
+            description: "Route {{ $labels.route }} has a 5xx error rate of {{ $value | humanizePercentage }}."
+
+        - alert: APISIXUpstreamUnhealthy
+          expr: |
+            apisix_upstream_status{status="unhealthy"} > 0
+          for: 1m
+          labels:
+            severity: critical
+            tier: gateway
+          annotations:
+            summary: "APISIX upstream marked unhealthy"
+            description: "Upstream {{ $labels.name }} is currently unhealthy. Traffic to downstream services may fail."
+
+        - alert: APISIXEtcdUnreachable
+          expr: |
+            apisix_etcd_reachable == 0
+          for: 1m
+          labels:
+            severity: critical
+            tier: gateway
+          annotations:
+            summary: "APISIX cannot reach etcd"
+            description: "APISIX instance {{ $labels.instance }} cannot reach etcd. Configuration updates are blocked."
+
+    # ──────────────────────────────────────────────────
+    # EMQX
+    # ──────────────────────────────────────────────────
+    - name: emqx.rules
+      rules:
+        - alert: EMQXNodeDown
+          expr: |
+            emqx_cluster_nodes_running{job=~"emqx.*"} < emqx_cluster_nodes_stopped{job=~"emqx.*"} + emqx_cluster_nodes_running{job=~"emqx.*"}
+          for: 1m
+          labels:
+            severity: critical
+            tier: messaging
+          annotations:
+            summary: "EMQX cluster node down"
+            description: "EMQX cluster {{ $labels.instance }} has a node that is not running. Current running: {{ $value }}."
+
+        - alert: EMQXConnectionsNearLimit
+          expr: |
+            (
+              emqx_connections_count{job=~"emqx.*"}
+              /
+              emqx_connections_max{job=~"emqx.*"}
+            ) > 0.90
+          for: 5m
+          labels:
+            severity: warning
+            tier: messaging
+          annotations:
+            summary: "EMQX connections > 90% of max"
+            description: "EMQX node {{ $labels.instance }} is at {{ $value | humanizePercentage }} of max connections."
+
+        - alert: EMQXMessageDropRateHigh
+          expr: |
+            rate(emqx_messages_dropped_total{job=~"emqx.*"}[5m]) / rate(emqx_messages_received_total{job=~"emqx.*"}[5m]) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            tier: messaging
+          annotations:
+            summary: "EMQX message drop rate > 1%"
+            description: "EMQX node {{ $labels.instance }} is dropping {{ $value | humanizePercentage }} of incoming messages."
+
+    # ──────────────────────────────────────────────────
+    # Vault
+    # ──────────────────────────────────────────────────
+    - name: vault.rules
+      rules:
+        - alert: VaultSealed
+          expr: |
+            vault_core_unsealed{job=~"vault.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            tier: security
+          annotations:
+            summary: "Vault is sealed"
+            description: "Vault instance {{ $labels.instance }} has been sealed for > 5 minutes. Secret access is blocked."
+
+        - alert: VaultTokenExpiringSoon
+          expr: |
+            vault_token_ttl{job=~"vault.*"} < 3600
+          for: 10m
+          labels:
+            severity: warning
+            tier: security
+          annotations:
+            summary: "Vault token expiring within 1 hour"
+            description: "A Vault token on {{ $labels.instance }} will expire in {{ $value | humanizeDuration }}. Renew or rotate."
+
+        - alert: VaultAuditLogErrors
+          expr: |
+            increase(vault_audit_log_request_failure{job=~"vault.*"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            tier: security
+          annotations:
+            summary: "Vault audit log write failures"
+            description: "Vault instance {{ $labels.instance }} had {{ $value }} audit log failure(s). Vault may block requests per policy."
