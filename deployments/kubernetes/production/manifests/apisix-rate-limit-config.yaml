@@ -1,0 +1,127 @@
+# APISIX Rate Limiting — Global and Per-Tenant Configuration
+# Applied via APISIX Admin API or as a global rule
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-rate-limit-config
+  namespace: isa-cloud-production
+  labels:
+    app: apisix
+    config: rate-limit
+data:
+  # Global rate limit plugin configuration
+  # Apply via: curl http://apisix-admin:9180/apisix/admin/global_rules/1
+  global-rate-limit.json: |
+    {
+      "plugins": {
+        "limit-req": {
+          "rate": 1000,
+          "burst": 200,
+          "rejected_code": 429,
+          "key_type": "var",
+          "key": "remote_addr",
+          "rejected_msg": "Rate limit exceeded. Retry after cooldown."
+        },
+        "limit-count": {
+          "count": 60000,
+          "time_window": 3600,
+          "rejected_code": 429,
+          "key_type": "var",
+          "key": "remote_addr",
+          "policy": "local",
+          "rejected_msg": "Hourly rate limit exceeded."
+        },
+        "response-rewrite": {
+          "headers": {
+            "set": {
+              "X-RateLimit-Limit": "1000",
+              "Retry-After": "60"
+            }
+          }
+        }
+      }
+    }
+
+  # Per-tenant rate limit template (applied per route)
+  # Tenants identified by X-Tenant-ID header or API key
+  tenant-rate-limit.json: |
+    {
+      "plugins": {
+        "limit-count": {
+          "count": 10000,
+          "time_window": 60,
+          "rejected_code": 429,
+          "key_type": "var_combination",
+          "key": "$http_x_tenant_id",
+          "policy": "redis-cluster",
+          "redis_cluster_nodes": ["redis-cluster.isa-cloud-production.svc.cluster.local:6379"],
+          "redis_cluster_name": "redis-cluster",
+          "rejected_msg": "Tenant rate limit exceeded."
+        }
+      }
+    }
+
+  # Rate limit metrics export (enable prometheus plugin)
+  prometheus-plugin.json: |
+    {
+      "plugins": {
+        "prometheus": {
+          "prefer_name": true,
+          "export_uri": "/apisix/prometheus/metrics",
+          "metric_prefix": "apisix_"
+        }
+      }
+    }
+---
+# Job to apply rate limit config to APISIX Admin API
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: apisix-apply-rate-limits
+  namespace: isa-cloud-production
+  labels:
+    app: apisix-config
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: apply-config
+          image: curlimages/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ADMIN_URL="http://apisix-admin.isa-cloud-production.svc.cluster.local:9180"
+              ADMIN_KEY="${APISIX_ADMIN_KEY}"
+
+              echo "Applying global rate limit..."
+              curl -s -X PUT "${ADMIN_URL}/apisix/admin/global_rules/rate-limit-global" \
+                -H "X-API-KEY: ${ADMIN_KEY}" \
+                -H "Content-Type: application/json" \
+                -d @/config/global-rate-limit.json
+
+              echo "Enabling Prometheus plugin..."
+              curl -s -X PUT "${ADMIN_URL}/apisix/admin/global_rules/prometheus" \
+                -H "X-API-KEY: ${ADMIN_KEY}" \
+                -H "Content-Type: application/json" \
+                -d @/config/prometheus-plugin.json
+
+              echo "Rate limit configuration applied."
+          env:
+            - name: APISIX_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: apisix-secret
+                  key: admin-key
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: apisix-rate-limit-config

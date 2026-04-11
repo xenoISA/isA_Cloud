@@ -1,0 +1,313 @@
+# ServiceMonitor CRDs for isA application services — per-service port bindings
+# Story: #196 — ServiceMonitor Coverage
+#
+# This file defines explicit per-service ServiceMonitors (with exact port numbers)
+# complementing the broad label-selector monitor in prometheus-service-monitors.yaml.
+# Each service exposes /metrics on its dedicated port.
+#
+# All ServiceMonitors carry "release: prometheus" for Prometheus Operator discovery.
+---
+# isa-mcp — MCP Tool Server (port 8081)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-mcp-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-mcp
+  endpoints:
+    - port: http
+      targetPort: 8081
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-model — Model Router (port 8082)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-model-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-model
+  endpoints:
+    - port: http
+      targetPort: 8082
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-agent — Agent Service (port 8083)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-agent-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-agent
+  endpoints:
+    - port: http
+      targetPort: 8083
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-data — Data Service (port 8084)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-data-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-data
+  endpoints:
+    - port: http
+      targetPort: 8084
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-user — User Service (port 8085)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-user-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-user
+  endpoints:
+    - port: http
+      targetPort: 8085
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-trade — Trade Service (port 8087)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-trade-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-trade
+  endpoints:
+    - port: http
+      targetPort: 8087
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-creative — Creative Service (port 8088)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-creative-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-creative
+  endpoints:
+    - port: http
+      targetPort: 8088
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-mate — Mate Service (port 8089)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-mate-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-mate
+  endpoints:
+    - port: http
+      targetPort: 8089
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-os — Cloud OS: cloud-os component (port 8086)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-os-cloud-os-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-os
+      component: cloud-os
+  endpoints:
+    - port: http
+      targetPort: 8086
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# isa-os — Cloud OS: pool-manager component (port 8090)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: isa-os-pool-manager-port
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    tier: application
+spec:
+  namespaceSelector:
+    matchNames:
+      - isa-cloud-production
+  selector:
+    matchLabels:
+      app: isa-os
+      component: pool-manager
+  endpoints:
+    - port: http
+      targetPort: 8090
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+---
+# PrometheusRule: fire when any ServiceMonitor has zero active scrape targets for 5 minutes.
+# Uses the "up" metric — a target that has never been scraped simply won't appear,
+# so we complement this with an absence check on the known service set.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: isa-service-monitor-coverage
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+    - name: service-monitor-coverage.rules
+      rules:
+        # Alert when a known isA service has zero healthy scrape targets
+        - alert: ServiceMonitorNoTargets
+          expr: |
+            count by (job) (
+              up{
+                job=~"isa-mcp|isa-model|isa-agent|isa-data|isa-user|isa-trade|isa-creative|isa-mate|isa-os"
+              } == 1
+            ) == 0
+          for: 5m
+          labels:
+            severity: warning
+            tier: observability
+          annotations:
+            summary: "ServiceMonitor job {{ $labels.job }} has 0 active targets"
+            description: "No healthy scrape targets found for job {{ $labels.job }} for 5 minutes. Check pod readiness and service selector."
+
+        # Alert when a known isA service is entirely absent from the up metric
+        # (never scraped — ServiceMonitor selector may be broken)
+        - alert: ServiceMonitorTargetAbsent
+          expr: |
+            absent(up{job="isa-mcp"})      or
+            absent(up{job="isa-model"})    or
+            absent(up{job="isa-agent"})    or
+            absent(up{job="isa-data"})     or
+            absent(up{job="isa-user"})     or
+            absent(up{job="isa-trade"})    or
+            absent(up{job="isa-creative"}) or
+            absent(up{job="isa-mate"})     or
+            absent(up{job="isa-os"})
+          for: 5m
+          labels:
+            severity: warning
+            tier: observability
+          annotations:
+            summary: "ServiceMonitor target absent from Prometheus"
+            description: "Job {{ $labels.job }} has no targets at all in Prometheus. The ServiceMonitor selector or service labels may be misconfigured."

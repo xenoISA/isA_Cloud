@@ -1,0 +1,144 @@
+# ResourceQuota CRDs for namespace-level resource governance
+# Story: #198 — Cost Allocation / ResourceQuotas
+#
+# Enforces hard resource ceilings per namespace and fires Prometheus alerts
+# when usage exceeds 80% of the CPU or memory quota.
+---
+# isa-cloud-production: primary workload namespace
+# Ceiling: 48 vCPU, 128 GiB RAM, 2 TiB storage, 200 pods
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: isa-cloud-production-quota
+  namespace: isa-cloud-production
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: resource-governance
+spec:
+  hard:
+    # Compute
+    requests.cpu: "40"
+    limits.cpu: "48"
+    requests.memory: 96Gi
+    limits.memory: 128Gi
+    # Storage (all storage classes combined)
+    requests.storage: 2Ti
+    # Object counts
+    pods: "200"
+    services: "80"
+    secrets: "200"
+    configmaps: "200"
+    persistentvolumeclaims: "60"
+---
+# gpu-operator: GPU infrastructure namespace
+# Ceiling: 4 vCPU, 8 GiB RAM, 20 pods
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gpu-operator-quota
+  namespace: gpu-operator
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: resource-governance
+spec:
+  hard:
+    requests.cpu: "2"
+    limits.cpu: "4"
+    requests.memory: 4Gi
+    limits.memory: 8Gi
+    pods: "20"
+    services: "10"
+    secrets: "40"
+    configmaps: "40"
+    persistentvolumeclaims: "10"
+---
+# PrometheusRule: alert when any namespace exceeds 80% of its CPU or memory quota.
+#
+# kube-state-metrics exposes:
+#   kube_resourcequota{resource="limits.cpu",  type="hard"|"used", namespace="..."}
+#   kube_resourcequota{resource="limits.memory",type="hard"|"used", namespace="..."}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: isa-resource-quota-alerts
+  namespace: isa-cloud-production
+  labels:
+    release: prometheus
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+    - name: resource-quota.rules
+      rules:
+        # ── CPU quota utilisation ──────────────────────────────────────────
+        - alert: NamespaceCPUQuotaExceeds80Percent
+          expr: |
+            (
+              kube_resourcequota{resource="limits.cpu", type="used"}
+              /
+              kube_resourcequota{resource="limits.cpu", type="hard"}
+            ) > 0.80
+          for: 10m
+          labels:
+            severity: warning
+            tier: cost
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} CPU quota > 80%"
+            description: >
+              Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }}
+              of its CPU limit quota. Current usage may approach the hard ceiling
+              ({{ with printf "kube_resourcequota{resource='limits.cpu',type='hard',namespace='%s'}" $labels.namespace | query }}{{ . | first | value | humanize }}{{ end }} cores).
+
+        # ── Memory quota utilisation ───────────────────────────────────────
+        - alert: NamespaceMemoryQuotaExceeds80Percent
+          expr: |
+            (
+              kube_resourcequota{resource="limits.memory", type="used"}
+              /
+              kube_resourcequota{resource="limits.memory", type="hard"}
+            ) > 0.80
+          for: 10m
+          labels:
+            severity: warning
+            tier: cost
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} memory quota > 80%"
+            description: >
+              Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }}
+              of its memory limit quota. New pods may fail to schedule if the hard limit is hit.
+
+        # ── Pod count quota utilisation ────────────────────────────────────
+        - alert: NamespacePodQuotaExceeds80Percent
+          expr: |
+            (
+              kube_resourcequota{resource="pods", type="used"}
+              /
+              kube_resourcequota{resource="pods", type="hard"}
+            ) > 0.80
+          for: 5m
+          labels:
+            severity: warning
+            tier: cost
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} pod quota > 80%"
+            description: >
+              Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }}
+              of its pod quota. Scale-out operations may be blocked soon.
+
+        # ── Storage quota utilisation ──────────────────────────────────────
+        - alert: NamespaceStorageQuotaExceeds80Percent
+          expr: |
+            (
+              kube_resourcequota{resource="requests.storage", type="used"}
+              /
+              kube_resourcequota{resource="requests.storage", type="hard"}
+            ) > 0.80
+          for: 15m
+          labels:
+            severity: warning
+            tier: cost
+          annotations:
+            summary: "Namespace {{ $labels.namespace }} storage quota > 80%"
+            description: >
+              Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }}
+              of its storage request quota. New PVC provisioning may be blocked.
