@@ -788,22 +788,148 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
+## Epic 13: Production Readiness Hardening
+
+> Close remaining gaps for production certification — SLO targets, alerting rules, rate limiting, distributed tracing, and operational verification.
+
+### E13-US1: SLO/SLA Targets Document
+
+**As an** operator
+**I want** documented availability, latency, and error rate targets per component
+**So that** I know when to escalate and what "normal" looks like
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | Availability targets per component (99.9%, 99.95%, 99.99%) | Planned |
+| AC-1.2 | P99 latency targets for Redis, PostgreSQL, NATS, APISIX | Planned |
+| AC-1.3 | Error budget calculation methodology documented | Planned |
+| AC-1.4 | Escalation thresholds and on-call routing defined | Planned |
+
+### E13-US2: Infrastructure Prometheus Alerting Rules
+
+**As an** SRE
+**I want** Prometheus alerting rules for all core infrastructure components
+**So that** incidents are detected before users are impacted
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | PostgreSQL alerts: replication lag >10s, connection pool exhausted, disk >85% | Planned |
+| AC-2.2 | Redis alerts: cluster state flapping, memory >90%, master failover | Planned |
+| AC-2.3 | NATS alerts: consumer lag >1000, JetStream storage >80% | Planned |
+| AC-2.4 | etcd alerts: leader election, disk latency, cluster health | Planned |
+| AC-2.5 | MinIO alerts: disk usage >85%, offline drives, healing in progress | Planned |
+| AC-2.6 | Consul alerts: leader loss, service deregistration spike | Planned |
+
+### E13-US3: APISIX Rate Limiting Policy
+
+**As an** operator
+**I want** rate limiting rules configured in APISIX per tenant and route
+**So that** one client cannot exhaust platform capacity
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | Global rate limit: 1000 req/min per IP | Planned |
+| AC-3.2 | Per-tenant rate limit configurable via route metadata | Planned |
+| AC-3.3 | HTTP 429 response with Retry-After header on limit breach | Planned |
+| AC-3.4 | Rate limit metrics exported to Prometheus | Planned |
+
+### E13-US4: Distributed Tracing Pipeline (Tempo)
+
+**As a** platform operator
+**I want** at least one service exporting traces to Tempo via OTLP
+**So that** the distributed tracing pipeline is validated end-to-end
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | Tempo Helm chart deployed with MinIO backend for trace storage | Planned |
+| AC-4.2 | OTel Collector deployed with OTLP receiver and Tempo exporter | Planned |
+| AC-4.3 | At least one service instrumented with isa_common.tracing sending spans | Planned |
+| AC-4.4 | Traces visible in Grafana Tempo datasource | Planned |
+
+### E13-US5: Prometheus ServiceMonitor Coverage
+
+**As an** SRE
+**I want** ServiceMonitors configured for all deployed application services
+**So that** no service metrics are silently dropped
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | ServiceMonitors cover all isA services (MCP, Model, Agent, Data, User, Trade, Creative, Mate, OS) | Planned |
+| AC-5.2 | Scrape targets verified in Prometheus Targets UI | Planned |
+| AC-5.3 | Missing-target alert fires if any ServiceMonitor has 0 endpoints | Planned |
+
+### E13-US6: Backup Restore Verification Test
+
+**As an** SRE
+**I want** an automated test that verifies backup → restore works for all stateful services
+**So that** I can trust backups will work in an emergency
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | PostgreSQL: dump → restore → query verification | Planned |
+| AC-6.2 | MinIO: mirror → restore → object verification | Planned |
+| AC-6.3 | NATS: stream config export → recreate → consumer verification | Planned |
+| AC-6.4 | Test runs as a CronJob (monthly) with pass/fail alerting | Planned |
+
+### E13-US7: Cost Allocation and Budget Alerts
+
+**As a** platform owner
+**I want** resource usage tracked per namespace/team with budget alerts
+**So that** runaway spending is caught early
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-7.1 | ResourceQuotas configured per namespace | Planned |
+| AC-7.2 | Prometheus metrics for CPU/memory/storage usage per namespace | Planned |
+| AC-7.3 | Alert when namespace exceeds 80% of quota | Planned |
+
+### E13-US8: Observability Migration Plan
+
+**As a** platform architect
+**I want** a phased plan for migrating all isA services to shared observability clients
+**So that** metrics and traces are consistent across the platform
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-8.1 | Migration plan identifies per-service owner and target quarter | Planned |
+| AC-8.2 | isA_MCP, isA_Model, isA_Mate migration steps documented | Planned |
+| AC-8.3 | Duplicate instrumentation removal checklist per service | Planned |
+
+---
+
 ## Priority Matrix
 
 | Epic | Priority | Status | Notes |
 |------|----------|--------|-------|
 | E1: Redis | P0 | Done | Core caching |
-| E2: PostgreSQL | P0 | Partial | Transactions planned |
+| E2: PostgreSQL | P0 | Done | Transactions implemented |
 | E3: NATS | P0 | Done | Event backbone |
 | E4: MinIO | P1 | Done | File storage |
 | E5: Qdrant | P1 | Done | AI features |
 | E6: Loki | P1 | Done | Observability |
-| E7: Cross-cutting | P0 | Partial | Tracing planned |
+| E7: Cross-cutting | P0 | Done | Service discovery + health checks |
 | E8: Unified Observability | P1 | Partial | Shared clients done, migrations + tracing remaining |
-| E9: Production K8s Deployment | P0 | Done | Provider-agnostic, Infotrend 3-node |
+| E9: Production K8s Deployment | P0 | Done | Provider-agnostic, Infotrend 3-node, prereq scripts |
 | E10: GPU Inference Platform | P0 | Planned | NVIDIA GPU Operator, vLLM, Triton, model cache |
 | E11: Big Data Platform | P1 | Planned | Ray distributed compute, DAG orchestrator, streaming ETL |
 | E12: Agent Runtime Platform | P0 | Planned | Firecracker/KVM, container-service, VM pool management |
+| E13: Production Readiness | P0 | Planned | SLO, alerting, rate limiting, tracing, backup verification |
 
 ---
 
@@ -815,5 +941,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.3.0
+**Version**: 2.4.0
 **Last Updated**: 2026-04-10
