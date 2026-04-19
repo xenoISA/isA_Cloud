@@ -1,0 +1,58 @@
+# FalkorDB Helm Values - DEV (kind cluster, single node)
+# Chart: bitnami/redis with FalkorDB module
+# Install: helm install falkordb bitnami/redis -n isa-cloud-dev -f dev/values/falkordb.yaml
+
+global:
+  security:
+    allowInsecureImages: true
+
+architecture: standalone
+
+image:
+  registry: docker.io
+  repository: falkordb/falkordb
+  tag: "v4.8.7"
+  pullPolicy: IfNotPresent
+
+# Dev mode: no auth for easy local poking; production and staging always enable it
+auth:
+  enabled: false
+
+master:
+  extraFlags:
+    - "--loadmodule"
+    - "/var/lib/falkordb/bin/falkordb.so"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+  configuration: |
+    appendonly yes
+    appendfsync everysec
+    maxmemory 768mb
+    maxmemory-policy noeviction
+
+  podLabels:
+    tier: infrastructure
+    environment: dev
+    app: falkordb
+
+replica:
+  replicaCount: 0
+
+metrics:
+  enabled: true

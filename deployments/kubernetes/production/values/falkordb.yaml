@@ -1,0 +1,97 @@
+# FalkorDB Helm Values - PRODUCTION
+# Chart: bitnami/redis with FalkorDB module
+# Install: helm install falkordb bitnami/redis -n isa-cloud-production -f production/values/falkordb.yaml
+#
+# Production sizing assumes ~50k :Tool nodes and 4 384-dim vector indexes
+# (Skill, Tool, Prompt, Resource per ADR-0001 in xenoISA/isA_MCP).
+
+global:
+  security:
+    allowInsecureImages: true
+
+architecture: replication
+
+image:
+  registry: docker.io
+  repository: falkordb/falkordb
+  tag: "v4.8.7"
+  pullPolicy: IfNotPresent
+
+auth:
+  enabled: true
+  existingSecret: "falkordb-secret"
+  existingSecretPasswordKey: "falkordb-password"
+
+master:
+  extraFlags:
+    - "--loadmodule"
+    - "/var/lib/falkordb/bin/falkordb.so"
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  persistence:
+    enabled: true
+    size: 50Gi
+
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+  configuration: |
+    appendonly yes
+    appendfsync everysec
+    save 900 1
+    save 300 10
+    save 60 10000
+    maxmemory 6gb
+    maxmemory-policy noeviction
+
+  podLabels:
+    tier: infrastructure
+    environment: production
+    app: falkordb
+
+# Read replica for query fan-out and HA
+replica:
+  replicaCount: 1
+  extraFlags:
+    - "--loadmodule"
+    - "/var/lib/falkordb/bin/falkordb.so"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 6Gi
+
+  persistence:
+    enabled: true
+    size: 50Gi
+
+  podLabels:
+    tier: infrastructure
+    environment: production
+    app: falkordb
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    additionalLabels:
+      app: falkordb
+      environment: production
+
+# Pod Disruption Budget for graceful upgrades
+pdb:
+  create: true
+  minAvailable: 1

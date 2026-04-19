@@ -23,6 +23,7 @@ Required secrets:
 - `postgresql-secret` - PostgreSQL credentials
 - `redis-secret` - Redis password
 - `neo4j-secret` - Neo4j credentials
+- `falkordb-secret` - FalkorDB password (key: `falkordb-password`)
 - `minio-secret` - MinIO access keys
 
 ### Storage Classes
@@ -75,6 +76,7 @@ The deploy script follows this order:
 | NATS | Helm | 1 | Event messaging |
 | EMQX | Helm | 1 | MQTT broker |
 | Qdrant | Helm | 1 | Vector database |
+| FalkorDB | Helm | 1 | Graph database (Redis module) for MCP hierarchical search |
 | Consul | Helm | 1 | Service discovery |
 | APISIX | Helm | 1 | API Gateway |
 
@@ -118,6 +120,9 @@ kubectl port-forward -n isa-cloud-staging svc/neo4j 7474:7474 7687:7687
 
 # Qdrant Dashboard
 kubectl port-forward -n isa-cloud-staging svc/qdrant 6333:6333
+
+# FalkorDB (use redis-cli on port 6379)
+kubectl port-forward -n isa-cloud-staging svc/falkordb-master 6379:6379
 ```
 
 ## Troubleshooting
@@ -191,13 +196,15 @@ helm rollback <release-name> -n isa-cloud-staging
 ```
 staging/
 ├── manifests/
-│   ├── etcd.yaml                 # etcd StatefulSet
-│   └── consul-apisix-sync.yaml   # Route sync CronJob
+│   ├── etcd.yaml                       # etcd StatefulSet
+│   ├── consul-apisix-sync.yaml         # Route sync CronJob
+│   └── falkordb-backup-cronjob.yaml    # FalkorDB daily backup to MinIO
 ├── values/
 │   ├── apisix.yaml               # APISIX Helm values
 │   ├── consul.yaml               # Consul Helm values
 │   ├── emqx.yaml                 # EMQX Helm values
 │   ├── etcd.yaml                 # etcd Helm values (alternative)
+│   ├── falkordb.yaml             # FalkorDB Helm values (Bitnami Redis + module)
 │   ├── minio.yaml                # MinIO Helm values
 │   ├── nats.yaml                 # NATS Helm values
 │   ├── neo4j.yaml                # Neo4j Helm values

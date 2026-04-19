@@ -98,6 +98,39 @@ spec:
           port: 6379
 
 ---
+# Allow MCP service to access FalkorDB (graph-backed hierarchical search)
+# See xenoISA/isA_MCP epic #525 for the discovery acceleration work that uses this.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-falkordb-access
+  namespace: isa-cloud-staging
+  labels:
+    app.kubernetes.io/part-of: isa-cloud
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: falkordb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcp-service
+        - podSelector:
+            matchLabels:
+              app: mcp-worker-service
+        # Backup CronJob lives in this namespace; allow same-ns scrape too
+        - podSelector:
+            matchLabels:
+              component: backup
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
 # Allow services to access Consul
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
