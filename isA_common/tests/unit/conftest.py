@@ -135,6 +135,44 @@ async def qdrant_client():
 
 
 # ============================================================================
+# FalkorDB
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def falkor_client():
+    """AsyncFalkorClient with mocked falkordb async driver."""
+    from isa_common import AsyncFalkorClient
+
+    client = AsyncFalkorClient(
+        host="localhost", port=6379,
+        graph="test_graph",
+        user_id="test_user", organization_id="org1",
+        lazy_connect=True,
+    )
+
+    mock_graph = MagicMock()
+    mock_graph.query = AsyncMock()
+    mock_graph.ro_query = AsyncMock()
+    mock_graph.delete = AsyncMock()
+
+    mock_db = MagicMock()
+    mock_db.select_graph.return_value = mock_graph
+    mock_db.list_graphs = AsyncMock(return_value=["test_graph"])
+    mock_db.connection = MagicMock()
+    mock_db.connection.ping = AsyncMock(return_value=True)
+
+    mock_pool = MagicMock()
+    mock_pool.disconnect = AsyncMock()
+
+    client._db = mock_db
+    client._pool = mock_pool
+    client._graph = mock_graph
+    client._connected = True
+    yield client
+    client._connected = False
+
+
+# ============================================================================
 # DuckDB
 # ============================================================================
 

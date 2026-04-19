@@ -37,6 +37,7 @@ dependencies = [
     "redis>=5.0.0",  # Async Redis (redis-py with asyncio)
     "nats-py>=2.6.0",  # Async NATS with JetStream
     "qdrant-client>=1.9.0",  # Async Qdrant vector database
+    "falkordb>=1.0.0",  # Async FalkorDB graph database (Redis module)
     "aiomqtt>=2.0.0",  # Async MQTT client
     "aiosqlite>=0.19.0",  # Async SQLite
     "duckdb>=0.10.0",  # DuckDB analytics database

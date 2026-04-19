@@ -10,6 +10,7 @@ Native async clients connect directly to infrastructure services:
 - AsyncNeo4jClient (neo4j driver) - port 7687
 - AsyncNATSClient (nats-py) - port 4222
 - AsyncQdrantClient (qdrant-client) - port 6333
+- AsyncFalkorClient (falkordb) - port 6379 (Redis-module graph DB)
 - AsyncMQTTClient (aiomqtt) - port 1883
 - AsyncMinIOClient (aioboto3) - port 9000
 - AsyncDuckDBClient (duckdb) - embedded
@@ -43,6 +44,7 @@ from .async_minio_client import AsyncMinIOClient
 from .async_duckdb_client import AsyncDuckDBClient
 from .async_mqtt_client import AsyncMQTTClient
 from .async_qdrant_client import AsyncQdrantClient
+from .async_falkor_client import AsyncFalkorClient
 from .async_loki_client import AsyncLokiClient
 from .loki_handler import LokiHandler, setup_loki_logging
 
@@ -101,6 +103,7 @@ __all__ = [
     'AsyncDuckDBClient',
     'AsyncMQTTClient',
     'AsyncQdrantClient',
+    'AsyncFalkorClient',
     'AsyncLokiClient',
     'LokiHandler',
     'setup_loki_logging',
@@ -135,6 +138,7 @@ NATIVE_PORTS: Dict[str, int] = {
     'neo4j': 7687,
     'nats': 4222,
     'qdrant': 6333,
+    'falkordb': 6379,  # Redis-module graph DB; deployed on its own service in production
     'mqtt': 1883,
     'minio': 9000,
     'consul': 8500,
