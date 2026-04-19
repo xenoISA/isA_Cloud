@@ -1,0 +1,97 @@
+# FalkorDB Daily Backup CronJob - STAGING
+# Runs `BGSAVE` against the master pod, then uploads the resulting RDB to MinIO.
+# Restore procedure: docs/runbooks/falkordb-recovery.md
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: falkordb-backup
+  namespace: isa-cloud-staging
+  labels:
+    app: falkordb
+    component: backup
+    tier: infrastructure
+    environment: staging
+spec:
+  # Daily at 03:15 UTC; offset from other backups to spread load
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: falkordb
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: bitnami/redis:7.4
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: REDIS_HOST
+                  value: "falkordb-master.isa-cloud-staging.svc.cluster.local"
+                - name: REDIS_PORT
+                  value: "6379"
+                - name: REDISCLI_AUTH
+                  valueFrom:
+                    secretKeyRef:
+                      name: falkordb-secret
+                      key: falkordb-password
+                - name: MINIO_ENDPOINT
+                  value: "http://minio.isa-cloud-staging.svc.cluster.local:9000"
+                - name: MINIO_BUCKET
+                  value: "falkordb-backups"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-secret
+                      key: root-user
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-secret
+                      key: root-password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%d-%H%M%S)
+                  KEY="falkordb-${TS}.rdb"
+
+                  echo "[1/4] Triggering BGSAVE on $REDIS_HOST..."
+                  redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" BGSAVE
+
+                  echo "[2/4] Waiting for BGSAVE to finish..."
+                  while true; do
+                    OUT=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LASTSAVE)
+                    sleep 5
+                    NEW=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" LASTSAVE)
+                    if [ "$OUT" != "$NEW" ]; then
+                      break
+                    fi
+                  done
+
+                  echo "[3/4] Copying RDB out of master pod..."
+                  POD=$(echo $REDIS_HOST | cut -d. -f1)-0
+                  # The Bitnami Redis chart writes dump.rdb under /data
+                  redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --rdb /tmp/${KEY}
+
+                  echo "[4/4] Uploading $KEY to s3://${MINIO_BUCKET}/..."
+                  apk add --no-cache aws-cli >/dev/null 2>&1 || true
+                  aws --endpoint-url "$MINIO_ENDPOINT" s3 cp /tmp/${KEY} \
+                    s3://${MINIO_BUCKET}/${KEY}
+
+                  echo "Backup complete: ${KEY}"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi

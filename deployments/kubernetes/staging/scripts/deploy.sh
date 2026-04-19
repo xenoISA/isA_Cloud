@@ -187,6 +187,19 @@ deploy_infrastructure() {
         -f ${VALUES_DIR}/qdrant.yaml \
         --wait --timeout ${TIMEOUT}
 
+    # 5b. Deploy graph database (FalkorDB - Redis module)
+    log_step "Deploying FalkorDB..."
+    helm upgrade --install falkordb bitnami/redis \
+        -n ${NAMESPACE} \
+        -f ${VALUES_DIR}/falkordb.yaml \
+        --wait --timeout ${TIMEOUT}
+
+    # Apply FalkorDB daily backup CronJob
+    if [ -f "${MANIFESTS_DIR}/falkordb-backup-cronjob.yaml" ]; then
+        log_step "Applying FalkorDB backup CronJob..."
+        kubectl apply -f "${MANIFESTS_DIR}/falkordb-backup-cronjob.yaml"
+    fi
+
     # 6. Deploy service discovery
     log_step "Deploying Consul..."
     helm upgrade --install consul hashicorp/consul \

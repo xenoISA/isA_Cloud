@@ -1,0 +1,85 @@
+# FalkorDB Helm Values - STAGING
+# Chart: bitnami/redis (FalkorDB ships as a Redis module)
+# Image: falkordb/falkordb:latest (see https://docs.falkordb.com/operations/k8s-support.html)
+# Install: helm install falkordb bitnami/redis -n isa-cloud-staging -f staging/values/falkordb.yaml
+#
+# FalkorDB powers the hierarchical resource discovery backend for isA_MCP
+# (epic xenoISA/isA_MCP#525). Schema lives in xenoISA/isA_MCP ADR-0001.
+
+# Bitnami Redis runs the FalkorDB image as the Redis binary; allow-list is
+# required because the image is not a Bitnami-published one.
+global:
+  security:
+    allowInsecureImages: true
+
+architecture: standalone
+
+# Use the FalkorDB image instead of upstream Redis
+image:
+  registry: docker.io
+  repository: falkordb/falkordb
+  # Pin a specific tag for reproducibility - update intentionally during upgrades.
+  # See https://hub.docker.com/r/falkordb/falkordb/tags for current releases.
+  tag: "v4.8.7"
+  pullPolicy: IfNotPresent
+
+# Authentication via existing K8s secret (provision via secrets/infrastructure-secrets.yaml)
+auth:
+  enabled: true
+  existingSecret: "falkordb-secret"
+  existingSecretPasswordKey: "falkordb-password"
+
+# Master configuration
+master:
+  # Load the FalkorDB module on Redis startup
+  extraFlags:
+    - "--loadmodule"
+    - "/var/lib/falkordb/bin/falkordb.so"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  persistence:
+    enabled: true
+    size: 20Gi
+
+  # ClusterIP for in-cluster access only; FalkorDB speaks the Redis protocol on 6379
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+  # AOF + periodic RDB snapshots; tuned for graph workloads where queries are
+  # cheaper to replay than full re-indexes
+  configuration: |
+    appendonly yes
+    appendfsync everysec
+    save 900 1
+    save 300 10
+    save 60 10000
+    maxmemory 3gb
+    maxmemory-policy noeviction
+
+  podLabels:
+    tier: infrastructure
+    environment: staging
+    app: falkordb
+
+# No replicas in staging (cost optimization); production is a separate values file
+replica:
+  replicaCount: 0
+
+# Built-in Bitnami metrics exporter; ServiceMonitor wires Prometheus
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    additionalLabels:
+      app: falkordb
+      environment: staging
