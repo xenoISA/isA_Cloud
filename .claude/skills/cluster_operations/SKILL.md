@@ -55,6 +55,7 @@ Comprehensive cluster operations including environment setup, backup, restore, a
 **What gets deployed:**
 - PostgreSQL (localhost:5432)
 - Redis (localhost:6379)
+- FalkorDB (localhost:6380) — graph DB for MCP hierarchical search
 - Qdrant (localhost:6333/6334)
 - MinIO (localhost:9000/9001)
 - Neo4j (localhost:7474/7687)
