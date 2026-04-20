@@ -197,6 +197,16 @@ if [ "$DRY_RUN" = false ]; then
             --wait --timeout 15m && echo -e "    ${GREEN}✓ Qdrant Distributed${NC}"
     fi
 
+    # FalkorDB (graph DB for MCP hierarchical search)
+    # Production values use Bitnami Redis chart with master + replica + PDB.
+    # See deployments/kubernetes/production/values/falkordb.yaml.
+    echo "  Installing FalkorDB..."
+    if [ -f "$VALUES_DIR/falkordb.yaml" ]; then
+        helm upgrade --install falkordb bitnami/redis \
+            -n "$NAMESPACE" -f "$VALUES_DIR/falkordb.yaml" \
+            --wait --timeout 15m && echo -e "    ${GREEN}✓ FalkorDB${NC}"
+    fi
+
     # MinIO Distributed
     echo "  Installing MinIO Distributed..."
     if [ -f "$VALUES_DIR/minio-distributed.yaml" ]; then

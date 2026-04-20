@@ -129,7 +129,7 @@ echo -e "${YELLOW}[5/6] Deploying infrastructure...${NC}"
 VALUES_DIR="$ISA_CLOUD_DIR/deployments/kubernetes/staging/values"
 
 # Deploy each service with staging values
-for service in postgresql redis qdrant minio neo4j nats consul; do
+for service in postgresql redis falkordb qdrant minio neo4j nats consul; do
     if [ -f "$VALUES_DIR/${service}.yaml" ]; then
         echo "  Installing $service..."
 
@@ -138,6 +138,13 @@ for service in postgresql redis qdrant minio neo4j nats consul; do
                 helm upgrade --install $service bitnami/postgresql -n "$NAMESPACE" -f "$VALUES_DIR/${service}.yaml" --wait --timeout 10m
                 ;;
             redis)
+                helm upgrade --install $service bitnami/redis -n "$NAMESPACE" -f "$VALUES_DIR/${service}.yaml" --wait --timeout 10m
+                ;;
+            falkordb)
+                # FalkorDB rides on the Bitnami Redis chart with a custom image
+                # (see deployments/kubernetes/staging/values/falkordb.yaml).
+                # The chart's allowInsecureImages flag is required because the
+                # falkordb image isn't a Bitnami-published one.
                 helm upgrade --install $service bitnami/redis -n "$NAMESPACE" -f "$VALUES_DIR/${service}.yaml" --wait --timeout 10m
                 ;;
             qdrant)
