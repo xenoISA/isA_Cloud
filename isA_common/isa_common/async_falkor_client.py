@@ -364,6 +364,7 @@ class AsyncFalkorClient(AsyncBaseClient):
         merge_on: Optional[str] = None,
         graph: Optional[str] = None,
         batch_size: int = 500,
+        vector_props: Optional[List[str]] = None,
     ) -> Optional[int]:
         """
         Insert or upsert nodes in batches via UNWIND.
@@ -375,9 +376,21 @@ class AsyncFalkorClient(AsyncBaseClient):
                 otherwise CREATE.
             graph: Override default graph.
             batch_size: Rows per Cypher call (default: 500).
+            vector_props: Property names that hold embedding vectors. These
+                are written via ``vecf32(row.<prop>)`` so the vector index
+                can use them. Defaults to ``["embedding"]`` — the canonical
+                name across the platform — pass ``[]`` to disable wrapping.
 
         Returns:
             Total rows written, or None on error.
+
+        Note on vector properties:
+            FalkorDB's vector index only sees properties stored via
+            ``vecf32(...)``. If you write a list of floats directly with
+            ``SET n += row``, the value is stored as a generic array and
+            ``db.idx.vector.queryNodes`` returns no matches. This method
+            handles the wrap automatically for the names listed in
+            ``vector_props``.
         """
         if not rows:
             return 0
@@ -388,6 +401,32 @@ class AsyncFalkorClient(AsyncBaseClient):
         if merge_on and not merge_on.isidentifier():
             raise ValueError(f"Invalid merge_on property: {merge_on!r}")
 
+        # Default vector property is `embedding` — the convention used
+        # everywhere in the isA platform.
+        if vector_props is None:
+            vector_props = ["embedding"]
+        for vp in vector_props:
+            if not vp.isidentifier():
+                raise ValueError(f"Invalid vector_prop: {vp!r}")
+
+        # Build a "SET" clause that strips the vector props out of the
+        # per-row dict and writes them via vecf32() so the vector index
+        # picks them up. Other properties go through the bulk `n += row`.
+        scrub = ", ".join(f"{vp}: null" for vp in vector_props)
+        if scrub:
+            base_set = f"SET n += apoc.map.removeKeys(row, $vec_keys)"
+        else:
+            base_set = "SET n += row"
+
+        # FalkorDB doesn't ship apoc; use a portable manual approach via
+        # WITH and per-property removal. The portable form: store the
+        # whole row, then overwrite each vector prop via vecf32().
+        per_vec_sets = " ".join(
+            f"SET n.{vp} = CASE WHEN row.{vp} IS NULL THEN n.{vp} "
+            f"ELSE vecf32(row.{vp}) END"
+            for vp in vector_props
+        )
+
         try:
             await self._ensure_connected()
 
@@ -395,10 +434,16 @@ class AsyncFalkorClient(AsyncBaseClient):
                 cypher = (
                     f"UNWIND $rows AS row "
                     f"MERGE (n:{label} {{ {merge_on}: row.{merge_on} }}) "
-                    f"SET n += row"
+                    f"SET n += row "
+                    f"{per_vec_sets}"
                 )
             else:
-                cypher = f"UNWIND $rows AS row CREATE (n:{label}) SET n += row"
+                cypher = (
+                    f"UNWIND $rows AS row "
+                    f"CREATE (n:{label}) "
+                    f"SET n += row "
+                    f"{per_vec_sets}"
+                )
 
             total = 0
             for start in range(0, len(rows), batch_size):
