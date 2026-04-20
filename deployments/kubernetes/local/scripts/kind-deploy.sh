@@ -1,4 +1,9 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED — see ./DEPRECATED.md
+# Use .claude/skills/cluster_operations/scripts/setup-local.sh instead.
+# ============================================================================
+echo "WARNING: This script is deprecated. Use .claude/skills/cluster_operations/scripts/setup-local.sh" >&2
 set -e
 
 # ============================================

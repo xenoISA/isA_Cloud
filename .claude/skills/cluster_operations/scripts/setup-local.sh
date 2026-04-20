@@ -16,7 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ISA_CLOUD_DIR="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 CLUSTER_NAME="${KIND_CLUSTER:-isa-cloud-local}"
-NAMESPACE="isa-cloud-staging"
+# Namespace defaults to the cluster name so local dev resources live in
+# `isa-cloud-local` (matching the cluster), not in `isa-cloud-staging` which
+# would be confusing. Override with NAMESPACE=... if needed.
+NAMESPACE="${NAMESPACE:-isa-cloud-local}"
 INFRA_ONLY=false
 REBUILD=false
 
@@ -160,6 +163,8 @@ helm repo add qdrant https://qdrant.github.io/qdrant-helm 2>/dev/null || true
 helm repo add nats https://nats-io.github.io/k8s/helm/charts/ 2>/dev/null || true
 helm repo add hashicorp https://helm.releases.hashicorp.com 2>/dev/null || true
 helm repo add apisix https://charts.apiseven.com 2>/dev/null || true
+helm repo add minio https://charts.min.io/ 2>/dev/null || true
+helm repo add neo4j https://helm.neo4j.com/neo4j 2>/dev/null || true
 helm repo update
 echo -e "  ${GREEN}✓ Helm repos configured${NC}"
 
@@ -169,13 +174,27 @@ echo -e "  ${GREEN}✓ Helm repos configured${NC}"
 echo ""
 echo -e "${YELLOW}[4/5] Deploying infrastructure...${NC}"
 
-VALUES_DIR="$ISA_CLOUD_DIR/deployments/kubernetes/staging/values"
+# Prefer local-specific values where they exist; fall back to staging.
+LOCAL_VALUES_DIR="$ISA_CLOUD_DIR/deployments/kubernetes/local/values"
+STAGING_VALUES_DIR="$ISA_CLOUD_DIR/deployments/kubernetes/staging/values"
+values_for() {
+    # Returns the best values file for service $1, preferring local then staging.
+    local svc="$1"
+    if [ -f "$LOCAL_VALUES_DIR/${svc}.yaml" ]; then
+        echo "$LOCAL_VALUES_DIR/${svc}.yaml"
+    elif [ -f "$STAGING_VALUES_DIR/${svc}.yaml" ]; then
+        echo "$STAGING_VALUES_DIR/${svc}.yaml"
+    else
+        echo ""
+    fi
+}
+VALUES_DIR="$STAGING_VALUES_DIR"  # back-compat alias for any inline -f references
 
 # PostgreSQL
 echo "  Installing PostgreSQL..."
 helm upgrade --install postgresql bitnami/postgresql \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/postgresql.yaml" \
+    -f "$(values_for postgresql)" \
     --set primary.service.type=NodePort \
     --set primary.service.nodePorts.postgresql=30432 \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ PostgreSQL${NC}" || echo -e "    ${YELLOW}⚠ PostgreSQL (may already exist)${NC}"
@@ -184,7 +203,7 @@ helm upgrade --install postgresql bitnami/postgresql \
 echo "  Installing Redis..."
 helm upgrade --install redis bitnami/redis \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/redis.yaml" \
+    -f "$(values_for redis)" \
     --set master.service.type=NodePort \
     --set master.service.nodePorts.redis=30379 \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ Redis${NC}" || echo -e "    ${YELLOW}⚠ Redis${NC}"
@@ -193,7 +212,7 @@ helm upgrade --install redis bitnami/redis \
 echo "  Installing Qdrant..."
 helm upgrade --install qdrant qdrant/qdrant \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/qdrant.yaml" \
+    -f "$(values_for qdrant)" \
     --set service.type=NodePort \
     --set service.nodePort=30333 \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ Qdrant${NC}" || echo -e "    ${YELLOW}⚠ Qdrant${NC}"
@@ -220,31 +239,30 @@ else
     echo -e "    ${YELLOW}⚠ FalkorDB manifest not found at $FALKORDB_MANIFEST${NC}"
 fi
 
-# MinIO
+# MinIO — use the official MinIO chart (charts.min.io). Bitnami's MinIO
+# chart pins rolling tags that get pruned from Docker Hub, so it
+# routinely breaks with ImagePullBackOff. The local values file targets
+# the official chart's value schema (mode, persistence, resources).
 echo "  Installing MinIO..."
-helm upgrade --install minio bitnami/minio \
+helm upgrade --install minio minio/minio \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/minio.yaml" \
-    --set service.type=NodePort \
-    --set service.nodePorts.api=30900 \
-    --set service.nodePorts.console=30901 \
-    --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ MinIO${NC}" || echo -e "    ${YELLOW}⚠ MinIO${NC}"
+    -f "$(values_for minio)" \
+    --wait --timeout 5m && echo -e "    ${GREEN}✓ MinIO${NC}" || echo -e "    ${YELLOW}⚠ MinIO${NC}"
 
-# Neo4j
+# Neo4j — use the official neo4j/neo4j chart (helm.neo4j.com). The local
+# values file targets that chart's nested `neo4j:` schema; Bitnami's
+# neo4j chart has a different shape and fails silently with our values.
 echo "  Installing Neo4j..."
-helm upgrade --install neo4j bitnami/neo4j \
+helm upgrade --install neo4j neo4j/neo4j \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/neo4j.yaml" \
-    --set service.type=NodePort \
-    --set service.nodePorts.bolt=30687 \
-    --set service.nodePorts.http=30474 \
-    --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ Neo4j${NC}" || echo -e "    ${YELLOW}⚠ Neo4j${NC}"
+    -f "$(values_for neo4j)" \
+    --wait --timeout 5m && echo -e "    ${GREEN}✓ Neo4j${NC}" || echo -e "    ${YELLOW}⚠ Neo4j${NC}"
 
 # NATS
 echo "  Installing NATS..."
 helm upgrade --install nats nats/nats \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/nats.yaml" \
+    -f "$(values_for nats)" \
     --set service.type=NodePort \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ NATS${NC}" || echo -e "    ${YELLOW}⚠ NATS${NC}"
 
@@ -252,7 +270,7 @@ helm upgrade --install nats nats/nats \
 echo "  Installing Consul..."
 helm upgrade --install consul hashicorp/consul \
     -n "$NAMESPACE" \
-    -f "$VALUES_DIR/consul.yaml" \
+    -f "$(values_for consul)" \
     --set ui.service.type=NodePort \
     --set ui.service.nodePort=30500 \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ Consul${NC}" || echo -e "    ${YELLOW}⚠ Consul${NC}"

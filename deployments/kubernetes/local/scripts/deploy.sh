@@ -1,4 +1,9 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED — see ./DEPRECATED.md
+# Use .claude/skills/cluster_operations/scripts/setup-{local,staging,production}.sh
+# ============================================================================
+echo "WARNING: This script is deprecated. Use .claude/skills/cluster_operations/" >&2
 set -e
 
 # ============================================
