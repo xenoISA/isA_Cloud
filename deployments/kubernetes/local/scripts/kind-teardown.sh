@@ -1,4 +1,10 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED — see ./DEPRECATED.md
+# Use: kind delete cluster --name isa-cloud-local
+# Or:  .claude/skills/cluster_operations/scripts/setup-local.sh --rebuild
+# ============================================================================
+echo "WARNING: This script is deprecated. Use 'kind delete cluster --name isa-cloud-local'" >&2
 set -e
 
 # ============================================

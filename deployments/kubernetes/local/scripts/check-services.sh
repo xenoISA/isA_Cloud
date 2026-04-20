@@ -1,4 +1,9 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED — see ./DEPRECATED.md
+# Use: kubectl get pods -n isa-cloud-local
+# ============================================================================
+echo "WARNING: This script is deprecated. Use 'kubectl get pods -n isa-cloud-local'" >&2
 
 # Check Services Status Script
 # 检查所有服务的健康状态
