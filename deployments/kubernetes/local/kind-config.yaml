@@ -49,6 +49,14 @@ nodes:
       hostPort: 6334
       protocol: TCP
 
+    # FalkorDB graph DB (NodePort 30380 -> localhost:6380)
+    # Same Redis-protocol port as Bitnami Redis (6379) but on a different
+    # host port so both can coexist for local dev. Powers the MCP
+    # hierarchical search backend (xenoISA/isA_MCP epic #525).
+    - containerPort: 30380
+      hostPort: 6380
+      protocol: TCP
+
     # ============================================================
     # OBJECT STORAGE
     # ============================================================
