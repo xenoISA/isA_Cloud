@@ -62,7 +62,7 @@ echo "Backup directory: $BACKUP_DIR"
 echo ""
 
 # Create backup directories
-mkdir -p "$BACKUP_DIR"/{postgres,redis,qdrant,neo4j,minio,consul,nats,apisix}
+mkdir -p "$BACKUP_DIR"/{postgres,redis,qdrant,falkordb,neo4j,minio,consul,nats,apisix}
 
 # =============================================================================
 # 1. PostgreSQL Backup
@@ -144,6 +144,32 @@ else
 fi
 
 kill $PF_PID 2>/dev/null || true
+
+# =============================================================================
+# 3b. FalkorDB Backup
+# =============================================================================
+echo ""
+echo -e "${YELLOW}[3b] Backing up FalkorDB...${NC}"
+FALKORDB_POD="falkordb-0"
+if kubectl get pod -n "$NAMESPACE" "$FALKORDB_POD" &>/dev/null; then
+    # Trigger background save then copy the RDB file out — same pattern as
+    # the Helm chart's CronJob in deployments/kubernetes/staging/manifests.
+    LASTSAVE_BEFORE=$(kubectl exec -n "$NAMESPACE" "$FALKORDB_POD" -- redis-cli LASTSAVE 2>/dev/null || echo "")
+    kubectl exec -n "$NAMESPACE" "$FALKORDB_POD" -- redis-cli BGSAVE >/dev/null 2>&1
+    # Wait for LASTSAVE to advance (max 30s)
+    for _ in $(seq 1 30); do
+        sleep 1
+        LASTSAVE_NOW=$(kubectl exec -n "$NAMESPACE" "$FALKORDB_POD" -- redis-cli LASTSAVE 2>/dev/null || echo "")
+        [ -n "$LASTSAVE_NOW" ] && [ "$LASTSAVE_NOW" != "$LASTSAVE_BEFORE" ] && break
+    done
+    # Copy the snapshot out (FalkorDB image stores at /var/lib/falkordb/data)
+    kubectl cp "$NAMESPACE/$FALKORDB_POD:/var/lib/falkordb/data/dump.rdb" \
+        "$BACKUP_DIR/falkordb/dump.rdb" 2>/dev/null && \
+        echo -e "  ${GREEN}✓ FalkorDB RDB snapshot ($(du -h "$BACKUP_DIR/falkordb/dump.rdb" 2>/dev/null | cut -f1))${NC}" || \
+        echo -e "  ${YELLOW}⚠ FalkorDB RDB copy failed${NC}"
+else
+    echo -e "  ${YELLOW}⚠ FalkorDB pod not found (skipping)${NC}"
+fi
 
 # =============================================================================
 # 4. Neo4j Backup
@@ -330,6 +356,7 @@ cat > "$BACKUP_DIR/metadata.json" << EOF
         "postgresql": $([ -f "$BACKUP_DIR/postgres/full_backup.sql" ] && echo "true" || echo "false"),
         "redis": $([ -f "$BACKUP_DIR/redis/dump.rdb" ] && echo "true" || echo "false"),
         "qdrant": $([ "$(ls -A "$BACKUP_DIR/qdrant" 2>/dev/null)" ] && echo "true" || echo "false"),
+        "falkordb": $([ "$(ls -A "$BACKUP_DIR/falkordb" 2>/dev/null)" ] && echo "true" || echo "false"),
         "neo4j": $([ -f "$BACKUP_DIR/neo4j/neo4j.dump" ] && echo "true" || echo "false"),
         "minio": $([ "$(ls -A "$BACKUP_DIR/minio" 2>/dev/null)" ] && echo "true" || echo "false"),
         "consul": $([ -f "$BACKUP_DIR/consul/consul.snap" ] && echo "true" || echo "false"),

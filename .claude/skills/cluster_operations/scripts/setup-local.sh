@@ -83,6 +83,11 @@ nodes:
       - containerPort: 30379
         hostPort: 6379
         protocol: TCP
+      # FalkorDB (Redis-protocol graph DB; coexists with Redis on a different host port)
+      # Powers MCP hierarchical search (xenoISA/isA_MCP epic #525)
+      - containerPort: 30380
+        hostPort: 6380
+        protocol: TCP
       # Qdrant gRPC
       - containerPort: 30334
         hostPort: 6334
@@ -192,6 +197,28 @@ helm upgrade --install qdrant qdrant/qdrant \
     --set service.type=NodePort \
     --set service.nodePort=30333 \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ Qdrant${NC}" || echo -e "    ${YELLOW}⚠ Qdrant${NC}"
+
+# FalkorDB (graph DB for MCP hierarchical search)
+# Skips the Bitnami Redis chart because it hard-codes module paths under
+# /opt/bitnami/redis/lib that don't exist in the falkordb image — the image
+# auto-loads its module from /FalkorDB/bin/src/falkordb.so on startup.
+echo "  Installing FalkorDB..."
+FALKORDB_MANIFEST="$ISA_CLOUD_DIR/deployments/kubernetes/local/manifests/falkordb.yaml"
+if [ -f "$FALKORDB_MANIFEST" ]; then
+    # Manifest hard-codes namespace `isa-cloud-local`; fall back to a sed
+    # rewrite when the bootstrap targets a different namespace.
+    if [ "$NAMESPACE" = "isa-cloud-local" ]; then
+        kubectl apply -f "$FALKORDB_MANIFEST" 2>/dev/null
+    else
+        sed "s/namespace: isa-cloud-local/namespace: $NAMESPACE/g" "$FALKORDB_MANIFEST" \
+            | kubectl apply -f - 2>/dev/null
+    fi
+    kubectl wait --for=condition=ready pod/falkordb-0 -n "$NAMESPACE" --timeout=120s 2>/dev/null \
+        && echo -e "    ${GREEN}✓ FalkorDB${NC}" \
+        || echo -e "    ${YELLOW}⚠ FalkorDB (pod not ready in 120s)${NC}"
+else
+    echo -e "    ${YELLOW}⚠ FalkorDB manifest not found at $FALKORDB_MANIFEST${NC}"
+fi
 
 # MinIO
 echo "  Installing MinIO..."

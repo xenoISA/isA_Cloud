@@ -255,6 +255,32 @@ if should_restore "qdrant"; then
 fi
 
 # =============================================================================
+# 3b. FalkorDB Restore
+# =============================================================================
+if should_restore "falkordb"; then
+    echo ""
+    echo -e "${YELLOW}[3b] Restoring FalkorDB...${NC}"
+    if [ -f "$BACKUP_DIR/falkordb/dump.rdb" ]; then
+        FALKORDB_POD="falkordb-0"
+        if kubectl get pod -n "$NAMESPACE" "$FALKORDB_POD" &>/dev/null; then
+            # Stop the server, drop the new RDB into the data dir, restart.
+            # The image auto-loads dump.rdb on startup.
+            kubectl cp "$BACKUP_DIR/falkordb/dump.rdb" \
+                "$NAMESPACE/$FALKORDB_POD:/var/lib/falkordb/data/dump.rdb" 2>/dev/null && \
+                kubectl exec -n "$NAMESPACE" "$FALKORDB_POD" -- redis-cli SHUTDOWN NOSAVE 2>/dev/null || true
+            # Pod restarts via StatefulSet readiness probe; wait for it
+            kubectl wait --for=condition=ready pod/$FALKORDB_POD -n "$NAMESPACE" --timeout=60s 2>/dev/null && \
+                echo -e "  ${GREEN}✓ FalkorDB restored from RDB${NC}" || \
+                echo -e "  ${YELLOW}⚠ FalkorDB pod restart timed out${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ FalkorDB pod not found${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}⚠ No FalkorDB backup found${NC}"
+    fi
+fi
+
+# =============================================================================
 # 4. Neo4j Restore
 # =============================================================================
 if should_restore "neo4j"; then
