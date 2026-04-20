@@ -1,0 +1,107 @@
+# FalkorDB graph database for local kind cluster.
+#
+# Uses a minimal StatefulSet + NodePort instead of the Bitnami Redis chart
+# because that chart hard-codes module paths under /opt/bitnami/redis/lib/...
+# which don't exist in the falkordb image. The image already auto-loads its
+# module from /FalkorDB/bin/src/falkordb.so on startup.
+#
+# Host access pattern matches Postgres / Redis / Qdrant (kind extraPortMapping):
+#   localhost:6380  ->  kind NodePort 30380  ->  Service falkordb:6379
+#
+# Powers the MCP hierarchical-search backend (xenoISA/isA_MCP epic #525).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb
+  namespace: isa-cloud-local
+  labels:
+    app: falkordb
+    tier: infrastructure
+    component: graph-database
+spec:
+  type: NodePort
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      nodePort: 30380
+      protocol: TCP
+  selector:
+    app: falkordb
+---
+# Headless service for stable in-cluster DNS (falkordb-0.falkordb-headless...)
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb-headless
+  namespace: isa-cloud-local
+  labels:
+    app: falkordb
+spec:
+  clusterIP: None
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+  selector:
+    app: falkordb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: falkordb
+  namespace: isa-cloud-local
+  labels:
+    app: falkordb
+    tier: infrastructure
+spec:
+  serviceName: falkordb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falkordb
+  template:
+    metadata:
+      labels:
+        app: falkordb
+        tier: infrastructure
+        environment: local
+    spec:
+      containers:
+        - name: falkordb
+          image: falkordb/falkordb:v4.8.7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/falkordb/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
