@@ -92,6 +92,7 @@ AWS_REGION=eu-west-1 ./scripts/setup-staging.sh
 **Production deploys HA versions:**
 - PostgreSQL HA (3 replicas + pgpool)
 - Redis Cluster (6 nodes)
+- FalkorDB (master + replica + PDB; Redis-protocol graph DB for MCP)
 - Qdrant Distributed
 - MinIO Distributed
 - Neo4j Cluster
@@ -107,10 +108,13 @@ AWS_REGION=eu-west-1 ./scripts/setup-staging.sh
 backups/cluster-backup-{timestamp}/
 ├── postgres/           # PostgreSQL dumps
 ├── redis/             # Redis RDB snapshots
+├── falkordb/          # FalkorDB RDB snapshot (graph DB for MCP)
 ├── neo4j/             # Neo4j graph database
 ├── minio/             # Object storage buckets
 ├── qdrant/            # Vector database snapshots
 ├── consul/            # Service registry KV store
+├── nats/              # JetStream data
+├── apisix/            # Routes / upstreams / services / consumers
 └── metadata.json      # Backup metadata
 ```
 
@@ -162,10 +166,13 @@ cat > backups/cluster-backup-*/BACKUP_INFO.md << EOF
 ## Services Backed Up
 - PostgreSQL
 - Redis
+- FalkorDB
 - Neo4j
 - MinIO
 - Qdrant
 - Consul
+- NATS (JetStream)
+- APISIX
 
 ## Backup Command
 \`\`\`bash
@@ -266,7 +273,7 @@ bash scripts/backup-cluster-data.sh
 
 **Step 2: Delete existing cluster**
 ```bash
-kind delete cluster --name isa-cloud
+kind delete cluster --name isa-cloud-local
 ```
 
 **Step 3: Create new cluster**
