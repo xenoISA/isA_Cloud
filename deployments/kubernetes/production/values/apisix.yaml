@@ -5,7 +5,7 @@
 # Note: Built-in etcd is for dev/testing only. For production, use external etcd.
 # Source: https://github.com/apache/apisix-helm-chart
 
-# Service configuration (gateway)
+# Gateway service configuration
 service:
   type: ClusterIP
   http:
@@ -17,19 +17,28 @@ service:
   stream:
     enabled: false
 
-# APISIX configuration
-apisix:
-  image:
-    repository: apache/apisix
-    tag: 3.8.0-debian
+# APISIX image/runtime settings
+image:
+  repository: apache/apisix
+  tag: 3.8.0-debian
 
-  resources:
-    requests:
-      cpu: 500m
-      memory: 512Mi
-    limits:
-      cpu: 2000m
-      memory: 2Gi
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+apisix:
+  ssl:
+    enabled: true
+
+  dns:
+    resolvers:
+      - 10.96.0.10
+    validity: 30
+    timeout: 5
 
   # Admin API configuration
   admin:
@@ -47,17 +56,15 @@ apisix:
         - 172.16.0.0/12
         - 192.168.0.0/16
 
-  nginx:
-    configurationSnippet:
-      http: |
-        resolver 10.96.0.10 valid=30s;
-
   discovery:
     enabled: true
     registry:
       consul:
         servers:
-          - "http://consul-ui.isa-cloud-production.svc.cluster.local"
+          - "http://consul-server.isa-cloud-production.svc.cluster.local:8500"
+        default_service:
+          host: 127.0.0.1
+          port: 20999
         fetch_interval: 3
         timeout:
           connect: 2000
@@ -65,12 +72,6 @@ apisix:
           wait: 60
         keepalive: true
         default_weight: 1
-
-dns:
-  resolvers:
-    - 10.96.0.10
-  validity: 30
-  timeout: 5
 
 # etcd - use external etcd (deployed separately with official image)
 etcd:

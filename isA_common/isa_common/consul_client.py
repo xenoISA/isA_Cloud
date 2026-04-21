@@ -7,7 +7,9 @@ Provides service registration and health check functionality for microservices
 import asyncio
 import json
 import logging
+import os
 import socket
+import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +28,100 @@ def _is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return host.lower() == "localhost"
+
+
+def _usable_service_host(addr: Optional[str]) -> bool:
+    """Return True when *addr* can be advertised to gateways/other services."""
+    return bool(addr) and addr != "0.0.0.0" and not _is_loopback(addr)
+
+
+def _is_resolvable(host: str) -> bool:
+    """Return True if the current runtime can resolve *host*."""
+    try:
+        socket.getaddrinfo(host, None)
+        return True
+    except socket.gaierror:
+        return False
+
+
+def _first_non_loopback_ip(host: str) -> Optional[str]:
+    """Resolve *host* to a non-loopback IP, preferring IPv4 for local dev."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return None
+
+    ipv6_candidate = None
+    for family, _, _, _, sockaddr in infos:
+        address = sockaddr[0]
+        if not _usable_service_host(address):
+            continue
+
+        if family == socket.AF_INET:
+            return address
+
+        if family == socket.AF_INET6 and ipv6_candidate is None:
+            ipv6_candidate = address
+
+    return ipv6_candidate
+
+
+def _desktop_gateway_host() -> Optional[str]:
+    """
+    Prefer Docker Desktop's stable host-gateway IP for native macOS dev services.
+
+    This keeps local services reachable from Kind/APISIX without requiring every
+    service repo to export SERVICE_HOST manually. APISIX 3.16 rejects Consul
+    discovery nodes that are still domain-shaped hosts, so we normalize the
+    Docker Desktop alias to a concrete IP before advertising it. Kubernetes
+    workloads must not use this fallback, so it is only considered outside
+    cluster runtimes.
+    """
+    if sys.platform != "darwin" or os.getenv("KUBERNETES_SERVICE_HOST"):
+        return None
+
+    return _first_non_loopback_ip("host.docker.internal")
+
+
+def _normalize_service_host(host: Optional[str]) -> Optional[str]:
+    """
+    Normalize a host before advertising it to Consul.
+
+    For native macOS local development we prefer concrete IPs over DNS names so
+    APISIX Consul discovery can forward to them without tripping over domain
+    host restrictions.
+    """
+    if not _usable_service_host(host):
+        return host
+
+    if sys.platform != "darwin" or os.getenv("KUBERNETES_SERVICE_HOST"):
+        return host
+
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        return _first_non_loopback_ip(host) or host
+
+
+def _resolve_service_host(service_host: Optional[str]) -> str:
+    """Resolve the address that Consul should advertise for the service."""
+    if _usable_service_host(service_host):
+        return _normalize_service_host(service_host)
+
+    env_host = os.getenv("SERVICE_HOST")
+    if _usable_service_host(env_host):
+        return _normalize_service_host(env_host)
+
+    desktop_gateway = _desktop_gateway_host()
+    if desktop_gateway:
+        return desktop_gateway
+
+    hostname = os.getenv("HOSTNAME", socket.gethostname())
+    if _usable_service_host(hostname):
+        return _normalize_service_host(hostname)
+
+    return hostname
 
 
 class ConsulRegistry:
@@ -67,26 +163,7 @@ class ConsulRegistry:
 
         # Only set these if we're registering (have service_name and service_port)
         if service_name and service_port is not None:
-            # Resolve the address that Consul advertises to APISIX / other consumers.
-            # Loopback (127.x.x.x / ::1) and unspecified (0.0.0.0) are never
-            # routable from a gateway context, so we skip them and fall through
-            # to hostname-based detection.
-            import os
-
-            def _usable(addr: str | None) -> bool:
-                return bool(addr) and addr != "0.0.0.0" and not _is_loopback(addr)
-
-            if _usable(service_host):
-                self.service_host = service_host
-            else:
-                # Priority: SERVICE_HOST (K8s Service DNS) > HOSTNAME (Docker container name) > hostname
-                env_host = os.getenv("SERVICE_HOST")
-                if _usable(env_host):
-                    self.service_host = env_host
-                else:
-                    self.service_host = os.getenv(
-                        "HOSTNAME", socket.gethostname()
-                    )
+            self.service_host = _resolve_service_host(service_host)
 
             # Final guard: warn if the resolved address is still loopback
             if _is_loopback(self.service_host):
@@ -100,8 +177,6 @@ class ConsulRegistry:
 
             self.service_id = f"{service_name}-{self.service_host}-{service_port}"
         else:
-            import os
-
             self.service_host = service_host or os.getenv(
                 "HOSTNAME", socket.gethostname()
             )
@@ -708,20 +783,8 @@ class AsyncConsulRegistry(AsyncBaseClient):
         self._health_check_task = None
 
         # Resolve service host (same logic as sync ConsulRegistry)
-        import os
-
-        def _usable(addr: str | None) -> bool:
-            return bool(addr) and addr != "0.0.0.0" and not _is_loopback(addr)
-
         if service_name and service_port is not None:
-            if _usable(service_host):
-                self.service_host = service_host
-            else:
-                env_host = os.getenv("SERVICE_HOST")
-                if _usable(env_host):
-                    self.service_host = env_host
-                else:
-                    self.service_host = os.getenv("HOSTNAME", socket.gethostname())
+            self.service_host = _resolve_service_host(service_host)
 
             if _is_loopback(self.service_host):
                 logger.warning(
@@ -1056,10 +1119,8 @@ async def consul_lifespan(
         ))
     """
     # Startup
-    # Use SERVICE_HOST env var if available, otherwise use hostname
-    import os
-
-    service_host = os.getenv("SERVICE_HOST", socket.gethostname())
+    # Prefer SERVICE_HOST, then macOS Docker Desktop host alias, then hostname.
+    service_host = _resolve_service_host(None)
 
     registry = ConsulRegistry(
         service_name=service_name,

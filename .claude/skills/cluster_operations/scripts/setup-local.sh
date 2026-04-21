@@ -190,6 +190,29 @@ values_for() {
 }
 VALUES_DIR="$STAGING_VALUES_DIR"  # back-compat alias for any inline -f references
 
+TEMP_RENDERED_FILES=()
+cleanup_rendered_files() {
+    if [ "${#TEMP_RENDERED_FILES[@]}" -gt 0 ]; then
+        rm -f "${TEMP_RENDERED_FILES[@]}"
+    fi
+}
+trap cleanup_rendered_files EXIT
+
+render_local_template() {
+    local src="$1"
+
+    if [ -z "$src" ] || [ ! -f "$src" ] || [ "$NAMESPACE" = "isa-cloud-local" ]; then
+        echo "$src"
+        return
+    fi
+
+    local rendered
+    rendered="$(mktemp)"
+    sed "s/isa-cloud-local/${NAMESPACE}/g" "$src" > "$rendered"
+    TEMP_RENDERED_FILES+=("$rendered")
+    echo "$rendered"
+}
+
 # PostgreSQL
 echo "  Installing PostgreSQL..."
 helm upgrade --install postgresql bitnami/postgresql \
@@ -259,11 +282,12 @@ helm upgrade --install neo4j neo4j/neo4j \
     --wait --timeout 5m && echo -e "    ${GREEN}✓ Neo4j${NC}" || echo -e "    ${YELLOW}⚠ Neo4j${NC}"
 
 # NATS
+# NodePort + nodePort:30422 is set via service.merge in values/nats.yaml
+# (the 2.12.x chart dropped the flat service.type key).
 echo "  Installing NATS..."
 helm upgrade --install nats nats/nats \
     -n "$NAMESPACE" \
     -f "$(values_for nats)" \
-    --set service.type=NodePort \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ NATS${NC}" || echo -e "    ${YELLOW}⚠ NATS${NC}"
 
 # Consul
@@ -277,12 +301,28 @@ helm upgrade --install consul hashicorp/consul \
 
 # APISIX
 echo "  Installing APISIX..."
+APISIX_VALUES_FILE="$(render_local_template "$(values_for apisix)")"
+APISIX_HELM_ARGS=()
+if [ -n "$APISIX_VALUES_FILE" ]; then
+    APISIX_HELM_ARGS=(-f "$APISIX_VALUES_FILE")
+fi
 helm upgrade --install apisix apisix/apisix \
     -n "$NAMESPACE" \
-    --set gateway.type=NodePort \
-    --set gateway.http.nodePort=30080 \
-    --set admin.type=NodePort \
+    "${APISIX_HELM_ARGS[@]}" \
     --wait --timeout 5m 2>/dev/null && echo -e "    ${GREEN}✓ APISIX${NC}" || echo -e "    ${YELLOW}⚠ APISIX${NC}"
+
+echo "  Applying Consul-APISIX sync resources..."
+CONSUL_APISIX_SYNC_MANIFEST="$(render_local_template "$ISA_CLOUD_DIR/deployments/kubernetes/local/manifests/consul-apisix-sync.yaml")"
+if [ -f "$CONSUL_APISIX_SYNC_MANIFEST" ]; then
+    kubectl apply -f "$CONSUL_APISIX_SYNC_MANIFEST" 2>/dev/null \
+        && echo -e "    ${GREEN}✓ Consul-APISIX sync${NC}" \
+        || echo -e "    ${YELLOW}⚠ Consul-APISIX sync${NC}"
+    kubectl rollout status deployment/consul-apisix-watch -n "$NAMESPACE" --timeout=120s 2>/dev/null \
+        && echo -e "    ${GREEN}✓ Consul-APISIX watch${NC}" \
+        || echo -e "    ${YELLOW}⚠ Consul-APISIX watch (deployment not ready in 120s)${NC}"
+else
+    echo -e "    ${YELLOW}⚠ Consul-APISIX sync manifest not found${NC}"
+fi
 
 # =============================================================================
 # Step 5: Verify Deployment
@@ -312,4 +352,5 @@ echo ""
 echo "Next steps:"
 echo "  1. Run MCP service: cd isA_MCP && ./deployment/local-dev.sh"
 echo "  2. Run Model service: cd isA_Model && ./deployment/local-dev.sh"
+echo "  3. Native macOS services can export SERVICE_HOST=host.docker.internal; Consul registration will normalize it to the Docker Desktop gateway IP for APISIX"
 echo "=============================================="

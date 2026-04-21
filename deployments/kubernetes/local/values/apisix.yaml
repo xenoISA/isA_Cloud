@@ -5,7 +5,7 @@
 # Note: Built-in etcd is for dev/testing only. For production, use external etcd.
 # Source: https://github.com/apache/apisix-helm-chart
 
-# Service configuration (gateway)
+# Gateway service configuration
 service:
   type: NodePort
   http:
@@ -14,26 +14,34 @@ service:
     containerPort: 9080
     nodePort: 30080
   tls:
-    enabled: true
     servicePort: 443
-    containerPort: 9443
     nodePort: 30943  # Matches kind-config mapping to localhost:9443
   stream:
     enabled: false
 
-# APISIX configuration
-apisix:
-  image:
-    repository: apache/apisix
-    tag: 3.8.0-debian
+# APISIX image/runtime settings
+image:
+  repository: apache/apisix
+  tag: 3.8.0-debian
 
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+apisix:
+  ssl:
+    enabled: true
+    containerPort: 9443
+
+  dns:
+    resolvers:
+      - 10.96.0.10
+    validity: 30
+    timeout: 5
 
   # Admin API configuration
   admin:
@@ -48,17 +56,15 @@ apisix:
       ipList:
         - 0.0.0.0/0
 
-  nginx:
-    configurationSnippet:
-      http: |
-        resolver 10.96.0.10 valid=30s;
-
   discovery:
     enabled: true
     registry:
       consul:
         servers:
-          - "http://consul-ui.isa-cloud-local.svc.cluster.local"
+          - "http://consul-server.isa-cloud-local.svc.cluster.local:8500"
+        default_service:
+          host: 127.0.0.1
+          port: 20999
         fetch_interval: 3
         timeout:
           connect: 2000
@@ -67,22 +73,9 @@ apisix:
         keepalive: true
         default_weight: 1
 
-dns:
-  resolvers:
-    - 10.96.0.10
-  validity: 30
-  timeout: 5
-
-# etcd - use external etcd (deployed separately with official image)
+# Local dev uses the chart-managed etcd statefulset (apisix-etcd)
 etcd:
-  enabled: false
-
-# External etcd configuration
-externalEtcd:
-  host:
-    - http://etcd.isa-cloud-local.svc.cluster.local:2379
-  user: ""
-  password: ""
+  enabled: true
 
 # Dashboard - enabled for local dev
 dashboard:
@@ -97,8 +90,3 @@ ingress-controller:
 
 # Single replica for local
 replicaCount: 1
-
-# Pod labels
-podLabels:
-  tier: infrastructure
-  environment: local

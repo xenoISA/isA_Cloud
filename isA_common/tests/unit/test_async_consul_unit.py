@@ -47,6 +47,57 @@ class TestAsyncConsulContextManager:
                 assert client.is_connected
 
 
+class TestAsyncConsulRegistryInit:
+    """AsyncConsulRegistry host resolution."""
+
+    def test_init_prefers_desktop_gateway_ip_for_native_macos_dev(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import AsyncConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch(
+                     "isa_common.consul_client.socket.getaddrinfo",
+                     return_value=[
+                         (2, None, None, None, ("192.168.65.254", 0)),
+                     ],
+                 ), \
+                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
+                 patch.dict("os.environ", {}, clear=True):
+                registry = AsyncConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                    lazy_connect=True,
+                )
+
+        assert registry.service_host == "192.168.65.254"
+        assert registry.service_id == "test-service-192.168.65.254-8080"
+
+    def test_init_normalizes_service_host_alias_to_ip_for_native_macos_dev(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import AsyncConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch(
+                     "isa_common.consul_client.socket.getaddrinfo",
+                     return_value=[
+                         (2, None, None, None, ("192.168.65.254", 0)),
+                     ],
+                 ), \
+                 patch.dict(
+                     "os.environ",
+                     {"SERVICE_HOST": "host.docker.internal"},
+                     clear=True,
+                 ):
+                registry = AsyncConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                    lazy_connect=True,
+                )
+
+        assert registry.service_host == "192.168.65.254"
+        assert registry.service_id == "test-service-192.168.65.254-8080"
+
+
 # ============================================================================
 # L2 — Connect / disconnect lifecycle
 # ============================================================================

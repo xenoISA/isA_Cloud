@@ -57,6 +57,73 @@ class TestConsulRegistryInit:
             assert registry.service_name is None
             assert registry.service_id is None
 
+    def test_init_prefers_desktop_gateway_ip_for_native_macos_dev(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import ConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch(
+                     "isa_common.consul_client.socket.getaddrinfo",
+                     return_value=[
+                         (2, None, None, None, ("192.168.65.254", 0)),
+                     ],
+                 ), \
+                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
+                 patch.dict("os.environ", {}, clear=True):
+                registry = ConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                )
+
+        assert registry.service_host == "192.168.65.254"
+        assert registry.service_id == "test-service-192.168.65.254-8080"
+
+    def test_init_normalizes_service_host_alias_to_ip_for_native_macos_dev(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import ConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch(
+                     "isa_common.consul_client.socket.getaddrinfo",
+                     return_value=[
+                         (2, None, None, None, ("192.168.65.254", 0)),
+                     ],
+                 ), \
+                 patch.dict(
+                     "os.environ",
+                     {"SERVICE_HOST": "host.docker.internal"},
+                     clear=True,
+                 ):
+                registry = ConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                )
+
+        assert registry.service_host == "192.168.65.254"
+        assert registry.service_id == "test-service-192.168.65.254-8080"
+
+    def test_init_does_not_use_host_docker_internal_inside_kubernetes(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import ConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch("isa_common.consul_client.socket.getaddrinfo", return_value=[object()]), \
+                 patch.dict(
+                     "os.environ",
+                     {
+                         "KUBERNETES_SERVICE_HOST": "10.96.0.1",
+                         "HOSTNAME": "apisix-pod-0",
+                     },
+                     clear=True,
+                 ):
+                registry = ConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                )
+
+        assert registry.service_host == "apisix-pod-0"
+        assert registry.service_id == "test-service-apisix-pod-0-8080"
+
 
 # ============================================================================
 # L2 — Registration / deregistration
