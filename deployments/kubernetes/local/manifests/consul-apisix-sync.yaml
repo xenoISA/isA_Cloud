@@ -299,6 +299,12 @@ data:
         local uri_path=$2
         local upstream_host=$3
         local upstream_port=$4
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000}"
+        local uris_json="[\"${uri_path}\", \"${uri_path}/*\"]"
+
+        if [ "$uri_path" = "/" ]; then
+            uris_json='["/", "/*"]'
+        fi
 
         print_info "Syncing frontend zone: $route_name → ${upstream_host}:${upstream_port}${uri_path}"
 
@@ -308,14 +314,15 @@ data:
             -H "Content-Type: application/json" \
             -d "{
                 \"name\": \"${route_name}\",
-                \"uris\": [\"${uri_path}\", \"${uri_path}/*\"],
+                \"uris\": ${uris_json},
                 \"priority\": 5,
                 \"status\": 1,
                 \"plugins\": {
                     \"cors\": {
-                        \"allow_origins\": \"**\",
+                        \"allow_origins\": \"${cors_origins}\",
                         \"allow_methods\": \"GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD\",
-                        \"allow_headers\": \"*\",
+                        \"allow_headers\": \"DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID\",
+                        \"expose_headers\": \"X-Request-ID\",
                         \"max_age\": 86400,
                         \"allow_credential\": true
                     },
@@ -751,14 +758,14 @@ data:
         done
 
         # Sync Mate service route (static upstream, not Consul-discovered)
-        local MATE_HOST="${MATE_HOST:-isa-mate.isa-cloud-local.svc.cluster.local}"
+        local MATE_HOST="${MATE_HOST:-host.docker.internal}"
         create_frontend_zone_route "mate_service_route" "/mate" "$MATE_HOST" "18789"
         processed_services+=("mate_service_route")
 
         # Sync frontend zone routes (static upstreams, not Consul-discovered)
-        local FRONTEND_HOST="${FRONTEND_HOST:-isa-app.isa-cloud-local.svc.cluster.local}"
-        local CONSOLE_HOST="${CONSOLE_HOST:-isa-console.isa-cloud-local.svc.cluster.local}"
-        local DOCS_HOST="${DOCS_HOST:-isa-docs.isa-cloud-local.svc.cluster.local}"
+        local FRONTEND_HOST="${FRONTEND_HOST:-host.docker.internal}"
+        local CONSOLE_HOST="${CONSOLE_HOST:-host.docker.internal}"
+        local DOCS_HOST="${DOCS_HOST:-host.docker.internal}"
 
         create_frontend_zone_route "frontend_app_route" "/" "$FRONTEND_HOST" "4100"
         processed_services+=("frontend_app_route")
@@ -872,7 +879,7 @@ spec:
     spec:
       containers:
         - name: watch
-          image: hashicorp/consul:1.17
+          image: hashicorp/consul:1.22.6
           command:
             - /bin/sh
             - -c
@@ -938,7 +945,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: sync
-              image: alpine:latest
+              image: hashicorp/consul:1.22.6
               command:
                 - /bin/sh
                 - -c

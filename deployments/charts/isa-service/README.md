@@ -51,6 +51,8 @@ deployment/
 └── local-dev.sh          # Local development script
 ```
 
+For native macOS local development, set `SERVICE_HOST=host.docker.internal` in `deployment/environments/dev.env`. `ConsulRegistry` will normalize that alias to the Docker Desktop gateway IP so Kind/APISIX can reach it reliably.
+
 ## Services
 
 | Service | Port | Values File |

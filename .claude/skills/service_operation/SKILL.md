@@ -28,7 +28,7 @@ Operations for managing API services in Consul and APISIX gateway.
 
 ### Service Host for Local Dev
 
-Services running on Mac need to register with `SERVICE_HOST=192.168.65.254` (Docker gateway IP) to be reachable from Kind cluster.
+Services running natively on macOS should register with `SERVICE_HOST=host.docker.internal`. `ConsulRegistry` normalizes that Docker Desktop alias to the host-gateway IP (typically `192.168.65.254`) so Kind/APISIX can reach it reliably.
 
 ## Operation 1: Check Service Status
 
@@ -325,7 +325,8 @@ Automatically find and remove stale Consul registrations and orphaned APISIX rou
 **Fix**:
 1. Check service logs for Consul registration errors
 2. Verify `CONSUL_ENABLED=true` in service's dev.env
-3. Verify `SERVICE_HOST=192.168.65.254` for local dev
+3. Verify `SERVICE_HOST=host.docker.internal` for local dev
+   `ConsulRegistry` should advertise the resolved gateway IP, not a hostname, in Consul.
 4. Check Consul is accessible: `curl http://localhost:8500/v1/status/leader`
 
 ### Service in Consul but No APISIX Route
@@ -342,8 +343,8 @@ Automatically find and remove stale Consul registrations and orphaned APISIX rou
 **Cause**: APISIX can't reach the service (wrong address)
 
 **Fix**:
-1. Check service address in Consul - should be `192.168.65.254`, NOT `localhost`
-2. Fix `SERVICE_HOST=192.168.65.254` in service's dev.env
+1. Check service address in Consul - should be a routable IP (often `192.168.65.254`), NOT `localhost`
+2. Fix `SERVICE_HOST=host.docker.internal` in service's dev.env
 3. Restart service and re-sync APISIX
 
 ### APISIX Returns 404 Not Found
@@ -460,7 +461,7 @@ Before deploying a service, verify:
 For a service to work via APISIX:
 
 - [ ] `CONSUL_ENABLED=true` in dev.env
-- [ ] `SERVICE_HOST=192.168.65.254` in dev.env (for local dev)
+- [ ] `SERVICE_HOST=host.docker.internal` in dev.env (for local dev; registration should normalize to a routable IP)
 - [ ] `base_path` or `api_path` in routes_registry.py metadata
 - [ ] Service import uses `from isa_common.consul_client import ConsulRegistry`
 - [ ] Service started and running
