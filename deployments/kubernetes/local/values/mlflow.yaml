@@ -1,0 +1,70 @@
+# MLflow Tracking Server — local kind cluster (isa-cloud-local)
+# Reuses the in-cluster PostgreSQL ('mlflow' DB) and MinIO ('mlflow-artifacts' bucket).
+# Chart: community-charts/mlflow (1.8.x — Bitnami chart deprecated in 2026)
+# Tracking issue: xenoISA/isA_Model#764
+#
+# Secrets required (created out-of-band, never inline):
+#   - mlflow-db-credentials  (keys: username, password)  — wraps postgresql/postgres-password
+#   - minio                  (keys: rootUser, rootPassword) — already exists
+#
+# Re-deploy:  helm upgrade --install mlflow community-charts/mlflow -n isa-cloud-local -f mlflow.yaml
+
+replicaCount: 1  # local dev — single replica
+
+# image: chart default is burakince/mlflow:<appVersion> — used as-is (ghcr.io/mlflow not published)
+
+service:
+  type: ClusterIP
+  port: 5000
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"  # 4 gunicorn workers + py3.13 + sqlalchemy on first start hit 1Gi cap
+
+# Backend store — reuse in-cluster PostgreSQL, 'mlflow' database
+backendStore:
+  databaseMigration: true   # let MLflow run alembic on first start
+  databaseConnectionCheck: true
+  postgres:
+    enabled: true
+    host: "postgresql.isa-cloud-local.svc.cluster.local"
+    port: 5432
+    database: "mlflow"
+    driver: "psycopg2"
+  existingDatabaseSecret:
+    name: "mlflow-db-credentials"
+    usernameKey: "username"
+    passwordKey: "password"
+
+# Artifact store — reuse in-cluster MinIO, 'mlflow-artifacts' bucket
+artifactRoot:
+  proxiedArtifactStorage: true
+  s3:
+    enabled: true
+    bucket: "mlflow-artifacts"
+    existingSecret:
+      name: "minio"
+      keyOfAccessKeyId: "rootUser"
+      keyOfSecretAccessKey: "rootPassword"
+
+# Point boto3 at the in-cluster MinIO endpoint
+extraEnvVars:
+  MLFLOW_S3_ENDPOINT_URL: "http://minio.isa-cloud-local.svc.cluster.local:9000"
+  AWS_DEFAULT_REGION: "us-east-1"  # MinIO ignores but boto3 requires it
+  MLFLOW_S3_IGNORE_TLS: "true"
+  GUNICORN_CMD_ARGS: "--workers=2 --worker-class=sync"  # 2 workers, fits in 2Gi limit
+  # MLflow 3.x security middleware: allow APISIX gateway + in-cluster + localhost.
+  # Without this, all non-localhost API requests are rejected as "DNS rebinding".
+  MLFLOW_SERVER_ALLOWED_HOSTS: "*"  # local dev — APISIX layers JWT for prod
+  MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: "*"
+
+# No ingress — APISIX route handles external exposure (see manifests/mlflow-apisix-route.yaml)
+ingress:
+  enabled: false
+
+serviceAccount:
+  create: true
