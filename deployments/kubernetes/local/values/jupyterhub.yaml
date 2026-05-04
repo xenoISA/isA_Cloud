@@ -35,6 +35,18 @@ hub:
           name: postgresql
           key: postgres-password
 
+  # Allow Prometheus to scrape /hub/metrics without a bearer token (local dev only).
+  # Production wiring uses a service-token via `services:` block + scrape_configs
+  # bearer_token_file. Tracks #794.
+  authenticatePrometheus: false
+
+  # Annotation-based scrape — picked up by the existing kubernetes-pods job in
+  # the cluster's prometheus-server config (no Prometheus Operator needed).
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8081"
+    prometheus.io/path: "/hub/metrics"
+
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 500m, memory: 512Mi }

@@ -251,3 +251,104 @@ data:
       "uid": "isa-mcp-service",
       "version": 1
     }
+  isa-mlflow-jupyterhub.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "type": "row",
+          "title": "MLflow gateway (APISIX prometheus plugin)",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "collapsed": false
+        },
+        {
+          "type": "stat",
+          "title": "MLflow requests/sec",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+          "id": 101,
+          "targets": [{"refId": "A", "expr": "sum(rate(apisix_http_requests_total[1m]))"}]
+        },
+        {
+          "type": "stat",
+          "title": "MLflow total requests (lifetime)",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+          "id": 102,
+          "targets": [{"refId": "A", "expr": "sum(apisix_http_requests_total)"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Gateway latency p50 / p95 / p99",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "id": 103,
+          "targets": [
+            {"refId": "P50", "expr": "histogram_quantile(0.50, sum(rate(apisix_http_latency_bucket[1m])) by (le))", "legendFormat": "p50"},
+            {"refId": "P95", "expr": "histogram_quantile(0.95, sum(rate(apisix_http_latency_bucket[1m])) by (le))", "legendFormat": "p95"},
+            {"refId": "P99", "expr": "histogram_quantile(0.99, sum(rate(apisix_http_latency_bucket[1m])) by (le))", "legendFormat": "p99"}
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Gateway HTTP statuses",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+          "id": 104,
+          "targets": [{"refId": "A", "expr": "sum by (code) (rate(apisix_http_status[1m]))", "legendFormat": "{{code}}"}]
+        },
+        {
+          "type": "row",
+          "title": "JupyterHub (Hub /hub/metrics)",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 13},
+          "id": 200,
+          "collapsed": false
+        },
+        {
+          "type": "stat",
+          "title": "Active users",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 14},
+          "id": 201,
+          "targets": [{"refId": "A", "expr": "jupyterhub_running_servers"}]
+        },
+        {
+          "type": "stat",
+          "title": "Total users registered",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 14},
+          "id": 202,
+          "targets": [{"refId": "A", "expr": "jupyterhub_total_users"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Hub request duration p95 by handler",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+          "id": 203,
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (handler, le) (rate(jupyterhub_request_duration_seconds_bucket[1m])))", "legendFormat": "{{handler}}"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Hub request rate by status",
+          "datasource": {"type": "prometheus", "uid": ""},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+          "id": 204,
+          "targets": [{"refId": "A", "expr": "sum by (code) (rate(jupyterhub_request_duration_seconds_count[1m]))", "legendFormat": "{{code}}"}]
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["isa", "mlflow", "jupyterhub", "phase8"],
+      "templating": {"list": []},
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "title": "isA MLflow + JupyterHub",
+      "uid": "isa-mlflow-jhub",
+      "version": 1
+    }
