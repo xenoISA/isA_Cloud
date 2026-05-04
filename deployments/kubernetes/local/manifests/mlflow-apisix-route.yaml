@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-apisix-route-script
+  namespace: isa-cloud-local
+  labels:
+    app: mlflow-apisix-route
+    tier: infrastructure
+data:
+  register_routes.sh: |
+    #!/bin/bash
+    # Register MLflow APISIX routes — /mlflow and /mlflow/*
+    # Tracking: xenoISA/isA_Model#764
+    set -e
+
+    APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-local.svc.cluster.local:9180}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    CORS_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4100,http://localhost:4200,http://localhost:4300}"
+
+    GREEN='\033[0;32m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+    ok()   { echo -e "${GREEN}OK  $1${NC}"; }
+    err()  { echo -e "${RED}ERR $1${NC}"; }
+    info() { echo -e "${BLUE}INFO $1${NC}"; }
+
+    info "Registering mlflow_route (/mlflow[/*] -> mlflow-tracking:5000)..."
+
+    PLUGINS=$(jq -n --arg cors "$CORS_ORIGINS" '{
+      "cors": {
+        "allow_origins": $cors,
+        "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+        "expose_headers": "X-Request-ID",
+        "max_age": 86400,
+        "allow_credential": true
+      },
+      "limit-count": {
+        "count": 100,
+        "time_window": 60,
+        "rejected_code": 429,
+        "rejected_msg": "Rate limit exceeded",
+        "policy": "local"
+      },
+      "request-id": { "algorithm": "uuid", "include_in_response": true },
+      "proxy-rewrite": { "regex_uri": ["^/mlflow/?(.*)$", "/$1"] },
+      "prometheus": {}
+    }')
+
+    UPSTREAM=$(jq -n '{
+      "type": "roundrobin",
+      "scheme": "http",
+      "pass_host": "pass",
+      "retries": 2,
+      "retry_timeout": 6,
+      "timeout": { "connect": 6, "send": 30, "read": 60 },
+      "keepalive_pool": { "size": 320, "idle_timeout": 60, "requests": 1000 },
+      "nodes": {
+        "mlflow.isa-cloud-local.svc.cluster.local:5000": 1
+      }
+    }')
+
+    RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/routes/mlflow_route" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --argjson plugins "$PLUGINS" \
+          --argjson upstream "$UPSTREAM" \
+          '{
+            "name": "mlflow_route",
+            "uris": ["/mlflow", "/mlflow/*"],
+            "priority": 10,
+            "status": 1,
+            "plugins": $plugins,
+            "upstream": $upstream
+          }')")
+
+    HTTP=$(echo "$RESP" | tail -n1)
+    if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+      ok "mlflow_route registered (HTTP $HTTP)"
+    else
+      err "Failed to register mlflow_route (HTTP $HTTP)"
+      echo "$RESP" | head -n -1
+      exit 1
+    fi
+
+    info "MLflow APISIX route registered successfully."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mlflow-apisix-route-register
+  namespace: isa-cloud-local
+  labels:
+    app: mlflow-apisix-route
+    tier: infrastructure
+  annotations:
+    # Re-run to reconcile:
+    #   kubectl delete job mlflow-apisix-route-register -n isa-cloud-local
+    #   kubectl apply -f mlflow-apisix-route.yaml
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: mlflow-apisix-route
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache bash curl jq > /dev/null 2>&1
+              bash /scripts/register_routes.sh
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          env:
+            - name: APISIX_ADMIN_URL
+              value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
+            - name: APISIX_ADMIN_KEY
+              value: "edd1c9f034335f136f87ad84b625c8f1"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: mlflow-apisix-route-script
+            defaultMode: 0755
