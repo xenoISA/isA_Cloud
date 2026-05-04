@@ -67,11 +67,66 @@ podDisruptionBudget:
   # minAvailable: 1
   maxUnavailable: 1
 
+# =============================================
+# Lifecycle / Drain (xenoISA/isA_MCP#669)
+# =============================================
+# Give the pod up to 30s after SIGTERM to drain in-flight requests.
+# Each service's app-level drain budget should fit inside this window;
+# isA_MCP for example uses 15s.
+terminationGracePeriodSeconds: 30
+
+# preStop runs before SIGTERM; the 5s sleep gives K8s Service endpoint
+# slices time to propagate the pod removal so new requests stop arriving
+# before the in-app drain begins. Without it there's a small (~5-10s)
+# window where new connections still hit a draining pod and get refused.
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 5"]
+
+# =============================================
 # Health checks
+# =============================================
+# readiness — drain-aware. ``health.path`` returns 503 once the app
+# enters drain mode so K8s removes the pod from Service endpoints.
 health:
   path: /health
   initialDelaySeconds: 5
   periodSeconds: 10
+
+# liveness — process-alive only. Must NOT share a path with readiness:
+# during drain, readiness 503 is desired (so traffic stops) but liveness
+# 503 would SIGKILL the pod and drop in-flight requests. Default to
+# ``/live`` which the application should implement as a no-op 200 that
+# bypasses any drain flag. Override to .Values.health.path for services
+# that haven't split the endpoints yet (legacy behaviour).
+liveness:
+  path: /live
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+# startupProbe — handles slow cold starts on degraded nodes without
+# letting liveness fire prematurely. failureThreshold * periodSeconds is
+# the total budget before liveness kicks in; default 30 * 5s = 150s
+# accommodates the slowest observed isA_MCP cold start (~12s) with
+# generous headroom.
+startupProbe:
+  enabled: true
+  path: /health
+  failureThreshold: 30
+  periodSeconds: 5
+
+# =============================================
+# Rollout strategy
+# =============================================
+# Explicit RollingUpdate with maxUnavailable=0 prevents deadlock when a
+# rollout coincides with a node drain (PDB.maxUnavailable=1 would block
+# the rollout). maxSurge=1 keeps capacity steady during the rollout.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
 
 # Environment variables (from ConfigMap)
 configMapRef: ""
