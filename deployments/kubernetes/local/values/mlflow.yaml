@@ -47,9 +47,13 @@ artifactRoot:
     enabled: true
     bucket: "mlflow-artifacts"
     existingSecret:
-      name: "minio"
-      keyOfAccessKeyId: "rootUser"
-      keyOfSecretAccessKey: "rootPassword"
+      # Scoped IAM identity created via `mc admin user add mlflow-svc` +
+      # mlflow-svc policy (read/write only on `mlflow-artifacts/*`).  See
+      # manifests/mlflow-minio-scoped-iam.sh.  Replaces the old `minio` root
+      # creds reference. Tracks #787.
+      name: "mlflow-s3-credentials"
+      keyOfAccessKeyId: "accessKeyId"
+      keyOfSecretAccessKey: "secretAccessKey"
 
 # Point boto3 at the in-cluster MinIO endpoint
 extraEnvVars:
