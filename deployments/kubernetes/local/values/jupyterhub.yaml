@@ -54,23 +54,19 @@ proxy:
       enabled: false
 
 singleuser:
+  # Custom image with isa_model[full-local] pre-installed (#790, follows on #786).
+  # Built locally via isA_Model `deployment/docker/build-jupyterhub.sh` and
+  # `kind load`-ed into all nodes — no registry needed for local dev.
   image:
-    name: quay.io/jupyter/scipy-notebook
-    tag: "python-3.11"
-    pullPolicy: IfNotPresent
+    name: isa-model-jupyter
+    tag: "local"
+    pullPolicy: IfNotPresent  # Never — image is loaded into containerd
 
   defaultUrl: "/lab"
-  startTimeout: 600  # first spawn pulls the image (~2GB)
+  startTimeout: 300  # no image pull on spawn, just unpack from containerd cache
 
-  # Pre-install isa_model SDK at spawn time (cheaper than maintaining a custom
-  # image for local dev). Production uses the prebuilt singleuser image.
-  lifecycleHooks:
-    postStart:
-      exec:
-        command:
-          - "sh"
-          - "-c"
-          - "pip install --quiet --user isa_model || true"
+  # isa_model is pre-installed in the custom image — no postStart pip install
+  # needed. Spawn time dropped from ~3 min (image pull) to ~16 s.
 
   extraEnv:
     ISA_API_URL: "http://apisix-gateway.isa-cloud-local.svc.cluster.local/api/v1/models"
