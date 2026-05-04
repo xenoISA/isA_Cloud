@@ -42,7 +42,8 @@ data:
       },
       "request-id": { "algorithm": "uuid", "include_in_response": true },
       "proxy-rewrite": { "regex_uri": ["^/mlflow/?(.*)$", "/$1"] },
-      "prometheus": {}
+      "prometheus": {},
+      "key-auth": {}
     }')
 
     UPSTREAM=$(jq -n '{
