@@ -10,6 +10,10 @@ spec:
   selector:
     matchLabels:
       app: {{ .Values.name }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
     metadata:
       labels:
@@ -25,6 +29,11 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      # Graceful shutdown: must accommodate the app's drain window
+      # (xenoISA/isA_MCP#669). Defaults to 30s if not set, matching K8s default.
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       # Pod-level security context (applies to all containers)
       {{- if .Values.podSecurityContext }}
       securityContext:
@@ -78,12 +87,31 @@ spec:
         volumeMounts:
         {{- toYaml .Values.volumeMounts | nindent 8 }}
         {{- end }}
+        # Liveness on a separate path that bypasses drain-503 logic
+        # (xenoISA/isA_MCP#669). Falls back to .Values.health.path for
+        # services that haven't split the endpoints yet.
         livenessProbe:
           httpGet:
-            path: {{ .Values.health.path }}
+            path: {{ .Values.liveness.path | default .Values.health.path }}
             port: {{ .Values.port }}
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          initialDelaySeconds: {{ .Values.liveness.initialDelaySeconds | default 15 }}
+          periodSeconds: {{ .Values.liveness.periodSeconds | default 20 }}
+        {{- if and .Values.startupProbe .Values.startupProbe.enabled }}
+        # startupProbe holds liveness off until the app is fully booted.
+        # Total budget = failureThreshold * periodSeconds.
+        startupProbe:
+          httpGet:
+            path: {{ .Values.startupProbe.path | default .Values.health.path }}
+            port: {{ .Values.port }}
+          failureThreshold: {{ .Values.startupProbe.failureThreshold | default 30 }}
+          periodSeconds: {{ .Values.startupProbe.periodSeconds | default 5 }}
+        {{- end }}
+        {{- with .Values.lifecycle }}
+        # preStop runs before SIGTERM so K8s endpoint slices propagate
+        # the pod removal before the in-app drain begins.
+        lifecycle:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       {{- with .Values.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
