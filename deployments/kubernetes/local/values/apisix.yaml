@@ -24,6 +24,13 @@ image:
   repository: apache/apisix
   tag: 3.8.0-debian
 
+# Pod annotations — picked up by the kubernetes-pods scrape job in
+# prometheus-server. Tracks #793 (gateway-side metrics for /mlflow + /jupyter).
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9091"
+  prometheus.io/path: "/apisix/prometheus/metrics"
+
 resources:
   requests:
     cpu: 100m
@@ -42,6 +49,16 @@ apisix:
       - 10.96.0.10
     validity: 30
     timeout: 5
+
+  # Prometheus metrics — exposes /apisix/prometheus/metrics on :9091.
+  # Per-route metrics (request count, latency p50/p95/p99, status codes) become
+  # available for the existing `prometheus` plugin already attached to
+  # mlflow_route + jupyterhub_route. Tracks #793.
+  prometheus:
+    enabled: true
+    path: /apisix/prometheus/metrics
+    metricPrefix: apisix_
+    containerPort: 9091
 
   # Admin API configuration
   admin:
