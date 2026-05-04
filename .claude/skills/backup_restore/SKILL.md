@@ -28,6 +28,37 @@ Complete backup and restore operations for ALL data stores in isA_Cloud.
 7. **NATS** - Message streaming (JetStream)
 8. **APISIX** - API Gateway (routes, upstreams, consumers)
 
+### Phase 8 resources (auto-covered)
+
+`backup-all.sh` iterates every non-template Postgres database and mirrors every
+MinIO bucket at the alias root. The new Phase 8 resources are therefore
+included automatically — no script change required:
+
+| Database               | Owner role | Tracked by |
+|------------------------|------------|------------|
+| `mlflow`               | `mlflow`   | xenoISA/isA_Model#785 |
+| `jupyterhub`           | `postgres` | xenoISA/isA_Model#771 |
+
+| MinIO bucket           | IAM identity | Tracked by |
+|------------------------|--------------|------------|
+| `mlflow-artifacts`     | `mlflow-svc` (scoped policy on bucket) | xenoISA/isA_Model#787 |
+| `jupyterhub-volumes`   | `minio` root (Z2JH default) | xenoISA/isA_Model#771 |
+
+**Restore drill** (per-resource, Phase 8):
+
+```bash
+# 1. Recover one MLflow experiment from a backup taken today
+pg_restore -U postgres -d mlflow_recovered <backup>/postgres/mlflow.dump
+psql -U postgres -d mlflow_recovered -c "SELECT name FROM experiments LIMIT 5;"
+
+# 2. Recover an artifact bucket
+mc mirror <backup>/minio/mlflow-artifacts/ local/mlflow-artifacts/
+
+# Sanity: smoke MLflow against the recovered DB
+helm upgrade mlflow community-charts/mlflow -n isa-cloud-local \
+  --set backendStore.postgres.database=mlflow_recovered ...
+```
+
 ## Operation Patterns
 
 ### Pattern 1: Individual Service Backup

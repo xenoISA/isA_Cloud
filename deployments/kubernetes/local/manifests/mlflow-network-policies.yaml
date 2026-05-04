@@ -1,0 +1,174 @@
+# Network policies for MLflow (#791) and JupyterHub (#792).
+# Default-deny posture is set in network-policies.yaml; this file adds the
+# explicit allow-lists for the new Phase 8 services.
+#
+# Apply: kubectl apply -f mlflow-network-policies.yaml
+# Verify:
+#   kubectl run -n isa-cloud-local --rm -i --restart=Never test \
+#     --image=alpine -- sh -c 'apk add --no-cache curl >/dev/null 2>&1 && \
+#       curl -s -o /dev/null -w "HTTP %{http_code}" http://mlflow:5000/health'
+#   # Expect: timeout (denied) when test pod has no allowed labels.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mlflow-allow
+  namespace: isa-cloud-local
+  labels:
+    app.kubernetes.io/instance: mlflow
+    tier: backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: mlflow
+
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # APISIX gateway -> MLflow:5000  (the only "public" path)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - { protocol: TCP, port: 5000 }
+
+    # JupyterHub singleuser pods (notebooks calling MLflow tracking API directly).
+    # Z2JH labels singleuser pods with `component=singleuser-server`.
+    - from:
+        - podSelector:
+            matchLabels:
+              component: singleuser-server
+      ports:
+        - { protocol: TCP, port: 5000 }
+
+    # Same-pod readiness/liveness probes from kubelet (allowed by default but
+    # documented here for clarity).
+
+  egress:
+    # PostgreSQL backend store
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - { protocol: TCP, port: 5432 }
+
+    # MinIO artifact store (s3 + console)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - { protocol: TCP, port: 9000 }
+        - { protocol: TCP, port: 9001 }
+
+    # CoreDNS — required for any DNS resolution in-cluster
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jupyterhub-singleuser-allow
+  namespace: isa-cloud-local
+  labels:
+    app: jupyterhub
+    tier: backend
+spec:
+  # Restrict singleuser pods spawned by Z2JH KubeSpawner.
+  podSelector:
+    matchLabels:
+      component: singleuser-server
+
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # Hub + Proxy talking to the user notebook on :8888
+    - from:
+        - podSelector:
+            matchLabels:
+              app: jupyterhub
+      ports:
+        - { protocol: TCP, port: 8888 }
+
+  egress:
+    # APISIX gateway (notebook -> isA_Model API + any other isA service)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 9080 }
+
+    # MLflow tracking server
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: mlflow
+      ports:
+        - { protocol: TCP, port: 5000 }
+
+    # MinIO (artifacts + user storage)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - { protocol: TCP, port: 9000 }
+
+    # PostgreSQL (notebooks doing data work directly)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - { protocol: TCP, port: 5432 }
+
+    # NATS (event publishing from notebook code)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - { protocol: TCP, port: 4222 }
+
+    # JupyterHub Hub (user server -> hub callback)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: jupyterhub
+              component: hub
+      ports:
+        - { protocol: TCP, port: 8081 }
+
+    # CoreDNS — required for DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+
+    # Internet egress (notebooks may pip install or download data).  If you
+    # need to lock this down further, add an explicit IPBlock allowlist for
+    # PyPI mirrors here.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # cluster CIDR — already covered by pod rules
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 80 }
