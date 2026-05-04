@@ -1,0 +1,146 @@
+# JupyterHub — local kind cluster (isa-cloud-local)
+# Chart: jupyterhub/jupyterhub 4.3.x
+# Tracking issue: xenoISA/isA_Model#771 (parent epic #763)
+#
+# Local-dev only — uses native (DummyAuthenticator) auth + the upstream
+# jupyter/scipy-notebook image with isa_model installed at spawn time via
+# lifecycleHooks.postStart. Production should use the custom singleuser image
+# from isA_Model deployment/docker/jupyterhub-singleuser.Dockerfile + OAuth
+# (already wired in deployments/helm/jupyterhub of isA_Model).
+#
+# Profiles capped to small/medium (max 4Gi) — kind cluster has limited RAM.
+#
+# Reuses in-cluster PostgreSQL ('jupyterhub' db) for hub state.
+
+hub:
+  config:
+    Authenticator:
+      admin_users:
+        - admin
+    JupyterHub:
+      authenticator_class: dummy  # local dev — no real auth, any password works
+      admin_access: true
+    DummyAuthenticator:
+      password: "isa-local-dev"  # documented dev default — see SECRETS.md note
+
+  db:
+    type: postgres
+    url: "postgresql+psycopg2://postgres@postgresql.isa-cloud-local.svc.cluster.local:5432/jupyterhub"
+    password: ""  # injected via env from secret below
+
+  extraEnv:
+    PGPASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: postgresql
+          key: postgres-password
+
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+  networkPolicy:
+    enabled: false  # use cluster-level network-policies.yaml manifests instead
+
+# CHP — Configurable HTTP Proxy
+proxy:
+  service:
+    type: ClusterIP  # NOT LoadBalancer — APISIX handles ingress
+  chp:
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits:   { cpu: 200m, memory: 256Mi }
+    networkPolicy:
+      enabled: false
+
+singleuser:
+  image:
+    name: quay.io/jupyter/scipy-notebook
+    tag: "python-3.11"
+    pullPolicy: IfNotPresent
+
+  defaultUrl: "/lab"
+  startTimeout: 600  # first spawn pulls the image (~2GB)
+
+  # Pre-install isa_model SDK at spawn time (cheaper than maintaining a custom
+  # image for local dev). Production uses the prebuilt singleuser image.
+  lifecycleHooks:
+    postStart:
+      exec:
+        command:
+          - "sh"
+          - "-c"
+          - "pip install --quiet --user isa_model || true"
+
+  extraEnv:
+    ISA_API_URL: "http://apisix-gateway.isa-cloud-local.svc.cluster.local/api/v1/models"
+    MLFLOW_TRACKING_URI: "http://mlflow.isa-cloud-local.svc.cluster.local:5000"
+    MLFLOW_S3_ENDPOINT_URL: "http://minio.isa-cloud-local.svc.cluster.local:9000"
+    AWS_ACCESS_KEY_ID:
+      valueFrom:
+        secretKeyRef:
+          name: minio
+          key: rootUser
+    AWS_SECRET_ACCESS_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: minio
+          key: rootPassword
+
+  storage:
+    type: dynamic
+    dynamic:
+      storageClass: standard  # kind local-path
+    capacity: 2Gi  # smaller than default 10Gi — kind RAM constraints
+    homeMountPath: /home/jovyan
+
+  cpu:
+    guarantee: 0.5
+    limit: 1.0
+  memory:
+    guarantee: 512M
+    limit: 2G
+
+  profileList:
+    - display_name: "Small (1 CPU, 2 Gi)"
+      description: "Minimal — runs the 01–03 demo notebooks"
+      default: true
+      kubespawner_override:
+        cpu_guarantee: 0.5
+        cpu_limit: 1.0
+        mem_guarantee: 512M
+        mem_limit: 2G
+    - display_name: "Medium (2 CPU, 4 Gi)"
+      description: "More room for data work; still safe on kind"
+      kubespawner_override:
+        cpu_guarantee: 1.0
+        cpu_limit: 2.0
+        mem_guarantee: 1G
+        mem_limit: 4G
+
+  networkPolicy:
+    enabled: false
+
+  # Cull idle servers after 30 min — protect kind cluster RAM
+  cmd: null
+
+cull:
+  enabled: true
+  timeout: 1800  # 30 min
+  every: 300
+
+scheduling:
+  userScheduler:
+    enabled: false  # not needed for single-node-pool kind
+
+prePuller:
+  hook:
+    enabled: false  # speeds up install on kind
+  continuous:
+    enabled: false
+
+ingress:
+  enabled: false  # APISIX route handles external exposure
+
+debug:
+  enabled: false
