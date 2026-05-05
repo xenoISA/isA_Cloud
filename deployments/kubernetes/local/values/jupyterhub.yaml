@@ -2,26 +2,47 @@
 # Chart: jupyterhub/jupyterhub 4.3.x
 # Tracking issue: xenoISA/isA_Model#771 (parent epic #763)
 #
-# Local-dev only — uses native (DummyAuthenticator) auth + the upstream
-# jupyter/scipy-notebook image with isa_model installed at spawn time via
-# lifecycleHooks.postStart. Production should use the custom singleuser image
-# from isA_Model deployment/docker/jupyterhub-singleuser.Dockerfile + OAuth
-# (already wired in deployments/helm/jupyterhub of isA_Model).
+# Local-dev only — uses isA Auth OAuth with the custom singleuser image
+# from isA_Model deployment/docker/jupyterhub-singleuser.Dockerfile.
 #
 # Profiles capped to small/medium (max 4Gi) — kind cluster has limited RAM.
 #
 # Reuses in-cluster PostgreSQL ('jupyterhub' db) for hub state.
 
 hub:
+  # OAuth client credentials:
+  #   kubectl -n isa-cloud-local create secret generic jupyterhub-oauth \
+  #     --from-literal=client-id=<isa-auth-client-id> \
+  #     --from-literal=client-secret=<isa-auth-client-secret>
+  # Crypt key:
+  #   kubectl -n isa-cloud-local create secret generic jupyterhub-crypt-key \
+  #     --from-literal=crypt-key="$(openssl rand -hex 32)"
   config:
     Authenticator:
       admin_users:
         - admin
     JupyterHub:
-      authenticator_class: dummy  # local dev — no real auth, any password works
+      authenticator_class: generic-oauth
       admin_access: true
-    DummyAuthenticator:
-      password: "isa-local-dev"  # documented dev default — see SECRETS.md note
+    GenericOAuthenticator:
+      client_id: "${OAUTH_CLIENT_ID}"
+      client_secret: "${OAUTH_CLIENT_SECRET}"
+      oauth_callback_url: "http://localhost:18000/hub/oauth_callback"
+      authorize_url: "http://127.0.0.1:8201/oauth/authorize"
+      token_url: "http://127.0.0.1:8201/oauth/token"
+      userdata_url: "http://127.0.0.1:8201/oauth/userinfo"
+      userdata_method: "GET"
+      username_claim: "preferred_username"
+      claim_groups_key: "roles"
+      admin_groups:
+        - "admin"
+      allow_all: true
+      scope:
+        - openid
+        - profile
+        - email
+        - roles
+      login_service: "isA Auth"
 
   db:
     type: postgres
@@ -34,6 +55,71 @@ hub:
         secretKeyRef:
           name: postgresql
           key: postgres-password
+    OAUTH_CLIENT_ID:
+      valueFrom:
+        secretKeyRef:
+          name: jupyterhub-oauth
+          key: client-id
+    OAUTH_CLIENT_SECRET:
+      valueFrom:
+        secretKeyRef:
+          name: jupyterhub-oauth
+          key: client-secret
+    JUPYTERHUB_CRYPT_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: jupyterhub-crypt-key
+          key: crypt-key
+
+  extraConfig:
+    10-isa-auth-state: |
+      c.GenericOAuthenticator.enable_auth_state = True
+
+      import os
+      _crypt_key = os.environ.get("JUPYTERHUB_CRYPT_KEY")
+      if _crypt_key:
+          c.CryptKeeper.keys = [_crypt_key]
+
+      async def isa_auth_state_hook(spawner, auth_state):
+          if not auth_state:
+              spawner.log.warning(
+                  "No auth_state for %s; tenant isolation cannot be enforced",
+                  spawner.user.name,
+              )
+              return
+          oauth_user = auth_state.get("oauth_user", {}) or {}
+          spawner.userdata = {
+              "tenant_id": oauth_user.get("tenant_id")
+                  or oauth_user.get("org_id")
+                  or oauth_user.get("organization_id", ""),
+              "roles": oauth_user.get("roles", []),
+              "email": oauth_user.get("email", ""),
+              "user_id": oauth_user.get("sub", ""),
+          }
+
+      async def isa_pre_spawn_hook(spawner):
+          auth_state = await spawner.user.get_auth_state()
+          await isa_auth_state_hook(spawner, auth_state)
+          ud = getattr(spawner, "userdata", {}) or {}
+          tenant_id = ud.get("tenant_id", "")
+          if not tenant_id:
+              spawner.log.error(
+                  "Refusing to spawn %s: no tenant_id in OAuth claims",
+                  spawner.user.name,
+              )
+              raise RuntimeError(
+                  "isA Auth did not return a tenant_id claim; "
+                  "refusing to spawn untenanted notebook server."
+              )
+          spawner.environment.update({
+              "ISA_TENANT_ID": tenant_id,
+              "ISA_USER_ID": ud.get("user_id", ""),
+              "ISA_USER_EMAIL": ud.get("email", ""),
+              "ISA_USER_ROLES": ",".join(ud.get("roles", []) or []),
+          })
+
+      c.GenericOAuthenticator.auth_state_hook = isa_auth_state_hook
+      c.KubeSpawner.pre_spawn_hook = isa_pre_spawn_hook
 
   # Allow Prometheus to scrape /hub/metrics without a bearer token (local dev only).
   # Production wiring uses a service-token via `services:` block + scrape_configs
