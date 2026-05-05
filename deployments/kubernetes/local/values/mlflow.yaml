@@ -6,6 +6,7 @@
 # Secrets required (created out-of-band, never inline):
 #   - mlflow-db-credentials  (keys: username, password)  — wraps postgresql/postgres-password
 #   - minio                  (keys: rootUser, rootPassword) — already exists
+#   - auth-service-jwt       (key: jwt-secret) — same HS256 JWT_SECRET used by isA_user/auth_service
 #
 # Re-deploy:  helm upgrade --install mlflow community-charts/mlflow -n isa-cloud-local -f mlflow.yaml
 
