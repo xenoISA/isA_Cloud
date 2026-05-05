@@ -10,17 +10,118 @@ data:
   register_routes.sh: |
     #!/bin/bash
     # Register JupyterHub APISIX routes — /jupyter and /jupyter/*
-    # Tracking: xenoISA/isA_Model#771
+    # Tracking: xenoISA/isA_Model#771, #789
     set -e
 
     APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-local.svc.cluster.local:9180}"
     ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
     CORS_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4100,http://localhost:4200,http://localhost:4300}"
+    AUTH_SERVICE_JWT_KEY="${AUTH_SERVICE_JWT_KEY:-isA_user}"
+    AUTH_SERVICE_JWT_ALGORITHM="${AUTH_SERVICE_JWT_ALGORITHM:-HS256}"
 
     GREEN='\033[0;32m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
     ok()   { echo -e "${GREEN}OK  $1${NC}"; }
     err()  { echo -e "${RED}ERR $1${NC}"; }
     info() { echo -e "${BLUE}INFO $1${NC}"; }
+
+    if [ -z "${AUTH_SERVICE_JWT_SECRET:-}" ]; then
+      err "AUTH_SERVICE_JWT_SECRET is required to validate auth_service HS256 JWTs"
+      exit 1
+    fi
+
+    info "Registering auth-service-jwt consumer for auth_service-issued JWTs..."
+    CONSUMER_RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/consumers/auth-service-jwt" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --arg key "$AUTH_SERVICE_JWT_KEY" \
+          --arg secret "$AUTH_SERVICE_JWT_SECRET" \
+          --arg algorithm "$AUTH_SERVICE_JWT_ALGORITHM" \
+          '{
+            "username": "auth-service-jwt",
+            "plugins": {
+              "jwt-auth": {
+                "key": $key,
+                "secret": $secret,
+                "algorithm": $algorithm
+              }
+            }
+          }')")
+
+    CONSUMER_HTTP=$(echo "$CONSUMER_RESP" | tail -n1)
+    if [ "$CONSUMER_HTTP" = "200" ] || [ "$CONSUMER_HTTP" = "201" ]; then
+      ok "auth-service-jwt consumer registered (HTTP $CONSUMER_HTTP)"
+    else
+      err "Failed to register auth-service-jwt consumer (HTTP $CONSUMER_HTTP)"
+      echo "$CONSUMER_RESP" | head -n -1
+      exit 1
+    fi
+
+    info "Registering jupyterhub_api_route (/jupyter/api/* -> proxy-public:80) with JWT auth..."
+
+    API_PLUGINS=$(jq -n --arg cors "$CORS_ORIGINS" '{
+      "cors": {
+        "allow_origins": $cors,
+        "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID,X-XSRFToken",
+        "expose_headers": "X-Request-ID",
+        "max_age": 86400,
+        "allow_credential": true
+      },
+      "request-id": { "algorithm": "uuid", "include_in_response": true },
+      "proxy-rewrite": { "regex_uri": ["^/jupyter/?(.*)$", "/$1"] },
+      "prometheus": {},
+      "serverless-pre-function": {
+        "phase": "access",
+        "functions": [
+          "return function(conf, ctx) local core = require(\"apisix.core\"); local authorization = core.request.header(ctx, \"authorization\"); if authorization then local token = authorization:match(\"^[Bb]earer%s+(.+)$\") or authorization; core.request.set_header(ctx, \"x-jupyter-jwt\", token); end end"
+        ]
+      },
+      "jwt-auth": {
+        "header": "x-jupyter-jwt",
+        "key_claim_name": "iss",
+        "hide_credentials": true
+      }
+    }')
+
+    UPSTREAM=$(jq -n '{
+      "type": "roundrobin",
+      "scheme": "http",
+      "pass_host": "pass",
+      "retries": 2,
+      "retry_timeout": 6,
+      "timeout": { "connect": 6, "send": 60, "read": 600 },
+      "keepalive_pool": { "size": 320, "idle_timeout": 60, "requests": 1000 },
+      "nodes": {
+        "proxy-public.isa-cloud-local.svc.cluster.local:80": 1
+      }
+    }')
+
+    API_RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/routes/jupyterhub_api_route" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --argjson plugins "$API_PLUGINS" \
+          --argjson upstream "$UPSTREAM" \
+          '{
+            "name": "jupyterhub_api_route",
+            "uris": ["/jupyter/api/*"],
+            "priority": 100,
+            "status": 1,
+            "plugins": $plugins,
+            "upstream": $upstream
+          }')")
+
+    API_HTTP=$(echo "$API_RESP" | tail -n1)
+    if [ "$API_HTTP" = "200" ] || [ "$API_HTTP" = "201" ]; then
+      ok "jupyterhub_api_route registered (HTTP $API_HTTP)"
+    else
+      err "Failed to register jupyterhub_api_route (HTTP $API_HTTP)"
+      echo "$API_RESP" | head -n -1
+      exit 1
+    fi
 
     info "Registering jupyterhub_route (/jupyter[/*] -> proxy-public:80)..."
 
@@ -115,6 +216,15 @@ spec:
               value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
             - name: APISIX_ADMIN_KEY
               value: "edd1c9f034335f136f87ad84b625c8f1"
+            - name: AUTH_SERVICE_JWT_KEY
+              value: "isA_user"
+            - name: AUTH_SERVICE_JWT_ALGORITHM
+              value: "HS256"
+            - name: AUTH_SERVICE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-jwt
+                  key: jwt-secret
           resources:
             requests:
               cpu: 50m
