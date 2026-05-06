@@ -30,17 +30,25 @@ consuming repo's runbook (e.g. `xenoISA/isA_user/docs/runbooks/migration-rollbac
 
 The chart renders `Rollout` and `AnalysisTemplate` CRs but does NOT
 install the Argo Rollouts controller itself. Install it once per
-cluster:
+cluster, **pinned to a specific release** so the cluster admin can
+reproduce the install on a fresh cluster and roll back deterministically
+if a controller release introduces a regression. Track the upgrade
+cadence as a normal cluster-admin chore, not via `latest`.
 
 ```bash
+# Pin to the same version we exercise in CI (the kubectl-argo-rollouts
+# plugin step in xenoISA/isA_user/.github/workflows/deploy.yml uses
+# the same tag — bump both at once).
+ARGO_ROLLOUTS_VERSION=v1.7.2
+
 kubectl create namespace argo-rollouts
 kubectl apply -n argo-rollouts \
-  -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+  -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml"
 
 # Optional but strongly recommended — kubectl plugin for live tree views.
 brew install argoproj/tap/kubectl-argo-rollouts   # macOS
-# or download the binary from
-#   https://github.com/argoproj/argo-rollouts/releases/latest
+# or download the pinned binary from
+#   https://github.com/argoproj/argo-rollouts/releases/tag/${ARGO_ROLLOUTS_VERSION}
 ```
 
 Upstream install guide:
@@ -98,9 +106,12 @@ kubectl argo rollouts get rollout "${SERVICE}" -n "${NAMESPACE}" --watch
 # Just the current step / weight / status:
 kubectl argo rollouts status "${SERVICE}" -n "${NAMESPACE}"
 
-# Inspect AnalysisRuns triggered during the canary.
+# Inspect AnalysisRuns triggered during the canary. Argo Rollouts emits
+# the `rollout.argoproj.io/name=<rollout-name>` label on every
+# AnalysisRun it spawns — there is no plain `rollout=` label.
 kubectl get analysisrun -n "${NAMESPACE}" \
-  -l rollout="${SERVICE}"  --sort-by=.metadata.creationTimestamp
+  -l "rollout.argoproj.io/name=${SERVICE}" \
+  --sort-by=.metadata.creationTimestamp
 ```
 
 The tree view shows:
@@ -174,9 +185,11 @@ Investigate:
 NAMESPACE=isa-cloud-prod
 SERVICE=user-auth-service
 
-# Latest AnalysisRun for this service.
+# Latest AnalysisRun for this service. The selector below matches the
+# `rollout.argoproj.io/name` label Argo Rollouts attaches to every
+# AnalysisRun (a plain `rollout=<name>` selector would match nothing).
 RUN=$(kubectl get analysisrun -n "${NAMESPACE}" \
-  -l rollout="${SERVICE}" \
+  -l "rollout.argoproj.io/name=${SERVICE}" \
   --sort-by=.metadata.creationTimestamp \
   -o jsonpath='{.items[-1:].metadata.name}')
 
