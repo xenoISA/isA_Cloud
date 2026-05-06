@@ -1,0 +1,158 @@
+{{- /*
+  Argo Rollouts AnalysisTemplate — Prometheus-based canary gate.
+
+  Provenance: ported from xenoISA/isA_user PR #361 (issue #350) with
+  three reviewer-requested fixes applied:
+
+    1. Selector switched from `service="..."` to
+       `app_kubernetes_io_name="..."`. Pods carry the standard
+       `app.kubernetes.io/name` label (added by templates/rollout.yaml);
+       Prometheus replaces dots with underscores so the queryable label
+       is `app_kubernetes_io_name`.
+
+    2. `failureCondition` and `consecutiveErrorLimit: 0` added so an
+       empty Prometheus result vector FAILS the analysis (the original
+       only had `successCondition`, which silently passes when no data
+       returns — defeats auto-rollback).
+
+    3. Metric names are exposed as values (`metricNames.requests`,
+       `metricNames.duration`) so operators can override per-environment
+       without editing the chart. The defaults match what isA_user
+       services expose via `isa_common.metrics`. The actual metric names
+       in production are prefixed (`isa_<service>_http_requests_total`)
+       — operators MUST set the correct prefix when flipping
+       `rollout.enabled=true`.
+       TODO(#350): drop the override knob once we standardize a single
+       canary-friendly metric name across services.
+
+  Both metrics use `failureLimit: 0` AND `consecutiveErrorLimit: 0` so
+  a single breach OR a single empty/error sample aborts the canary.
+
+  Prometheus address defaults to the in-cluster monitoring stack but is
+  overridable via .Values.rollout.analysis.prometheusAddress.
+*/ -}}
+{{- if .Values.rollout.enabled }}
+{{- $analysis := .Values.rollout.analysis | default dict -}}
+{{- $promAddr := $analysis.prometheusAddress | default "http://prometheus-server.monitoring.svc.cluster.local:9090" -}}
+{{- $errorThreshold := $analysis.errorRateThreshold | default "0.01" -}}
+{{- $latencyRatioThreshold := $analysis.latencyRatioThreshold | default "1.5" -}}
+{{- $interval := $analysis.interval | default "30s" -}}
+{{- $count := $analysis.count | default 3 -}}
+{{- $window := $analysis.window | default "2m" -}}
+{{- $consecutiveErrorLimit := $analysis.consecutiveErrorLimit | default 0 -}}
+{{- $metricNames := $analysis.metricNames | default dict -}}
+{{- $requestsMetric := $metricNames.requests | default "http_requests_total" -}}
+{{- $durationMetric := $metricNames.duration | default "http_request_duration_seconds_bucket" -}}
+{{- $statusLabel := $metricNames.statusLabel | default "status_code" -}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Values.name }}-canary-analysis
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.name }}
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: canary-analysis
+spec:
+  args:
+    - name: service-name
+      value: {{ .Values.name }}
+    - name: namespace
+      value: {{ .Values.namespace }}
+    # canary-hash and stable-hash are supplied at run time by the
+    # Rollout via `valueFrom.podTemplateHashValue`. We declare them
+    # without a default so a missing value fails fast.
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    # -----------------------------------------------------------------
+    # Metric 1: 5xx error rate on the canary replica set.
+    # Aborts when the rate exceeds errorRateThreshold (default 1%) OR
+    # when Prometheus returns no samples (treated as failure, not pass).
+    # TODO(xenoISA/isA_user#350): verify the exact metric name once a
+    # canary actually runs against the cluster's /metrics output. The
+    # `isa_common` middleware emits `http_requests_total` (and may
+    # prefix with the service name, e.g. `isa_user_auth_service_…`).
+    # Override via .Values.rollout.analysis.metricNames.requests if so.
+    # -----------------------------------------------------------------
+    - name: error-rate
+      interval: {{ $interval }}
+      count: {{ $count }}
+      successCondition: len(result) > 0 && result[0] <= {{ $errorThreshold }}
+      failureCondition: len(result) == 0 || result[0] > {{ $errorThreshold }}
+      failureLimit: 0
+      consecutiveErrorLimit: {{ $consecutiveErrorLimit }}
+      provider:
+        prometheus:
+          address: {{ $promAddr | quote }}
+          query: |
+            sum(
+              rate(
+                {{ $requestsMetric }}{
+                  app_kubernetes_io_name="{{ "{{args.service-name}}" }}",
+                  namespace="{{ "{{args.namespace}}" }}",
+                  rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}",
+                  {{ $statusLabel }}=~"5.."
+                }[{{ $window }}]
+              )
+            )
+            /
+            sum(
+              rate(
+                {{ $requestsMetric }}{
+                  app_kubernetes_io_name="{{ "{{args.service-name}}" }}",
+                  namespace="{{ "{{args.namespace}}" }}",
+                  rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}"
+                }[{{ $window }}]
+              )
+            )
+    # -----------------------------------------------------------------
+    # Metric 2: p95 latency ratio (canary / stable).
+    # Aborts when canary p95 > latencyRatioThreshold * stable p95
+    # (default 1.5x) OR when Prometheus returns no samples.
+    # TODO(xenoISA/isA_user#350): same caveat — verify the exact
+    # histogram bucket metric name. Override via
+    # .Values.rollout.analysis.metricNames.duration.
+    # -----------------------------------------------------------------
+    - name: latency-p95-ratio
+      interval: {{ $interval }}
+      count: {{ $count }}
+      successCondition: len(result) > 0 && result[0] <= {{ $latencyRatioThreshold }}
+      failureCondition: len(result) == 0 || result[0] > {{ $latencyRatioThreshold }}
+      failureLimit: 0
+      consecutiveErrorLimit: {{ $consecutiveErrorLimit }}
+      provider:
+        prometheus:
+          address: {{ $promAddr | quote }}
+          query: |
+            (
+              histogram_quantile(0.95,
+                sum by (le) (
+                  rate(
+                    {{ $durationMetric }}{
+                      app_kubernetes_io_name="{{ "{{args.service-name}}" }}",
+                      namespace="{{ "{{args.namespace}}" }}",
+                      rollouts_pod_template_hash="{{ "{{args.canary-hash}}" }}"
+                    }[{{ $window }}]
+                  )
+                )
+              )
+            )
+            /
+            (
+              histogram_quantile(0.95,
+                sum by (le) (
+                  rate(
+                    {{ $durationMetric }}{
+                      app_kubernetes_io_name="{{ "{{args.service-name}}" }}",
+                      namespace="{{ "{{args.namespace}}" }}",
+                      rollouts_pod_template_hash="{{ "{{args.stable-hash}}" }}"
+                    }[{{ $window }}]
+                  )
+                )
+              )
+            )
+{{- end }}

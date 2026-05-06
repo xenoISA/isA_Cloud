@@ -305,3 +305,81 @@ volumeMounts: []
 #   mountPath: /tmp
 # - name: cache
 #   mountPath: /app/.cache
+
+# =============================================================================
+# Argo Rollouts canary (ported from xenoISA/isA_user PR #361, issue #350)
+# =============================================================================
+# When `enabled: true`, the chart renders an Argo Rollouts `Rollout` CR
+# (templates/rollout.yaml) and an `AnalysisTemplate` (templates/analysis-
+# template.yaml) instead of the standard `Deployment`. The Rollout owns
+# the same Pods the Deployment used to own, so flipping this flag is a
+# behaviour-preserving migration aside from the canary stages it adds
+# during image bumps.
+#
+# Cluster prerequisite: argo-rollouts controller installed.
+#   See: docs/runbooks/canary-deploy.md section 0
+#   Upstream: https://argo-rollouts.readthedocs.io/en/stable/installation/
+#
+# Defaults match the spec on issue #350:
+#   - 1-replica canary with a 60s health gate
+#   - 10/25/50/100 traffic ramp
+#   - Prometheus error-rate >1% OR p95 latency >1.5x baseline triggers
+#     auto-rollback (single breach aborts: `failureLimit: 0`,
+#     `consecutiveErrorLimit: 0` so empty results also fail).
+# =============================================================================
+rollout:
+  # Opt-in. Operators flip this on per-environment / per-service once the
+  # Argo Rollouts controller is installed in the target cluster.
+  enabled: false
+  # How long the 1-replica canary bakes before any traffic is split.
+  healthGateSeconds: 60
+  # Pause between weight bumps (gives analysis a fresh window).
+  stagePauseSeconds: 30
+  # Argo's surge / unavailable knobs during the canary ramp.
+  maxSurge: "25%"
+  maxUnavailable: 0
+  # Seconds Argo keeps the old ReplicaSet around after a successful
+  # promotion. Bump in production to give a longer rollback window.
+  scaleDownDelaySeconds: 30
+  revisionHistoryLimit: 5
+  # Set to enable L7 traffic splitting via a service mesh / ingress
+  # (Istio, SMI, Gateway API, ALB, Nginx, ...). Leave empty to use the
+  # built-in replica-weighted "basic canary" mode that needs no mesh.
+  # NOTE: when empty, the `setCanaryScale.matchTrafficWeight` step is
+  # skipped because it is a no-op without trafficRouting.
+  trafficRouting: {}
+  # Override `steps` to ship a custom ramp for a service tier (e.g., a
+  # background worker that wants a faster promotion). Leave empty to
+  # render the default 1-replica -> healthGate -> 10/25/50 -> 100% ramp.
+  steps: []
+  # Prometheus analysis knobs, consumed by templates/analysis-template.yaml.
+  analysis:
+    prometheusAddress: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+    # Auto-rollback when 5xx rate exceeds 1% of total RPS over `window`.
+    errorRateThreshold: "0.01"
+    # Auto-rollback when canary p95 latency > 1.5x the stable replica set.
+    latencyRatioThreshold: "1.5"
+    # How frequently each metric is sampled inside one analysis run.
+    interval: "30s"
+    # Number of samples per analysis run before passing the gate.
+    count: 3
+    # Time window each Prometheus query looks back over.
+    window: "2m"
+    # `consecutiveErrorLimit: 0` makes a single Prometheus error (e.g.
+    # provider unreachable) fail the analysis. Combined with the
+    # `failureCondition: len(result) == 0` guard in the AnalysisTemplate,
+    # this closes the silent-pass loophole called out in PR #361 review.
+    consecutiveErrorLimit: 0
+    # Metric-name overrides — the chart defaults match the names emitted
+    # by `prometheus_client` / `isa_common.metrics`. If your services
+    # expose the per-service prefixed names (e.g.
+    # `isa_user_auth_service_http_requests_total`) override here.
+    # TODO(xenoISA/isA_user#350): unify metric names across services
+    # and drop this knob.
+    metricNames:
+      requests: "http_requests_total"
+      duration: "http_request_duration_seconds_bucket"
+      # Label that carries the HTTP status. `isa_common` uses
+      # `status_code`; older Prometheus instrumentation often uses
+      # `code` or `status`.
+      statusLabel: "status_code"

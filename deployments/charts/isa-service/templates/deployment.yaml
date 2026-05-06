@@ -1,3 +1,13 @@
+{{- /*
+  Standard Deployment for the service.
+
+  When `.Values.rollout.enabled` is true the chart switches to an Argo
+  Rollouts CR (see templates/rollout.yaml) which OWNS the same Pods.
+  Two controllers cannot reconcile the same Pods, so this Deployment
+  is gated off in that case. See the "Migration path" section in
+  docs/runbooks/canary-deploy.md for the cutover procedure.
+*/ -}}
+{{- if not .Values.rollout.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -124,3 +134,4 @@ spec:
       volumes:
       {{- toYaml .Values.volumes | nindent 6 }}
       {{- end }}
+{{- end }}
