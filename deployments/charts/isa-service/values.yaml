@@ -60,6 +60,123 @@ autoscaling:
   targetCPUUtilization: 70
   targetMemoryUtilization: 80
 
+# =============================================================================
+# HorizontalPodAutoscaler — KEDA ScaledObjects (xenoISA/isA_user issue #352,
+# parent epic #345). Architectural home: deployments/charts/isa-service.
+# =============================================================================
+# `hpa.kedaEnabled=true` flips the chart from the plain HorizontalPodAutoscaler
+# (`templates/hpa.yaml`) to a KEDA ScaledObject (`templates/scaledobject.yaml`).
+# KEDA itself is NOT installed by this chart — the cluster operator must run
+# `helm install keda kedacore/keda -n keda --create-namespace` once per cluster
+# before flipping this on. See docs/adr/0002-keda-custom-hpa-metrics.md and
+# docs/runbooks/keda-hpa-metrics.md.
+#
+# Tier presets map a service-class onto a trigger preset; CPU/memory triggers
+# are ALWAYS appended on top so a stuck custom-metric collector still scales
+# on raw load (acceptance criterion for #352).
+#
+#   * `event`     — NATS JetStream consumer pending messages
+#                   (wallet/billing/payment) — polled every 15s
+#   * `auth`      — Prometheus p95 request latency (auth/account/authorization)
+#                   — polled every 60s (matches scrape cadence)
+#   * `telemetry` — Prometheus active WebSocket connection gauge
+#                   — polled every 30s
+#   * `default`   — CPU/memory only — polled every 30s
+#
+# Per-service overrides: set hpa.keda.tier and (optionally) hpa.keda.triggers
+# in the per-service values file. NATS consumer/stream names are deliberately
+# left as configurables because each service owns its own durable.
+#
+# IMPORTANT: production thresholds in this file are starting points only.
+# Attach staging soak data before flipping `kedaEnabled: true` in production
+# (see runbook section "Tuning a threshold").
+hpa:
+  # Opt-in. Default false so existing deployments fall through to hpa.yaml.
+  kedaEnabled: false
+  # Selected tier preset. Override per service.
+  keda:
+    tier: default
+    # Optional global overrides — when empty the tier preset's value wins.
+    pollingInterval: ""
+    cooldownPeriod: ""
+    scaleDownStabilization: 300
+    # Fallback behaviour when the metrics-apiserver is unreachable. KEDA
+    # pins the deployment to `replicas` after `failureThreshold` consecutive
+    # poll failures so a metrics outage does not cause an unbounded scale-up.
+    fallback:
+      failureThreshold: 3
+      replicas: 2
+    # Per-service trigger override. When set, replaces the tier preset's
+    # triggers entirely. CPU/memory fallback triggers are still appended.
+    # triggers: []
+    tiers:
+      default:
+        # CPU/memory only — same shape as the plain HPA, just routed via KEDA.
+        pollingInterval: 30
+        cooldownPeriod: 300
+        triggers: []
+      event:
+        # Tight polling cadence (15s) — JetStream backlog can spike fast.
+        # `consumer` and `stream` MUST be overridden per service. Defaults
+        # below match the auto-derived names from core/nats_client.py
+        # `_get_stream_name()` and `_consumer_loop()` in xenoISA/isA_user.
+        pollingInterval: 15
+        cooldownPeriod: 300
+        triggers:
+          - type: nats-jetstream
+            metricType: AverageValue
+            metadata:
+              # Override per-service — chart-level default is a placeholder.
+              # See README for the verified service-to-stream mapping:
+              #   wallet  -> stream=user-stream consumer=wallet-payment-consumer (and per-event durables)
+              #   billing -> stream=billing-stream consumer=billing-<pattern>-consumer[-<suffix>]
+              #   payment -> stream=<auto>-stream  consumer=payment_service-<prefix>-consumer
+              natsServerMonitoringEndpoint: "nats.isa-cloud-staging.svc.cluster.local:8222"
+              account: "$G"
+              stream: "OVERRIDE_PER_SERVICE"
+              consumer: "OVERRIDE_PER_SERVICE"
+              lagThreshold: "100"
+              activationLagThreshold: "10"
+              useHttps: "false"
+      auth:
+        # 60s polling matches Prometheus scrape interval — finer cadence
+        # would scrape stale data and waste KEDA->Prom round-trips.
+        pollingInterval: 60
+        cooldownPeriod: 300
+        triggers:
+          - type: prometheus
+            metricType: AverageValue
+            metadata:
+              serverAddress: "http://prometheus.isa-cloud-staging.svc.cluster.local:9090"
+              # isa_common.metrics emits `isa_<service>_http_request_duration_seconds`
+              # — the metric name already encodes the service so a label
+              # selector is redundant. Override metricName per-service.
+              # TODO(#352): verify metric exists in actual /metrics output
+              # against deployed pods before enabling production thresholds.
+              metricName: "isa_user_http_request_p95_seconds"
+              threshold: "0.5"
+              activationThreshold: "0.1"
+              query: |
+                histogram_quantile(0.95,
+                  sum(rate(isa_user_http_request_duration_seconds_bucket[2m])) by (le))
+      telemetry:
+        pollingInterval: 30
+        cooldownPeriod: 300
+        triggers:
+          - type: prometheus
+            metricType: AverageValue
+            metadata:
+              serverAddress: "http://prometheus.isa-cloud-staging.svc.cluster.local:9090"
+              # TODO(#352): verify the WebSocket connection gauge name once
+              # the telemetry exporter ships. PR #363 used
+              # `isa_user_websocket_active_connections` — left as-is here so
+              # the chart renders; staging soak will confirm before prod.
+              metricName: "isa_user_websocket_active_connections"
+              threshold: "500"
+              activationThreshold: "50"
+              query: |
+                sum(isa_user_websocket_active_connections)
+
 # Pod Disruption Budget (enabled by default when replicas > 1)
 podDisruptionBudget:
   enabled: true
