@@ -5,6 +5,15 @@
   a KEDA ScaledObject and KEDA synthesises its own HPA. Rendering both at
   the same time would race on `spec.replicas`, so this template skips
   itself in that case (xenoISA/isA_user issue #352, epic #345).
+
+  When `.Values.rollout.enabled=true`, the chart deletes the Deployment
+  (gated off in templates/deployment.yaml) and creates an Argo Rollouts
+  `Rollout` CR. The HPA must point at the Rollout — not at a Deployment
+  that no longer exists — otherwise autoscaling silently breaks for any
+  service that opts into the canary strategy. Argo Rollouts officially
+  supports being an HPA scale target via `kind: Rollout,
+  apiVersion: argoproj.io/v1alpha1`.
+  See: https://argo-rollouts.readthedocs.io/en/stable/features/scaling-down/
 */ -}}
 {{- if and .Values.autoscaling.enabled (not .Values.hpa.kedaEnabled) }}
 apiVersion: autoscaling/v2
@@ -14,8 +23,8 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
+    apiVersion: {{ if .Values.rollout.enabled }}argoproj.io/v1alpha1{{ else }}apps/v1{{ end }}
+    kind: {{ if .Values.rollout.enabled }}Rollout{{ else }}Deployment{{ end }}
     name: {{ .Values.name }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
