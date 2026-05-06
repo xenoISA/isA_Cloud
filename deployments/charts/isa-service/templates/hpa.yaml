@@ -1,4 +1,12 @@
-{{- if .Values.autoscaling.enabled }}
+{{- /*
+  Plain HorizontalPodAutoscaler — used when KEDA is NOT enabled.
+
+  When `.Values.hpa.kedaEnabled=true`, `templates/scaledobject.yaml` renders
+  a KEDA ScaledObject and KEDA synthesises its own HPA. Rendering both at
+  the same time would race on `spec.replicas`, so this template skips
+  itself in that case (xenoISA/isA_user issue #352, epic #345).
+*/ -}}
+{{- if and .Values.autoscaling.enabled (not .Values.hpa.kedaEnabled) }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
