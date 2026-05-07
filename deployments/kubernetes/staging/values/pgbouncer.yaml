@@ -1,0 +1,74 @@
+# =============================================================================
+# PgBouncer — STAGING (isa-cloud-staging)
+# =============================================================================
+# 2 replicas, auth Secret pre-provisioned out-of-band by the operator.
+#
+# Pre-flight (one-time per cluster):
+#   kubectl create secret generic pgbouncer-auth \
+#     -n isa-cloud-staging \
+#     --from-literal=admin-username=isa_admin \
+#     --from-literal=admin-password='<staging-postgres-password>' \
+#     --from-literal=stats-username=pgbouncer_stats \
+#     --from-literal=stats-password='<staging-stats-password>' \
+#     --from-file=userlist.txt=/path/to/staging-userlist.txt
+#
+# Install:
+#   helm upgrade --install pgbouncer ~/Documents/Fun/isA/isA_Cloud/deployments/charts/pgbouncer \
+#     -n isa-cloud-staging \
+#     -f ~/Documents/Fun/isA/isA_Cloud/deployments/kubernetes/staging/values/pgbouncer.yaml
+# =============================================================================
+
+name: pgbouncer
+namespace: isa-cloud-staging
+
+replicas: 2
+
+postgres:
+  host: postgresql.isa-cloud-staging.svc.cluster.local
+  port: 5432
+  sslmode: prefer
+
+auth:
+  create: false
+  existingSecret: pgbouncer-auth
+  type: scram-sha-256
+
+config:
+  poolMode: transaction
+  defaultPoolSize: 25
+  reservePoolSize: 5
+  maxClientConn: 5000
+  serverTlsSslmode: prefer
+  databases:
+    - name: isa_platform
+      dbname: isa_platform
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+exporter:
+  enabled: true
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: pgbouncer
+
+networkPolicy:
+  enabled: false

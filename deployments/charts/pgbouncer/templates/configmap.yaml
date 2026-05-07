@@ -1,0 +1,61 @@
+{{- /*
+  pgbouncer.ini lives in a ConfigMap; userlist.txt lives in the auth Secret
+  and is mounted alongside it at /etc/pgbouncer. Splitting the two keeps
+  credentials out of the ConfigMap (which is world-readable to anyone with
+  namespace get) while letting `helm upgrade` re-render config without
+  touching the credential surface.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pgbouncer.configMapName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pgbouncer.labels" . | nindent 4 }}
+data:
+  pgbouncer.ini: |
+    [databases]
+    {{- range .Values.config.databases }}
+    {{- $host := .host | default $.Values.postgres.host }}
+    {{- $port := .port | default $.Values.postgres.port }}
+    {{ .name }} = host={{ $host }} port={{ $port }} dbname={{ .dbname | default .name }}{{- if .authUser }} auth_user={{ .authUser }}{{- end }}
+    {{- end }}
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = {{ .Values.port }}
+    # Default unix_socket_dir is /tmp/.s.PGSQL.* — a writable emptyDir is
+    # mounted at /tmp so readOnlyRootFilesystem stays on.
+    unix_socket_dir = /tmp
+
+    auth_type = {{ .Values.auth.type }}
+    auth_file = /etc/pgbouncer/userlist.txt
+
+    pool_mode = {{ .Values.config.poolMode }}
+    default_pool_size = {{ .Values.config.defaultPoolSize }}
+    min_pool_size = {{ .Values.config.minPoolSize }}
+    reserve_pool_size = {{ .Values.config.reservePoolSize }}
+    reserve_pool_timeout = {{ .Values.config.reservePoolTimeout }}
+    max_client_conn = {{ .Values.config.maxClientConn }}
+    max_db_connections = {{ .Values.config.maxDbConnections }}
+
+    server_idle_timeout = {{ .Values.config.serverIdleTimeout }}
+    server_lifetime = {{ .Values.config.serverLifetime }}
+    query_wait_timeout = {{ .Values.config.queryWaitTimeout }}
+    tcp_keepalive = {{ .Values.config.tcpKeepalive }}
+
+    server_tls_sslmode = {{ .Values.config.serverTlsSslmode }}
+
+    admin_users = {{ join "," .Values.config.adminUsers }}
+    stats_users = {{ join "," .Values.config.statsUsers }}
+
+    # Logs go to stdout so kubectl/loki pick them up; PgBouncer's own log_*
+    # toggles stay at defaults.
+    logfile =
+    pidfile =
+
+    verbose = {{ .Values.config.verbose }}
+
+    # Required for transaction pooling — disable session-level features that
+    # would otherwise leak between clients sharing a backend connection.
+    ignore_startup_parameters = extra_float_digits,search_path,application_name

@@ -1,0 +1,100 @@
+# =============================================================================
+# PgBouncer — PRODUCTION (isa-cloud-production)
+# =============================================================================
+# 3 replicas, full resource limits, talks to the postgresql-ha primary
+# Service. Auth Secret MUST be provisioned via external-secrets before
+# helm install.
+#
+# Capacity math (production):
+#   * 35 services × 10 HPA-max replicas × 11 pool size = 3,850 client conns
+#   * max_client_conn = 5000 (30% headroom over worst case)
+#   * 3 pgbouncer replicas × 1 db × default_pool_size 25 = 75 backend conns
+#     (+ reserve_pool_size 5 × 3 = 15) -> ~90 peak backend conns
+#   * Postgres max_connections = 500 (postgresql-ha.yaml:38) -> ~18% used
+#
+# Pre-flight (one-time):
+#   external-secrets.io ExternalSecret should sync the credential payload
+#   from Vault/AWS Secrets Manager into the `pgbouncer-auth` Secret with the
+#   keys: admin-username, admin-password, stats-username, stats-password,
+#   userlist.txt (SCRAM-hashed). See README "Provisioning credentials".
+#
+# Install:
+#   helm upgrade --install pgbouncer ~/Documents/Fun/isA/isA_Cloud/deployments/charts/pgbouncer \
+#     -n isa-cloud-production \
+#     -f ~/Documents/Fun/isA/isA_Cloud/deployments/kubernetes/production/values/pgbouncer.yaml
+# =============================================================================
+
+name: pgbouncer
+namespace: isa-cloud-production
+
+# 3 replicas spread across nodes for an extra failure-domain margin over
+# staging's 2-replica baseline.
+replicas: 3
+
+postgres:
+  # postgresql-ha primary Service. The bitnami chart exposes the writable
+  # endpoint at the `-pgpool` Service if pgpool is enabled, or at
+  # `<release>-postgresql-ha-postgresql` for direct primary access. We dial
+  # the pgpool front-end so failover is transparent to pgbouncer.
+  host: postgresql-ha-pgpool.isa-cloud-production.svc.cluster.local
+  port: 5432
+  sslmode: require
+
+auth:
+  create: false
+  existingSecret: pgbouncer-auth
+  type: scram-sha-256
+
+config:
+  poolMode: transaction
+  defaultPoolSize: 25
+  reservePoolSize: 5
+  reservePoolTimeout: 3
+  maxClientConn: 5000
+  serverIdleTimeout: 600
+  serverLifetime: 3600
+  queryWaitTimeout: 30
+  tcpKeepalive: 1
+  serverTlsSslmode: require
+  databases:
+    # Production isA_user services connect to `isa_platform` (verified
+    # against isA_user/deployment/helm/values-production.yaml).
+    - name: isa_platform
+      dbname: isa_platform
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+podDisruptionBudget:
+  enabled: true
+  # 3 replicas — keep at least 2 up at all times.
+  minAvailable: 2
+
+exporter:
+  enabled: true
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+
+# Hard spread across nodes so a single node drain can't knock out a quorum.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: pgbouncer
+
+# Application-tier ingress only — keeps the pool surface contained.
+networkPolicy:
+  enabled: true
+  allowedNamespaces:
+    - isa-cloud-production

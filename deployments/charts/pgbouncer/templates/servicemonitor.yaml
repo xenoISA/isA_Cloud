@@ -1,0 +1,31 @@
+{{- /*
+  Prometheus Operator ServiceMonitor — scrapes the pgbouncer-exporter
+  sidecar on port 9127. Off by default; flip via serviceMonitor.enabled
+  in environments where prometheus-operator is installed (matches the
+  pattern used by deployments/kubernetes/production/manifests/
+  prometheus-service-monitors.yaml).
+*/ -}}
+{{- if and .Values.serviceMonitor.enabled .Values.exporter.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pgbouncer.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  selector:
+    matchLabels:
+      {{- include "pgbouncer.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}
