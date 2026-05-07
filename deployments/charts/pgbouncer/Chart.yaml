@@ -1,0 +1,21 @@
+apiVersion: v2
+name: pgbouncer
+description: |
+  PgBouncer transaction-pooling layer that sits between isA platform services
+  and PostgreSQL. Multiplexes many client connections onto a small backend
+  pool so the application tier can HPA-scale without exhausting Postgres
+  `max_connections`. See xenoISA/isA_Cloud#231 and xenoISA/isA_user#345.
+type: application
+version: 0.1.0
+appVersion: "1.23.1"
+keywords:
+  - postgres
+  - pgbouncer
+  - connection-pooling
+  - hpa
+home: https://www.pgbouncer.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/pgbouncer/pgbouncer
+maintainers:
+  - name: isA Platform

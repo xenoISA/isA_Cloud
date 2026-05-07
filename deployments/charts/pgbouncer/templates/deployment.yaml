@@ -1,0 +1,175 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pgbouncer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "pgbouncer.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # PgBouncer loses in-flight transactions on shutdown, so spin a fresh
+      # pod up first and let the PDB+graceful drain hand off cleanly.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "pgbouncer.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Bounce pods on config/secret changes — Helm's checksum trick.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.auth.create }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # PgBouncer benefits from a graceful drain — it stops accepting new
+      # client connections on SIGTERM but keeps existing transactions open
+      # until they commit/rollback. 30s covers typical OLTP workloads.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: pgbouncer
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The edoburu image's entrypoint generates pgbouncer.ini from env
+          # vars only when /etc/pgbouncer/pgbouncer.ini does NOT already
+          # exist. We mount our chart-rendered config at that exact path,
+          # so the entrypoint skips regeneration and exec()s pgbouncer
+          # against our config verbatim.
+          env:
+            - name: AUTH_FILE
+              value: /etc/pgbouncer/userlist.txt
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: pgbouncer
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          # TCP probe — pgbouncer accepts connections as soon as it's bound.
+          # Avoids needing pg_isready (which would require auth round-trips).
+          readinessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/pgbouncer/pgbouncer.ini
+              subPath: pgbouncer.ini
+              readOnly: true
+            - name: auth
+              mountPath: /etc/pgbouncer/userlist.txt
+              subPath: userlist.txt
+              readOnly: true
+            # readOnlyRootFilesystem=true blocks /tmp by default. The
+            # edoburu entrypoint's `touch userlist.txt` no-ops thanks to
+            # our subPath mount above, but pgbouncer itself may write a
+            # PID under /var/run/pgbouncer. Bind both as writable tmpfs.
+            - name: tmp
+              mountPath: /tmp
+            - name: pgbouncer-run
+              mountPath: /var/run/pgbouncer
+        {{- if .Values.exporter.enabled }}
+        - name: pgbouncer-exporter
+          image: "{{ .Values.exporter.image.registry }}/{{ .Values.exporter.image.repository }}:{{ .Values.exporter.image.tag }}"
+          imagePullPolicy: {{ .Values.exporter.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1001
+          # The exporter speaks pgbouncer's stats virtual DB over a normal
+          # client connection on localhost:6432, authenticating as the stats
+          # user. Credentials come from the auth secret.
+          # NOTE on env ordering: K8s `$(VAR)` substitution only resolves
+          # against env entries defined *earlier* in the same container's
+          # env list. STATS_USER / STATS_PASSWORD must come BEFORE
+          # PGBOUNCER_EXPORTER_CONNECTION_STRING or the substitution leaves
+          # the literal `$(STATS_USER)` in the connection string and the
+          # exporter dies on first scrape.
+          env:
+            - name: STATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pgbouncer.authSecretName" . }}
+                  key: stats-username
+            - name: STATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pgbouncer.authSecretName" . }}
+                  key: stats-password
+            # prometheus-community/pgbouncer-exporter reads the connection
+            # string from PGBOUNCER_EXPORTER_CONNECTION_STRING (the default
+            # is `postgres://postgres:@localhost:6543/pgbouncer` which is
+            # wrong for our setup — pgbouncer listens on 6432 and uses a
+            # separate stats role).
+            - name: PGBOUNCER_EXPORTER_CONNECTION_STRING
+              value: "postgres://$(STATS_USER):$(STATS_PASSWORD)@127.0.0.1:{{ .Values.port }}/pgbouncer?sslmode=disable"
+          args:
+            - "--web.listen-address=:{{ .Values.exporter.port }}"
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.exporter.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.exporter.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "pgbouncer.configMapName" . }}
+        - name: auth
+          secret:
+            secretName: {{ include "pgbouncer.authSecretName" . }}
+            items:
+              - key: userlist.txt
+                path: userlist.txt
+        - name: tmp
+          emptyDir: {}
+        - name: pgbouncer-run
+          emptyDir: {}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

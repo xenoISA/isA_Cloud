@@ -1,0 +1,242 @@
+# =============================================================================
+# pgbouncer chart — defaults (xenoISA/isA_Cloud#231)
+# =============================================================================
+# Transaction-pooling fronts the isA platform services so they can HPA-scale
+# without saturating Postgres max_connections. Defaults below target the
+# staging/local profile; production overrides live in
+# deployments/kubernetes/production/values/pgbouncer.yaml.
+#
+# Capacity math (from PgBouncer's perspective):
+#
+#   client side: max_client_conn (5000)
+#               must be >= sum(per-pod pool * pods * services)
+#               HPA-max worst case = 10 pods * 35 services * 11 = 3,850
+#               -> 5000 leaves ~30% headroom
+#
+#   backend side: replicas * (#databases) * default_pool_size
+#                = 2 * 1 * 25 = 50 backend conns at idle
+#                + reserve_pool_size (5) per db -> 60 peak per replica
+#                worst case 2 * 60 = 120 backend conns
+#                Postgres max_connections (prod) = 500 -> ~24% utilization
+#
+# Tune `default_pool_size` and `replicas` per environment; the rest of the
+# pgbouncer.ini block scales with them.
+# =============================================================================
+
+name: pgbouncer
+namespace: isa-cloud-staging
+
+image:
+  registry: docker.io
+  # edoburu/pgbouncer is the de-facto K8s pgbouncer image: small (~15MB
+  # alpine), env-var configurable, and respects a chart-mounted
+  # /etc/pgbouncer/pgbouncer.ini (its entrypoint skips re-generation when
+  # the file already exists).
+  #
+  # Bitnami's pgbouncer image was retired into the bitnamilegacy/ namespace
+  # in late 2025, so we don't pin it here.
+  repository: edoburu/pgbouncer
+  tag: "v1.25.1-p0"
+  pullPolicy: IfNotPresent
+
+# 2 replicas is the staging/HA default. Local dev overrides to 1; production
+# overrides to 3 for an extra failure-domain margin.
+replicas: 2
+
+# Listening port for application clients. PgBouncer's standard port.
+port: 6432
+
+# =============================================================================
+# Backend Postgres connection target
+# =============================================================================
+# host:port the pgbouncer pods dial out to. Override per environment.
+postgres:
+  host: postgresql.isa-cloud-staging.svc.cluster.local
+  port: 5432
+  # SSL mode for the backend connection. `prefer` works against bitnami's
+  # postgresql chart in both staging and prod-ha. Set `disable` only for
+  # local dev clusters that don't have certs.
+  sslmode: prefer
+
+# =============================================================================
+# Authentication
+# =============================================================================
+# Two auth modes are supported:
+#
+#   1. existingSecret — recommended for staging + production. Operator
+#      provisions a Secret with these keys *before* helm install:
+#        - admin-username
+#        - admin-password
+#        - stats-username
+#        - stats-password
+#        - userlist.txt   (full SCRAM/MD5 userlist for app users; templated
+#                          into /etc/pgbouncer/userlist.txt by an init job
+#                          or external-secrets, see README)
+#
+#   2. plaintext (auth.create=true) — for local kind clusters only. Renders
+#      a Secret in-cluster from the values below. NEVER use in staging/prod.
+auth:
+  # Set true to render a Secret from the plaintext credentials below. Local
+  # only. Production MUST set this to false and provide existingSecret.
+  create: false
+
+  # Name of the Secret to mount. When create=true the chart renders a Secret
+  # at this name; when create=false the operator must pre-provision it.
+  existingSecret: pgbouncer-auth
+
+  # Plaintext fallback values (only consumed when create=true).
+  adminUsername: pgbouncer
+  adminPassword: ""        # Required when create=true.
+  statsUsername: pgbouncer_stats
+  statsPassword: ""        # Required when create=true.
+
+  # SCRAM-SHA-256 is the right default for Postgres 14+. Bitnami's postgresql
+  # chart ships PG 16 by default, so SCRAM is safe. Drop to "md5" only for
+  # legacy backends < PG 14.
+  type: scram-sha-256
+
+# =============================================================================
+# pgbouncer.ini knobs (rendered into the configmap)
+# =============================================================================
+# Defaults are the issue's recommended baseline for HPA scale-out workloads
+# (transaction pooling, ~25 backend conns/db, 5000 client cap).
+config:
+  poolMode: transaction
+  defaultPoolSize: 25
+  minPoolSize: 0
+  reservePoolSize: 5
+  reservePoolTimeout: 3
+  maxClientConn: 5000
+  maxDbConnections: 0    # 0 = unlimited; bound only by default_pool_size
+  serverIdleTimeout: 600
+  serverLifetime: 3600
+  queryWaitTimeout: 30
+  tcpKeepalive: 1
+  # Stats access goes to the virtual `pgbouncer` admin DB, not the backend.
+  # Override only if you wire up additional stats consumers.
+  statsUsers:
+    - pgbouncer_stats
+  adminUsers:
+    - pgbouncer
+  # Verbose logging for diagnostics. 0 = info, 1 = debug, 2 = noisy.
+  verbose: 0
+  # Server-side TLS to the backend Postgres. Mirrors postgres.sslmode above
+  # but lives in pgbouncer.ini at the server_tls_sslmode key.
+  serverTlsSslmode: prefer
+
+  # =========================================================================
+  # Application databases routed through pgbouncer.
+  # =========================================================================
+  # Both staging and production isA_user services connect to a logical
+  # database named `isa_platform`. Map that name onto the same backend
+  # database — clients keep using `dbname=isa_platform` and pgbouncer pools
+  # transparently. Add per-service logical aliases here if a service needs
+  # a separate pool (rare; transaction pooling already isolates txns).
+  databases:
+    - name: isa_platform
+      host: ""             # blank = use top-level postgres.host
+      port: ""             # blank = use top-level postgres.port
+      dbname: isa_platform
+      # Authenticate as the platform admin user. The userlist.txt secret
+      # must include matching credentials. To pin a specific user override
+      # `authUser` per database here.
+      authUser: ""
+
+# =============================================================================
+# Observability
+# =============================================================================
+# Two layers:
+#  - serviceMonitor: pgbouncer's stats virtual DB queried via a
+#    `pgbouncer-exporter` sidecar (same release pattern as postgres-exporter).
+#  - prometheus pod-scrape annotations as a fallback.
+exporter:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: prometheuscommunity/pgbouncer-exporter
+    tag: "v0.10.2"
+    pullPolicy: IfNotPresent
+  port: 9127
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+serviceMonitor:
+  # Toggle off for environments without prometheus-operator installed.
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  # Selector label the operator uses for discovery. Matches the pattern in
+  # deployments/kubernetes/production/manifests/prometheus-service-monitors.yaml.
+  labels:
+    release: prometheus
+
+# =============================================================================
+# Network exposure
+# =============================================================================
+service:
+  type: ClusterIP
+  # Only the application namespace needs to reach this service. Cross-namespace
+  # ingress is gated by the optional NetworkPolicy below.
+  annotations: {}
+
+# =============================================================================
+# Resources / scheduling
+# =============================================================================
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podSecurityContext:
+  # edoburu/pgbouncer is built on alpine and runs as the `postgres` user (UID 70).
+  runAsNonRoot: true
+  runAsUser: 70
+  runAsGroup: 70
+  fsGroup: 70
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 70
+
+# Pod Disruption Budget — at 2 replicas we tolerate one pod down at a time
+# during a node drain. Disabled automatically when replicas <= 1.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+# Spread pgbouncer pods across nodes/zones so a single node loss can't take
+# the whole pool offline.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: pgbouncer
+
+affinity: {}
+
+# Optional ingress restriction. Off by default to match staging's permissive
+# stance; production may flip this on with a per-namespace allowlist.
+networkPolicy:
+  enabled: false
+  # Namespaces allowed to dial pgbouncer:6432.
+  allowedNamespaces:
+    - isa-cloud-staging
+
+podAnnotations: {}
+
+extraEnv: []

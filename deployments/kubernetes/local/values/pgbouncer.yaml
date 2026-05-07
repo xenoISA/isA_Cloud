@@ -1,0 +1,75 @@
+# =============================================================================
+# PgBouncer — LOCAL kind cluster (isa-cloud-local)
+# =============================================================================
+# Single replica, plaintext-rendered Secret, talks to the bitnami postgresql
+# Service that already runs in this namespace.
+#
+# Install:
+#   helm upgrade --install pgbouncer ~/Documents/Fun/isA/isA_Cloud/deployments/charts/pgbouncer \
+#     -n isa-cloud-local \
+#     -f ~/Documents/Fun/isA/isA_Cloud/deployments/kubernetes/local/values/pgbouncer.yaml \
+#     --set auth.adminPassword=staging_postgres_2024 \
+#     --set auth.statsPassword=staging_postgres_2024
+#
+# (The postgres password staging_postgres_2024 comes from
+# deployments/kubernetes/local/values/postgresql.yaml.)
+# =============================================================================
+
+name: pgbouncer
+namespace: isa-cloud-local
+
+replicas: 1
+
+postgres:
+  host: postgresql.isa-cloud-local.svc.cluster.local
+  port: 5432
+  # Local kind cluster has no certs — pin to disable so handshake doesn't fail.
+  sslmode: disable
+
+auth:
+  # Local-only: render a plaintext Secret in-cluster. NEVER use in staging/prod.
+  create: true
+  existingSecret: pgbouncer-auth
+  type: md5     # bitnami's local postgres uses md5 by default
+  adminUsername: postgres
+  # adminPassword + statsPassword are passed via --set on the helm command.
+  statsUsername: pgbouncer_stats
+
+config:
+  # Lighter defaults for a single-node kind cluster.
+  defaultPoolSize: 10
+  reservePoolSize: 2
+  maxClientConn: 500
+  serverTlsSslmode: disable
+  databases:
+    - name: isa_platform
+      dbname: isa_platform
+    # Keep `postgres` reachable for `psql -d postgres` admin probes.
+    - name: postgres
+      dbname: postgres
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+# Single replica — no PDB needed.
+podDisruptionBudget:
+  enabled: false
+
+# Local kind cluster has no prometheus-operator — keep ServiceMonitor off,
+# but leave the exporter sidecar on so `kubectl port-forward svc/pgbouncer 9127`
+# still surfaces metrics for ad-hoc inspection.
+exporter:
+  enabled: true
+serviceMonitor:
+  enabled: false
+
+# Single-node kind: don't enforce hostname spreading.
+topologySpreadConstraints: []
+
+networkPolicy:
+  enabled: false
