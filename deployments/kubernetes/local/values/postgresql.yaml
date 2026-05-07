@@ -25,10 +25,14 @@ primary:
     size: 20Gi
 
   # Basic performance tuning for local dev
+  # max_connections raised from 100 → 300 to support `local-dev.sh --run-all`
+  # (35 services × 1 replica × pool floor=5 = 175 connections at idle, plus
+  # headroom for transient bursts). See xenoISA/isA_user#346/#359 for the
+  # cross-service connection budget math.
   configuration: |
     listen_addresses = '*'
-    max_connections = 100
-    shared_buffers = 128MB
+    max_connections = 300
+    shared_buffers = 256MB
     effective_cache_size = 512MB
     work_mem = 4MB
 

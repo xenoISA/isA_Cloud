@@ -47,10 +47,14 @@ primary:
     enabled: true
     size: 20Gi
 
-  # Basic performance tuning for local dev
+  # Performance tuning
+  # max_connections raised from 100 → 300 to fit isA_user's per-service pool
+  # floor=5 across 35 services × 2 replicas = 350 client connections at idle.
+  # PgBouncer transaction pooling (issue #231) is the long-term answer for HPA
+  # scale-out; this bump unblocks staging deploys until that lands.
   configuration: |
-    max_connections = 100
-    shared_buffers = 128MB
+    max_connections = 300
+    shared_buffers = 256MB
     effective_cache_size = 512MB
     work_mem = 4MB
 
