@@ -1,0 +1,81 @@
+{{- /*
+  Smoke test Job. Runs once on Helm pre-install + pre-upgrade. Verifies:
+    1. DNS for each probe host resolves
+    2. TCP port reach to each probe host
+    3. The paimon bucket on MinIO is reachable (HEAD-ish via curl)
+
+  Intentionally light. Real V-2 / V-3 verification (Paimon table create
+  → Flink write → StarRocks read) requires a running Flink cluster and
+  lives in a separate story under epic #234.
+
+  Cleanup: ttlSecondsAfterFinished + before-hook-creation +
+  hook-succeeded delete policy keep the namespace tidy across re-installs.
+*/ -}}
+{{- if .Values.init.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.name }}-smoke
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "paimon-tools.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.init.backoffLimit }}
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "paimon-tools.labels" . | nindent 8 }}
+        component: smoke
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: smoke
+          image: "{{ .Values.init.image.registry }}/{{ .Values.init.image.repository }}:{{ .Values.init.image.tag }}"
+          imagePullPolicy: {{ .Values.init.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "[paimon-tools/smoke] installing curl + bind-tools..."
+              apk add --quiet --no-cache curl bind-tools >/dev/null
+              echo "[paimon-tools/smoke] probing hosts..."
+              {{- range .Values.init.probeHosts }}
+              echo "  -> {{ .label }}: nslookup {{ .host }}"
+              nslookup {{ .host }} >/dev/null
+              echo "  -> {{ .label }}: nc -zv {{ .host }} {{ .port }}"
+              nc -zv -w 5 {{ .host }} {{ .port }}
+              {{- end }}
+              echo "[paimon-tools/smoke] checking {{ .Values.init.bucketProbe.bucket }} bucket on {{ .Values.init.bucketProbe.endpoint }}..."
+              # 200 (public list) or 403 (auth required) both prove the
+              # bucket exists and the endpoint is reachable. 404 means
+              # the bucket is missing — a real failure.
+              status=$(curl -fsS -o /dev/null -w "%{http_code}" "{{ .Values.init.bucketProbe.endpoint }}/{{ .Values.init.bucketProbe.bucket }}/?list-type=2" \
+                || curl -sS -o /dev/null -w "%{http_code}" "{{ .Values.init.bucketProbe.endpoint }}/{{ .Values.init.bucketProbe.bucket }}/?list-type=2")
+              echo "  -> bucket probe HTTP ${status}"
+              case "${status}" in
+                200|403) echo "[paimon-tools/smoke] PASS (bucket reachable)";;
+                404) echo "[paimon-tools/smoke] FAIL: bucket missing"; exit 1;;
+                *) echo "[paimon-tools/smoke] FAIL: unexpected ${status}"; exit 1;;
+              esac
+          resources:
+            {{- toYaml .Values.init.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

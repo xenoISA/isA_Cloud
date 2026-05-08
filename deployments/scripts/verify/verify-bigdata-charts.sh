@@ -18,6 +18,7 @@ APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
 POSTGRES_CHART="${DEPLOYMENTS}/charts/postgres-bigdata"
 HMS_CHART="${DEPLOYMENTS}/charts/hive-metastore"
 MINIO_CHART="${DEPLOYMENTS}/charts/minio"
+PAIMON_CHART="${DEPLOYMENTS}/charts/paimon-tools"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -80,6 +81,10 @@ template_umbrella_with_profile() {
     echo "[fail] no minio rendering in ${profile}" >&2
     exit 4
   fi
+  if ! grep -q "paimon-catalog" <<<"${out}"; then
+    echo "[fail] no paimon-tools rendering in ${profile}" >&2
+    exit 4
+  fi
 }
 
 main() {
@@ -96,6 +101,7 @@ main() {
   lint_chart "${POSTGRES_CHART}"
   lint_chart "${HMS_CHART}"
   lint_chart "${MINIO_CHART}"
+  lint_chart "${PAIMON_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -105,6 +111,7 @@ main() {
     --set s3a.auth.create=true --set s3a.auth.accessKey=test --set s3a.auth.secretKey=test
   template_chart "${MINIO_CHART}" \
     --set auth.create=true --set auth.rootUser=test --set auth.rootPassword=testtesttest
+  template_chart "${PAIMON_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

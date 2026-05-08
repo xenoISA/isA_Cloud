@@ -1,0 +1,32 @@
+apiVersion: v2
+name: paimon-tools
+description: |
+  Apache Paimon catalog config + init Job for the isA platform's
+  big-data foundation. Self-written chart per design — provides a
+  single ConfigMap with the catalog properties consumed by downstream
+  compute charts (flink-cdc-jobs, starrocks) and an optional one-shot
+  init Job that smoke-tests reachability of hive-metastore + minio.
+
+  Note: this chart does NOT deploy a long-running service. Paimon is
+  a lakehouse table format library; actual reads/writes happen on
+  Flink and StarRocks workers in their respective charts.
+
+  See xenoISA/isA_Cloud#243, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5 / 00-infra-architecture-overview.md
+  §6.1 / §1.4 risk #1 (V-3 = highest-risk gate).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - paimon
+  - lakehouse
+  - hive-metastore
+  - s3a
+  - bigdata
+  - data-platform
+home: https://paimon.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/paimon
+maintainers:
+  - name: isA Platform

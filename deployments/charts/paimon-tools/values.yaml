@@ -1,0 +1,118 @@
+# =============================================================================
+# paimon-tools chart — defaults (xenoISA/isA_Cloud#243)
+# =============================================================================
+# Self-written. Renders only:
+#   - ConfigMap "paimon-catalog" with the catalog properties consumed
+#     by Flink + StarRocks once those charts land
+#   - Optional init Job that smoke-tests reachability of HMS + MinIO
+#     (DNS + nc + bucket list)
+#
+# Profile defaults below match the staging tier.
+# =============================================================================
+
+name: paimon-tools
+namespace: isa-bigdata
+
+# Paimon-aware metadata. The image below is only used by the init Job.
+# Downstream compute charts (flink-cdc-jobs, starrocks) load Paimon JARs
+# from their own images; this chart does NOT ship JARs (see README).
+paimonVersion: "1.0.0"
+
+# =============================================================================
+# Catalog properties — rendered into the paimon-catalog ConfigMap.
+# Consumers mount this ConfigMap and pass these as Flink/StarRocks
+# catalog options. Hostnames default to the in-cluster Services produced
+# by the hive-metastore + minio charts.
+# =============================================================================
+catalog:
+  type: hive
+  metastore: hive
+  uri: "thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083"
+  warehouse: "s3a://paimon/warehouse/"
+  # Default database the consumers look up tables under. Optional —
+  # downstream charts may override per-job.
+  defaultDatabase: paimon_default
+
+s3a:
+  endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+  pathStyleAccess: true
+  sslEnabled: false
+  # Credentials are NOT in the ConfigMap. Consumer charts inject these
+  # as env vars from the minio-credentials Secret; the catalog config
+  # references them via Hadoop's ${env:VAR} interpolation.
+  credentialsSecret:
+    name: minio-credentials
+    accessKeyKey: access-key
+    secretKeyKey: secret-key
+
+# Free-form passthrough. Each entry becomes a key in the ConfigMap.
+# Useful for Paimon-specific tuning (snapshot.expire.execution-mode,
+# write-buffer-size, etc.) without re-templating.
+extraCatalogProperties: {}
+  # Example:
+  # snapshot.expire.execution-mode: sync
+  # write-buffer-size: 256MB
+
+# =============================================================================
+# Init Job — smoke test for HMS + MinIO reachability.
+#
+# Why so light: the actual V-2 / V-3 verification (Paimon table create →
+# Flink CDC write → StarRocks read) requires a running Flink cluster,
+# which is a separate chart. Until then, a lightweight DNS + nc + bucket-
+# list check catches the most common deploy mistakes (wrong host, wrong
+# port, missing bucket) without pulling a multi-hundred-MB Paimon image.
+#
+# Helm hook: pre-install + pre-upgrade. ttlSecondsAfterFinished cleans
+# the Pod after success.
+# =============================================================================
+init:
+  enabled: true
+  image:
+    registry: docker.io
+    # alpine + busybox-style tools; ~5MB and present in air-gap caches.
+    repository: alpine
+    tag: "3.19"
+    pullPolicy: IfNotPresent
+  # Hosts probed at runtime. Default to the in-cluster Service DNS for
+  # hive-metastore + minio. customer-prod can extend for off-cluster
+  # endpoints.
+  probeHosts:
+    - host: hive-metastore.isa-bigdata.svc.cluster.local
+      port: 9083
+      label: hive-metastore-thrift
+    - host: minio.isa-bigdata.svc.cluster.local
+      port: 9000
+      label: minio-s3
+  # Bucket existence check — HEAD against /<bucket>/?list-type=2 returns
+  # 200 (empty bucket) or 403 (auth required). Either is OK for a smoke
+  # test; only DNS / TCP failures block.
+  bucketProbe:
+    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    bucket: paimon
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 1000
+
+priorityClassName: ""
+
+podAnnotations: {}

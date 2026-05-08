@@ -1,0 +1,55 @@
+{{- /*
+  paimon-catalog ConfigMap. The keys are flat properties — downstream
+  consumers (Flink table API, StarRocks external catalog DDL) read them
+  as their respective config formats.
+
+  Credentials are NOT here. The Hadoop ${env:VAR} interpolation lets
+  the same property file work whether the consumer reads
+  AWS_ACCESS_KEY_ID from a Secret-mounted env var (Flink/StarRocks
+  pods) or has it pre-set in the runtime image.
+
+  paimon-catalog.properties is the canonical Paimon catalog config
+  format consumed by `Catalog.create(properties)` calls in Flink/Spark.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "paimon-tools.catalogConfigMapName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "paimon-tools.labels" . | nindent 4 }}
+data:
+  paimon-catalog.properties: |
+    # Paimon catalog wired to Hive Metastore + MinIO (S3A). Generated
+    # by the paimon-tools chart (xenoISA/isA_Cloud#243). Consumers should
+    # mount this file at /etc/paimon/paimon-catalog.properties (or
+    # equivalent) and pass it to Catalog.create().
+
+    catalog.type = {{ .Values.catalog.type }}
+    catalog.metastore = {{ .Values.catalog.metastore }}
+    catalog.uri = {{ .Values.catalog.uri }}
+    warehouse = {{ .Values.catalog.warehouse }}
+    {{- with .Values.catalog.defaultDatabase }}
+    default-database = {{ . }}
+    {{- end }}
+
+    # S3A backend (Hadoop-style keys; both Flink and StarRocks read
+    # these directly).
+    fs.s3a.endpoint = {{ .Values.s3a.endpoint }}
+    fs.s3a.path.style.access = {{ .Values.s3a.pathStyleAccess }}
+    fs.s3a.connection.ssl.enabled = {{ .Values.s3a.sslEnabled }}
+    fs.s3a.access.key = ${env:AWS_ACCESS_KEY_ID}
+    fs.s3a.secret.key = ${env:AWS_SECRET_ACCESS_KEY}
+    fs.s3a.impl = org.apache.hadoop.fs.s3a.S3AFileSystem
+
+    {{- range $k, $v := .Values.extraCatalogProperties }}
+    {{ $k }} = {{ $v }}
+    {{- end }}
+
+  # Sidecar block: which Secret to mount as env in consumers. Charts
+  # downstream can read this metadata from the ConfigMap rather than
+  # hardcoding the Secret name.
+  consumer-credentials-secret: |
+    secretName={{ .Values.s3a.credentialsSecret.name }}
+    accessKeyKey={{ .Values.s3a.credentialsSecret.accessKeyKey }}
+    secretKeyKey={{ .Values.s3a.credentialsSecret.secretKeyKey }}
