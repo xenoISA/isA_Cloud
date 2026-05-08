@@ -16,7 +16,7 @@ UMBRELLA="${DEPLOYMENTS}/umbrella/isa-bigdata"
 KAFKA_CHART="${DEPLOYMENTS}/charts/kafka"
 APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
 
-PROFILES=("kind-local" "customer-prod")
+PROFILES=("kind-local" "dev-shared" "customer-prod")
 
 step() {
   printf '\n=== %s ===\n' "$1"
