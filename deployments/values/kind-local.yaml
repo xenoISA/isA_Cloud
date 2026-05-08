@@ -182,3 +182,50 @@ hive-metastore:
     enabled: false
   serviceMonitor:
     enabled: false
+
+minio:
+  auth:
+    create: true
+    secretName: minio-credentials
+    rootUser: minio-kind
+    rootPassword: minio-kind-secret
+  minio:
+    mode: standalone
+    replicas: 1
+    existingSecret: minio-credentials
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: local-path
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    service:
+      type: ClusterIP
+      port: 9000
+    consoleService:
+      # NodePort in kind so devs can poke the Console at http://<node>:30901
+      type: NodePort
+      port: 9001
+      nodePort: 30901
+    buckets:
+      - name: paimon
+        policy: none
+        purge: false
+      - name: flink-checkpoints
+        policy: none
+        purge: false
+      - name: dataphin-export
+        policy: none
+        purge: false
+    podDisruptionBudget:
+      enabled: false
+    networkPolicy:
+      enabled: false
+    metrics:
+      serviceMonitor:
+        enabled: false

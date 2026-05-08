@@ -190,3 +190,51 @@ hive-metastore:
     enabled: true
     labels:
       release: prometheus
+
+minio:
+  # Secret pre-provisioned by the dev cluster operator. Required keys:
+  # access-key, secret-key, rootUser, rootPassword (rootUser/Password
+  # consumed by upstream chart; access-key/secret-key by hive-metastore).
+  auth:
+    create: false
+    secretName: minio-credentials
+  minio:
+    mode: standalone
+    replicas: 1
+    existingSecret: minio-credentials
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    service:
+      type: ClusterIP
+      port: 9000
+    consoleService:
+      type: ClusterIP
+      port: 9001
+    buckets:
+      - name: paimon
+        policy: none
+        purge: false
+      - name: flink-checkpoints
+        policy: none
+        purge: false
+      - name: dataphin-export
+        policy: none
+        purge: false
+    podDisruptionBudget:
+      enabled: false
+    networkPolicy:
+      enabled: false
+    metrics:
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: prometheus

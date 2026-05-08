@@ -1,0 +1,32 @@
+apiVersion: v2
+name: minio
+description: |
+  MinIO object storage for the isA platform's big-data foundation —
+  Paimon warehouse, Flink checkpoints, Dataphin export staging. Wraps
+  the upstream minio/minio chart (v5.x) with profile-aware defaults
+  (kind-local / dev-shared / customer-prod).
+
+  Runs in the isa-bigdata namespace, separate from the existing isA
+  platform MinIO deploys under deployments/kubernetes/<env>/values/.
+  See xenoISA/isA_Cloud#241 and xenoISA/sn-commercial-tower
+  ADR-0002 §2.5 / 00-infra-architecture-overview.md §6.1, §6.2, §1.4.
+type: application
+version: 0.1.0
+appVersion: "RELEASE.2024-12-18T13-15-44Z"
+keywords:
+  - minio
+  - s3
+  - object-storage
+  - paimon
+  - bigdata
+  - data-platform
+home: https://min.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/minio/minio
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: minio
+    version: "5.4.0"
+    repository: https://charts.min.io/

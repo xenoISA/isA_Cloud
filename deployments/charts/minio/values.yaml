@@ -1,0 +1,133 @@
+# =============================================================================
+# minio chart — defaults (xenoISA/isA_Cloud#241)
+# =============================================================================
+# Wraps the upstream minio/minio chart. Defaults below match the staging
+# tier; environment overrides under deployments/values/{kind-local,
+# dev-shared,customer-prod}.yaml.
+#
+# Sizing reference (sn-commercial-tower 00-infra-architecture-overview.md):
+#
+#   kind-local       : standalone, 1 replica, 20Gi local-path
+#   dev-shared       : standalone, 1 replica, 50Gi default-class PVC
+#   customer-prod    : distributed, 4 replicas EC:2 (4+2), 200Gi infortrend-iscsi
+#                      anti-affinity per host, PDB minAvailable=3, NetworkPolicy on
+#
+# This chart is the big-data foundation MinIO. The pre-existing isA
+# platform MinIO deploys under deployments/kubernetes/<env>/values/minio*.yaml
+# are unrelated and stay where they are. Separate clusters, separate
+# buckets, separate auth.
+# =============================================================================
+
+# Upstream minio/minio subchart values. Bucket creation, policies,
+# anti-affinity, NetworkPolicy, and PDB all live in the subchart's
+# values namespace.
+minio:
+  # Deployment mode: standalone for kind/dev, distributed for prod.
+  mode: standalone
+  replicas: 1
+
+  # The image is tracked via Chart.yaml's appVersion; we don't override
+  # tags here so a chart bump pulls the matching MinIO release.
+  image:
+    pullPolicy: IfNotPresent
+
+  # Root credentials: use existingSecret in production; kind/dev may
+  # render a Secret in-cluster via auth.create=true on this chart.
+  rootUser: ""
+  rootPassword: ""
+  existingSecret: ""
+
+  # Buckets the chart creates on first install. The `paimon` bucket is
+  # the warehouse the hive-metastore chart points its `s3a://paimon/...`
+  # path at. flink-checkpoints and dataphin-export are reserved for
+  # the next big-data charts (flink, dataphin) so we don't churn this
+  # chart's release cycle every time a new consumer lands.
+  buckets:
+    - name: paimon
+      policy: none
+      purge: false
+    - name: flink-checkpoints
+      policy: none
+      purge: false
+    - name: dataphin-export
+      policy: none
+      purge: false
+
+  # Persistence — sized per profile. Default targets staging.
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  # Service — ClusterIP for in-cluster S3 traffic. Console exposed only
+  # in kind/dev (consoleService.type: NodePort) or via Ingress later.
+  service:
+    type: ClusterIP
+    port: 9000
+  consoleService:
+    type: ClusterIP
+    port: 9001
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  # Anti-affinity, NetworkPolicy, PDB, ServiceMonitor — the upstream chart
+  # provides all four. Profile values toggle them.
+  affinity: {}
+  topologySpreadConstraints: []
+
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 3
+
+  networkPolicy:
+    enabled: false
+    allowExternal: false
+
+  metrics:
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: prometheus
+
+  serviceAccount:
+    create: true
+    name: "minio"
+
+  # Probes — defaults from the upstream chart are conservative; we keep
+  # them. distributed mode in prod gets a longer startupProbe automatically.
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    failureThreshold: 60
+
+# =============================================================================
+# Auth secret — when create=true the chart renders the `minio-credentials`
+# Secret with rootUser/rootPassword from values. Production must use the
+# upstream chart's existingSecret pattern (set above) and pre-provision
+# the Secret externally (vault / external-secrets).
+#
+# Secret keys are kept compatible with what the hive-metastore chart's
+# S3A `existingSecret: minio-credentials` reads:
+#   - access-key  (==> rootUser)
+#   - secret-key  (==> rootPassword)
+# =============================================================================
+auth:
+  create: false
+  secretName: minio-credentials
+  rootUser: ""
+  rootPassword: ""

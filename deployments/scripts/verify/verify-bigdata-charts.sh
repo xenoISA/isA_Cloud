@@ -17,6 +17,7 @@ KAFKA_CHART="${DEPLOYMENTS}/charts/kafka"
 APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
 POSTGRES_CHART="${DEPLOYMENTS}/charts/postgres-bigdata"
 HMS_CHART="${DEPLOYMENTS}/charts/hive-metastore"
+MINIO_CHART="${DEPLOYMENTS}/charts/minio"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -75,6 +76,10 @@ template_umbrella_with_profile() {
     echo "[fail] no hive-metastore rendering in ${profile}" >&2
     exit 4
   fi
+  if ! grep -q "minio" <<<"${out}"; then
+    echo "[fail] no minio rendering in ${profile}" >&2
+    exit 4
+  fi
 }
 
 main() {
@@ -83,10 +88,14 @@ main() {
   step "helm dependency update ${POSTGRES_CHART}"
   helm dependency update "${POSTGRES_CHART}"
 
+  step "helm dependency update ${MINIO_CHART}"
+  helm dependency update "${MINIO_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
   lint_chart "${HMS_CHART}"
+  lint_chart "${MINIO_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -94,6 +103,8 @@ main() {
   template_chart "${HMS_CHART}" \
     --set db.auth.create=true --set db.auth.password=test \
     --set s3a.auth.create=true --set s3a.auth.accessKey=test --set s3a.auth.secretKey=test
+  template_chart "${MINIO_CHART}" \
+    --set auth.create=true --set auth.rootUser=test --set auth.rootPassword=testtesttest
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"
