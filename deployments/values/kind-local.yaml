@@ -1,0 +1,93 @@
+# =============================================================================
+# isa-bigdata umbrella — kind-local profile
+# =============================================================================
+# W2 verification target. Single broker, ephemeral PG-less Apicurio (kind
+# doesn't have a shared postgres-bigdata yet, so we render the auth Secret
+# in-cluster and assume a kind-local Postgres lives at the host below).
+# =============================================================================
+
+kafka:
+  name: kafka
+  namespace: isa-bigdata
+  nodePool:
+    name: dual
+    replicas: 1
+    roles:
+      - controller
+      - broker
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    jvmOptions:
+      "-Xms": "512m"
+      "-Xmx": "512m"
+  storage:
+    type: persistent-claim
+    size: 20Gi
+    class: local-path
+    deleteClaim: true
+  listeners:
+    plain:
+      enabled: true
+      port: 9092
+    tls:
+      enabled: false
+      port: 9093
+    external:
+      enabled: false
+  tls:
+    mtls: false
+  config:
+    offsets.topic.replication.factor: 1
+    transaction.state.log.replication.factor: 1
+    transaction.state.log.min.isr: 1
+    default.replication.factor: 1
+    min.insync.replicas: 1
+    log.retention.hours: 24
+    compression.type: zstd
+  metrics:
+    enabled: true
+    renderConfigMap: true
+  serviceMonitor:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
+  networkPolicy:
+    enabled: false
+  entityOperator:
+    enabled: false
+
+apicurio-registry:
+  name: apicurio-registry
+  namespace: isa-bigdata
+  replicas: 1
+  registry:
+    compatibilityLevel: BACKWARD
+    authEnabled: false
+  db:
+    host: postgres-kind.isa-bigdata.svc.cluster.local
+    port: 5432
+    name: apicurio
+    auth:
+      create: true
+      username: apicurio
+      password: apicurio-kind
+  metrics:
+    enabled: true
+  serviceMonitor:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  networkPolicy:
+    enabled: false

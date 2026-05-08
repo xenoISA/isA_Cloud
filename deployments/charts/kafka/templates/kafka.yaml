@@ -1,0 +1,117 @@
+{{- /*
+  Strimzi KRaft cluster topology.
+
+  Two custom resources:
+    1. KafkaNodePool — declares the broker/controller pods. KRaft requires
+       at least one node pool with both roles (or split controller and
+       broker pools).
+    2. Kafka — top-level cluster spec (listeners, replication, metrics).
+
+  The `strimzi.io/node-pools: enabled` and `strimzi.io/kraft: enabled`
+  annotations on the Kafka resource opt this cluster into KRaft mode.
+*/ -}}
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: {{ .Values.nodePool.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "kafka.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ .Values.name }}
+spec:
+  replicas: {{ .Values.nodePool.replicas }}
+  roles:
+    {{- range .Values.nodePool.roles }}
+    - {{ . }}
+    {{- end }}
+  storage:
+    type: {{ .Values.storage.type }}
+    {{- if eq .Values.storage.type "persistent-claim" }}
+    size: {{ .Values.storage.size }}
+    {{- if .Values.storage.class }}
+    class: {{ .Values.storage.class }}
+    {{- end }}
+    deleteClaim: {{ .Values.storage.deleteClaim }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.nodePool.resources | nindent 4 }}
+  {{- with .Values.nodePool.jvmOptions }}
+  jvmOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    pod:
+      {{- if and .Values.podAntiAffinity.enabled (gt (int .Values.nodePool.replicas) 1) }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  strimzi.io/cluster: {{ .Values.name }}
+              topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "kafka.labels" . | nindent 4 }}
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: {{ .Values.kafkaVersion | quote }}
+    listeners:
+      {{- if .Values.listeners.plain.enabled }}
+      - name: plain
+        port: {{ .Values.listeners.plain.port }}
+        type: internal
+        tls: false
+      {{- end }}
+      {{- if .Values.listeners.tls.enabled }}
+      - name: tls
+        port: {{ .Values.listeners.tls.port }}
+        type: internal
+        tls: true
+        {{- if .Values.tls.mtls }}
+        authentication:
+          type: tls
+        {{- end }}
+      {{- end }}
+      {{- if .Values.listeners.external.enabled }}
+      - name: external
+        port: {{ .Values.listeners.external.port }}
+        type: {{ .Values.listeners.external.type }}
+        tls: true
+        {{- if .Values.tls.mtls }}
+        authentication:
+          type: tls
+        {{- end }}
+      {{- end }}
+    config:
+      {{- range $k, $v := .Values.config }}
+      {{ $k }}: {{ $v }}
+      {{- end }}
+    {{- if .Values.metrics.enabled }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ include "kafka.metricsConfigMapName" . }}
+          key: {{ .Values.metrics.configMapKey }}
+    {{- end }}
+  {{- if .Values.entityOperator.enabled }}
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+  {{- end }}

@@ -1,0 +1,19 @@
+# =============================================================================
+# isa-bigdata umbrella — defaults
+# =============================================================================
+# This file holds the DEFAULT pass-through values for the bundled subcharts.
+# Environment-specific overrides live under deployments/values/*.yaml and are
+# applied via `helm template ... -f values/<env>.yaml`.
+#
+# Default profile here matches the staging tier (3-broker Kafka, single
+# Apicurio replica, no NetworkPolicy). It deliberately does NOT match
+# customer-prod — production must explicitly opt in via values/customer-prod.
+# =============================================================================
+
+kafka:
+  enabled: true
+  namespace: isa-bigdata
+
+apicurio-registry:
+  enabled: true
+  namespace: isa-bigdata

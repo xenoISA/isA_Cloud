@@ -1,0 +1,28 @@
+apiVersion: v2
+name: isa-bigdata
+description: |
+  Umbrella chart that aggregates the big-data foundation components
+  declared in xenoISA/sn-commercial-tower ADR-0002 §2.5 and
+  bigdata-architecture.md §4.1: Kafka (Strimzi-managed) + Apicurio
+  Registry today; future deps (postgres-bigdata, hive-metastore,
+  flink-operator, paimon-tools, starrocks-fe/be, flink-cdc-jobs) land in
+  follow-up PRs.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kafka
+  - apicurio
+  - bigdata
+  - data-platform
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: kafka
+    version: 0.1.0
+    repository: file://../../charts/kafka
+  - name: apicurio-registry
+    version: 0.1.0
+    repository: file://../../charts/apicurio-registry

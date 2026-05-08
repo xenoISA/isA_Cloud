@@ -1,0 +1,23 @@
+apiVersion: v2
+name: kafka
+description: |
+  Strimzi-managed Apache Kafka cluster (KRaft mode) for the isA platform's
+  big-data foundation. Renders KafkaNodePool + Kafka custom resources; the
+  Strimzi Operator (deployed separately) reconciles the underlying
+  StatefulSet, Services, PDB, and CA secrets. See xenoISA/isA_Cloud#234
+  and xenoISA/sn-commercial-tower ADR-0002 §2.5.
+type: application
+version: 0.1.0
+appVersion: "3.7.0"
+keywords:
+  - kafka
+  - strimzi
+  - kraft
+  - bigdata
+  - data-platform
+home: https://strimzi.io
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/strimzi/strimzi-kafka-operator
+maintainers:
+  - name: isA Platform
