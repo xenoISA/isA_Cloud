@@ -274,3 +274,103 @@ hive-metastore:
     enabled: true
     labels:
       release: prometheus
+
+minio:
+  # Vault-provisioned Secret. Required keys: rootUser, rootPassword
+  # (consumed by upstream chart) + access-key, secret-key (consumed
+  # by hive-metastore S3A). The chart does NOT render this Secret in
+  # prod; auth.create stays false.
+  auth:
+    create: false
+    secretName: minio-credentials
+  minio:
+    mode: distributed
+    # 4 replicas with EC:2 → 4 data + 2 parity per design
+    # (00-infra-architecture-overview.md §6.2: "minio (4 副本 EC 4+2)").
+    replicas: 4
+    drivesPerNode: 1
+    pools: 1
+    existingSecret: minio-credentials
+    image:
+      pullPolicy: IfNotPresent
+    persistence:
+      enabled: true
+      size: 200Gi
+      storageClass: infortrend-iscsi
+      accessMode: ReadWriteOnce
+    resources:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    service:
+      type: ClusterIP
+      port: 9000
+    consoleService:
+      type: ClusterIP
+      port: 9001
+    environment:
+      MINIO_BROWSER: "on"
+      MINIO_PROMETHEUS_AUTH_TYPE: "public"
+      # Erasure-coding storage class for new objects: 4 data + 2 parity.
+      # Tolerates loss of any 2 nodes/drives without data loss.
+      MINIO_STORAGE_CLASS_STANDARD: "EC:2"
+    buckets:
+      - name: paimon
+        policy: none
+        purge: false
+      - name: flink-checkpoints
+        policy: none
+        purge: false
+      - name: dataphin-export
+        policy: none
+        purge: false
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: minio
+            topologyKey: kubernetes.io/hostname
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: minio
+    podDisruptionBudget:
+      enabled: true
+      # 4-replica EC:2 tolerates 2 node losses; require 3 healthy at all times
+      # to keep both writes and reads safe during a rolling restart.
+      minAvailable: 3
+    networkPolicy:
+      enabled: true
+      allowExternal: false
+    metrics:
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: prometheus
+        interval: 30s
+        scrapeTimeout: 10s
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 3
+    startupProbe:
+      enabled: true
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 60
+    priorityClassName: infra-critical

@@ -32,3 +32,6 @@ dependencies:
   - name: hive-metastore
     version: 0.1.0
     repository: file://../../charts/hive-metastore
+  - name: minio
+    version: 0.1.0
+    repository: file://../../charts/minio

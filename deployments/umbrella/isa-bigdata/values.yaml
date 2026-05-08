@@ -24,3 +24,6 @@ postgres-bigdata:
 hive-metastore:
   enabled: true
   namespace: isa-bigdata
+
+minio:
+  enabled: true
