@@ -84,7 +84,7 @@ apicurio-registry:
     compatibilityLevel: BACKWARD
     authEnabled: false
   db:
-    host: postgresql-bigdata.isa-bigdata.svc.cluster.local
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
     port: 5432
     name: apicurio
     auth:
@@ -120,3 +120,88 @@ apicurio-registry:
       - isa-bigdata
       - isa-data
       - isa-mcp
+
+postgres-bigdata:
+  postgresql:
+    # 1 primary + 2 read replicas via bitnami's replication architecture.
+    # No automatic failover — manual promotion only. Switch to
+    # bitnami/postgresql-ha later if true HA is needed.
+    architecture: replication
+    auth:
+      enablePostgresUser: true
+      # Required: external-secrets / vault provisions this Secret with
+      # keys postgres-password, password, replication-password. initdb
+      # is intentionally empty — operators pre-create users + databases
+      # via a separate provisioning job so passwords never appear in
+      # values files.
+      existingSecret: postgres-bigdata-auth
+      username: bigdata
+      database: bigdata
+    primary:
+      persistence:
+        enabled: true
+        storageClass: infortrend-iscsi
+        size: 500Gi
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+      priorityClassName: infra-critical
+      podAntiAffinityPreset: hard
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+              app.kubernetes.io/component: primary
+      pdb:
+        create: true
+        minAvailable: 1
+      # No initdb — users + databases pre-provisioned by external job.
+      initdb:
+        scripts: {}
+    readReplicas:
+      replicaCount: 2
+      persistence:
+        enabled: true
+        storageClass: infortrend-iscsi
+        size: 500Gi
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+      priorityClassName: infra-critical
+      podAntiAffinityPreset: hard
+      pdb:
+        create: true
+        minAvailable: 1
+    networkPolicy:
+      enabled: true
+      ingressRules:
+        primaryAccessOnlyFrom:
+          enabled: true
+          customRules:
+            - from:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: isa-bigdata
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: isa-data
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: isa-mcp
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: prometheus

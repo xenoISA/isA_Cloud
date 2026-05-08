@@ -69,7 +69,12 @@ apicurio-registry:
     compatibilityLevel: BACKWARD
     authEnabled: false
   db:
-    host: postgres-kind.isa-bigdata.svc.cluster.local
+    # Targets the postgres-bigdata chart's primary Service. The bitnami
+    # postgresql chart names its primary Service `<release>-postgresql`
+    # by default; helm install bigdata umbrella puts the release at
+    # `bigdata-postgresql`. Override here if you install with a different
+    # release name.
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
     port: 5432
     name: apicurio
     auth:
@@ -91,3 +96,48 @@ apicurio-registry:
       memory: 512Mi
   networkPolicy:
     enabled: false
+
+postgres-bigdata:
+  postgresql:
+    architecture: standalone
+    auth:
+      enablePostgresUser: true
+      postgresPassword: kind-postgres-password
+      username: bigdata
+      password: kind-bigdata-password
+      database: bigdata
+    primary:
+      persistence:
+        enabled: true
+        storageClass: local-path
+        size: 4Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      initdb:
+        scripts:
+          02-bigdata-consumers.sql: |
+            -- Pre-create the per-consumer roles and databases so downstream
+            -- charts (apicurio-registry, hive-metastore, dataphin) can
+            -- connect with their own credentials. Passwords match the
+            -- existingSecret values rendered by each consumer chart in
+            -- kind-local mode.
+            CREATE USER apicurio WITH PASSWORD 'apicurio-kind';
+            CREATE DATABASE apicurio OWNER apicurio;
+            GRANT ALL PRIVILEGES ON DATABASE apicurio TO apicurio;
+
+            CREATE USER hive_metastore WITH PASSWORD 'hms-kind';
+            CREATE DATABASE hive_metastore OWNER hive_metastore;
+            GRANT ALL PRIVILEGES ON DATABASE hive_metastore TO hive_metastore;
+
+            CREATE USER dataphin WITH PASSWORD 'dataphin-kind';
+            CREATE DATABASE dataphin OWNER dataphin;
+            GRANT ALL PRIVILEGES ON DATABASE dataphin TO dataphin;
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: false

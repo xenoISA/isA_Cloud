@@ -76,7 +76,7 @@ apicurio-registry:
     compatibilityLevel: BACKWARD
     authEnabled: false
   db:
-    host: postgresql-bigdata.isa-bigdata.svc.cluster.local
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
     port: 5432
     name: apicurio
     auth:
@@ -99,3 +99,53 @@ apicurio-registry:
       memory: 1Gi
   networkPolicy:
     enabled: false
+
+postgres-bigdata:
+  postgresql:
+    architecture: standalone
+    auth:
+      enablePostgresUser: true
+      # All credentials sourced from a pre-provisioned Secret (created by
+      # the operator or external-secrets in the dev cluster). Required
+      # keys: postgres-password, password, replication-password.
+      existingSecret: postgres-bigdata-auth
+      username: bigdata
+      database: bigdata
+    primary:
+      persistence:
+        enabled: true
+        storageClass: ""
+        size: 50Gi
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      # initdb runs once on first startup; consumer Secrets must already
+      # exist in-cluster (apicurio-registry-db, hive-metastore-db,
+      # dataphin-db) so downstream charts can `existingSecret`-reference
+      # the same passwords used here. To keep initdb deterministic we
+      # bake the consumer passwords directly — for non-shared secrets
+      # bypass this profile and use customer-prod's `initdb: scripts: {}`.
+      initdb:
+        scripts:
+          02-bigdata-consumers.sql: |
+            CREATE USER apicurio WITH PASSWORD 'CHANGE_ME_DEV_APICURIO';
+            CREATE DATABASE apicurio OWNER apicurio;
+            GRANT ALL PRIVILEGES ON DATABASE apicurio TO apicurio;
+
+            CREATE USER hive_metastore WITH PASSWORD 'CHANGE_ME_DEV_HMS';
+            CREATE DATABASE hive_metastore OWNER hive_metastore;
+            GRANT ALL PRIVILEGES ON DATABASE hive_metastore TO hive_metastore;
+
+            CREATE USER dataphin WITH PASSWORD 'CHANGE_ME_DEV_DATAPHIN';
+            CREATE DATABASE dataphin OWNER dataphin;
+            GRANT ALL PRIVILEGES ON DATABASE dataphin TO dataphin;
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: prometheus

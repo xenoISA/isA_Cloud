@@ -1,0 +1,91 @@
+# =============================================================================
+# postgres-bigdata chart — defaults (xenoISA/isA_Cloud#237)
+# =============================================================================
+# This chart wraps bitnami/postgresql. The defaults below match the staging
+# tier; environment overrides live under deployments/values/{kind-local,
+# dev-shared,customer-prod}.yaml.
+#
+# Sizing reference (from sn-commercial-tower bigdata-architecture.md §4.1
+# and 00-infra-architecture-overview.md §6.1 / §6.2):
+#
+#   kind-local       : standalone, 4Gi local-path, plaintext auth (kind only)
+#   dev-shared       : standalone, 50Gi default-class PVC, existingSecret
+#   customer-prod    : 1 primary + 2 read replicas, 500Gi infortrend-iscsi,
+#                      anti-affinity per host, infra-critical priorityClass,
+#                      NetworkPolicy on
+#
+# The three consumer databases — apicurio, hive_metastore, dataphin — are
+# created via initdb scripts that the per-profile values block expands.
+# =============================================================================
+
+# Bitnami postgresql subchart values. The bitnami chart is the source of
+# truth for the actual StatefulSet — we only set our defaults here.
+postgresql:
+  # Architecture: standalone for kind/dev, replication for prod.
+  architecture: standalone
+
+  auth:
+    # Postgres root user — the bitnami chart manages this.
+    enablePostgresUser: true
+    postgresPassword: ""        # MUST be set per environment (or use existingSecret)
+    # Application user that the chart creates and owns auth.database.
+    # Naming convention: keep this generic ("bigdata") to make the
+    # per-database initdb scripts simpler. Each consumer (apicurio, hms,
+    # dataphin) owns its own database via initdb-created users.
+    username: bigdata
+    password: ""                # MUST be set per environment (or use existingSecret)
+    database: bigdata
+    # When non-empty, bitnami reads username/password/postgres-password
+    # from the named Secret and ignores the plaintext values above.
+    existingSecret: ""
+
+  primary:
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    # initdb scripts run once on first startup, as the postgres superuser,
+    # before the chart marks the primary ready. Per-environment values
+    # files extend this block with the consumer-creation SQL.
+    initdb:
+      scripts: {}
+
+  # Read replicas — only when architecture: replication.
+  readReplicas:
+    replicaCount: 0
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  # Built-in NetworkPolicy from the bitnami subchart. We use this rather
+  # than rendering our own to keep the dep model thin.
+  networkPolicy:
+    enabled: false
+    # When enabled, bitnami's chart constructs an allowlist; this map is
+    # appended via per-environment values files.
+    ingressRules:
+      primaryAccessOnlyFrom:
+        enabled: false
+        customRules: []
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: prometheus

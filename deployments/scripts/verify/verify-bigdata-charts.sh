@@ -15,6 +15,7 @@ DEPLOYMENTS="${REPO_ROOT}/deployments"
 UMBRELLA="${DEPLOYMENTS}/umbrella/isa-bigdata"
 KAFKA_CHART="${DEPLOYMENTS}/charts/kafka"
 APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
+POSTGRES_CHART="${DEPLOYMENTS}/charts/postgres-bigdata"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -65,16 +66,25 @@ template_umbrella_with_profile() {
     echo "[fail] no apicurio-registry rendering in ${profile}" >&2
     exit 4
   fi
+  if ! grep -q "postgresql" <<<"${out}"; then
+    echo "[fail] no postgresql (postgres-bigdata) rendering in ${profile}" >&2
+    exit 4
+  fi
 }
 
 main() {
   require_helm
 
+  step "helm dependency update ${POSTGRES_CHART}"
+  helm dependency update "${POSTGRES_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
+  lint_chart "${POSTGRES_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
+  template_chart "${POSTGRES_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"
