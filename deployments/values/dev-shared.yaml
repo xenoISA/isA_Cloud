@@ -149,3 +149,44 @@ postgres-bigdata:
         enabled: true
         labels:
           release: prometheus
+
+hive-metastore:
+  name: hive-metastore
+  namespace: isa-bigdata
+  replicas: 1
+  db:
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
+    port: 5432
+    name: hive_metastore
+    auth:
+      create: false
+      existingSecret: hive-metastore-db
+  schemaInit:
+    enabled: true
+  warehouse:
+    dir: "s3a://paimon/warehouse/"
+  s3a:
+    enabled: true
+    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    pathStyleAccess: true
+    auth:
+      create: false
+      existingSecret: minio-credentials
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  jvm:
+    xms: "512m"
+    xmx: "1024m"
+  podDisruptionBudget:
+    enabled: false
+  networkPolicy:
+    enabled: false
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus

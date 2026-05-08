@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "hms.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  serviceName: {{ .Values.name }}
+  selector:
+    matchLabels:
+      {{- include "hms.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hms.labels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: hive-metastore
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # `hive --service metastore` runs the standalone metastore.
+          # The image's default entrypoint also accepts `metastore` as a
+          # shorthand; we set it explicitly to avoid drift across image
+          # tag bumps.
+          args:
+            - "--service"
+            - "metastore"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: thrift
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          env:
+            # SERVICE_NAME is what the Hive entrypoint uses when no
+            # `--service` flag is passed; we set both for safety.
+            - name: SERVICE_NAME
+              value: metastore
+            - name: HIVE_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.dbSecretName" . }}
+                  key: username
+            - name: HIVE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.dbSecretName" . }}
+                  key: password
+            {{- if .Values.s3a.enabled }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.s3aSecretName" . }}
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.s3aSecretName" . }}
+                  key: secret-key
+            {{- end }}
+            - name: HIVE_OPTS
+              value: "-Xms{{ .Values.jvm.xms }} -Xmx{{ .Values.jvm.xmx }}"
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # HMS has no HTTP health endpoint — TCP probes on the Thrift
+          # port are the canonical pattern.
+          livenessProbe:
+            tcpSocket:
+              port: thrift
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            tcpSocket:
+              port: thrift
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/hive/conf/hive-site.xml
+              subPath: hive-site.xml
+              readOnly: true
+            # readOnlyRootFilesystem demands writable tmp + Hive scratch.
+            - name: tmp
+              mountPath: /tmp
+            - name: hive-scratch
+              mountPath: /opt/hive/scratch
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "hms.configMapName" . }}
+            items:
+              - key: hive-site.xml
+                path: hive-site.xml
+        - name: tmp
+          emptyDir: {}
+        - name: hive-scratch
+          emptyDir: {}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

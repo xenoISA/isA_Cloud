@@ -205,3 +205,72 @@ postgres-bigdata:
         enabled: true
         labels:
           release: prometheus
+
+hive-metastore:
+  name: hive-metastore
+  namespace: isa-bigdata
+  # Active-active HMS — multiple replicas all backed by the same Postgres.
+  # No automatic failover needed; clients (Flink CDC, Dataphin, StarRocks)
+  # round-robin via the ClusterIP Service.
+  replicas: 2
+  db:
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
+    port: 5432
+    name: hive_metastore
+    auth:
+      create: false
+      existingSecret: hive-metastore-db
+  # Operator pre-runs schematool via a vault-driven Job before the chart
+  # is installed; disabling the Helm hook prevents a re-install from
+  # racing the live database.
+  schemaInit:
+    enabled: false
+  warehouse:
+    dir: "s3a://paimon/warehouse/"
+  s3a:
+    enabled: true
+    # Override once the minio chart lands; for now points at the planned
+    # minio Service in isa-bigdata.
+    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    pathStyleAccess: true
+    auth:
+      create: false
+      existingSecret: minio-credentials
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+  jvm:
+    xms: "2048m"
+    xmx: "4096m"
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: hive-metastore
+          topologyKey: kubernetes.io/hostname
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app: hive-metastore
+  priorityClassName: infra-critical
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  networkPolicy:
+    enabled: true
+    allowedNamespaces:
+      - isa-bigdata
+      - isa-data
+      - isa-mcp
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus

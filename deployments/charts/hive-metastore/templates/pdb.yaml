@@ -1,0 +1,18 @@
+{{- /*
+  PDB only renders when replicas > 1. With a single pod a PDB makes the
+  pod undrainable, which blocks node maintenance.
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "hms.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hms.selectorLabels" . | nindent 6 }}
+{{- end }}

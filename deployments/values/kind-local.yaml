@@ -141,3 +141,44 @@ postgres-bigdata:
       enabled: true
       serviceMonitor:
         enabled: false
+
+hive-metastore:
+  name: hive-metastore
+  namespace: isa-bigdata
+  replicas: 1
+  db:
+    host: bigdata-postgresql.isa-bigdata.svc.cluster.local
+    port: 5432
+    name: hive_metastore
+    auth:
+      create: true
+      username: hive_metastore
+      password: hms-kind
+  schemaInit:
+    enabled: true
+  warehouse:
+    dir: "s3a://paimon/warehouse/"
+  s3a:
+    enabled: true
+    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    pathStyleAccess: true
+    auth:
+      create: true
+      accessKey: minio-kind
+      secretKey: minio-kind-secret
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  jvm:
+    xms: "256m"
+    xmx: "512m"
+  podDisruptionBudget:
+    enabled: false
+  networkPolicy:
+    enabled: false
+  serviceMonitor:
+    enabled: false

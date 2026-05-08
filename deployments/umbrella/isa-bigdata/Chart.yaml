@@ -29,3 +29,6 @@ dependencies:
   - name: postgres-bigdata
     version: 0.1.0
     repository: file://../../charts/postgres-bigdata
+  - name: hive-metastore
+    version: 0.1.0
+    repository: file://../../charts/hive-metastore
