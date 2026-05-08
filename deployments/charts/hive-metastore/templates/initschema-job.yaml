@@ -1,0 +1,98 @@
+{{- /*
+  schematool -initSchema -dbType postgres — bootstraps the HMS schema in
+  the backing PostgreSQL database. Wrapped as a Helm pre-install +
+  pre-upgrade hook so a chart upgrade that bumps Hive (and ships a
+  schema migration) re-runs schematool with -upgradeSchema.
+
+  Idempotent: schematool detects an existing schema version and exits
+  cleanly rather than replaying DDL. backoffLimit=1 — schema failures
+  are usually fatal config errors; retrying rarely helps.
+
+  ttlSecondsAfterFinished cleans the Job up after success so successive
+  installs don't accumulate completed Jobs in the namespace.
+*/ -}}
+{{- if .Values.schemaInit.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.name }}-init-schema
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "hms.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install{{ if .Values.schemaInit.upgradeOnUpgrade }},pre-upgrade{{ end }}
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.schemaInit.backoffLimit }}
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "hms.labels" . | nindent 8 }}
+        component: init-schema
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: schematool
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # `schematool` lives on the Hive image PATH. Calling it with
+          # -initOrUpgradeSchema would be ideal but is not in 4.0.x;
+          # instead we run -info first and only initialize if needed.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "[init-schema] checking existing HMS schema..."
+              if /opt/hive/bin/schematool -dbType postgres -info >/dev/null 2>&1; then
+                echo "[init-schema] schema already present; running upgradeSchema (no-op if at HEAD)."
+                /opt/hive/bin/schematool -dbType postgres -upgradeSchema -verbose
+              else
+                echo "[init-schema] no schema found; running initSchema."
+                /opt/hive/bin/schematool -dbType postgres -initSchema -verbose
+              fi
+              echo "[init-schema] done."
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: HIVE_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.dbSecretName" . }}
+                  key: username
+            - name: HIVE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hms.dbSecretName" . }}
+                  key: password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /opt/hive/conf/hive-site.xml
+              subPath: hive-site.xml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "hms.configMapName" . }}
+            items:
+              - key: hive-site.xml
+                path: hive-site.xml
+        - name: tmp
+          emptyDir: {}
+{{- end }}

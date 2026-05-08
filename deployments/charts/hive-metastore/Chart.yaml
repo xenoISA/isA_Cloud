@@ -1,0 +1,28 @@
+apiVersion: v2
+name: hive-metastore
+description: |
+  Apache Hive Metastore (HMS) running standalone as the catalog server
+  for the isA platform's big-data foundation. Backed by the
+  postgres-bigdata chart (hive_metastore database). Exposes the Thrift
+  catalog API on :9083 for Paimon, Flink, StarRocks, and Dataphin to
+  share table metadata.
+
+  Self-written chart per design (no upstream Helm chart). See
+  xenoISA/isA_Cloud#239, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5.
+type: application
+version: 0.1.0
+appVersion: "4.0.1"
+keywords:
+  - hive
+  - hive-metastore
+  - hms
+  - paimon
+  - bigdata
+  - data-platform
+home: https://hive.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/hive
+maintainers:
+  - name: isA Platform

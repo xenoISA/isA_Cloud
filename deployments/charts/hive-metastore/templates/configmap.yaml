@@ -1,0 +1,108 @@
+{{- /*
+  hive-site.xml — the only config the metastore reads. We render the JDBC,
+  Thrift, warehouse, and S3A blocks; profile-specific values can append
+  arbitrary <property> entries via .Values.extraSiteProperties.
+
+  Credentials never appear in the ConfigMap — the StatefulSet exposes
+  them as env vars (HIVE_DB_USERNAME / HIVE_DB_PASSWORD / AWS_*), and
+  hive-site.xml below references those env vars via Hive's own
+  ${env:VAR} interpolation. This is the canonical Hive pattern: keep
+  hive-site.xml in version-control-safe ConfigMaps and inject secrets
+  via env at pod start.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hms.configMapName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "hms.labels" . | nindent 4 }}
+data:
+  hive-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+      <!-- ============== JDBC backing store ============== -->
+      <property>
+        <name>javax.jdo.option.ConnectionURL</name>
+        <value>{{ include "hms.jdbcUrl" . }}</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionDriverName</name>
+        <value>{{ .Values.db.driver }}</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionUserName</name>
+        <value>${env:HIVE_DB_USERNAME}</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionPassword</name>
+        <value>${env:HIVE_DB_PASSWORD}</value>
+      </property>
+      <property>
+        <name>datanucleus.schema.autoCreateAll</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>hive.metastore.schema.verification</name>
+        <value>true</value>
+      </property>
+
+      <!-- ============== Thrift listener ============== -->
+      <property>
+        <name>metastore.thrift.uris</name>
+        <value>thrift://{{ .Values.name }}.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.port }}</value>
+      </property>
+      <property>
+        <name>metastore.thrift.port</name>
+        <value>{{ .Values.port }}</value>
+      </property>
+      <property>
+        <name>metastore.warehouse.dir</name>
+        <value>{{ .Values.warehouse.dir }}</value>
+      </property>
+      <!-- Hive 4.x renamed many keys; keep both old + new for client compat. -->
+      <property>
+        <name>hive.metastore.uris</name>
+        <value>thrift://{{ .Values.name }}.{{ .Values.namespace }}.svc.cluster.local:{{ .Values.port }}</value>
+      </property>
+      <property>
+        <name>hive.metastore.warehouse.dir</name>
+        <value>{{ .Values.warehouse.dir }}</value>
+      </property>
+
+      {{- if .Values.s3a.enabled }}
+      <!-- ============== S3A (MinIO) — Paimon warehouse ============== -->
+      <property>
+        <name>fs.s3a.endpoint</name>
+        <value>{{ .Values.s3a.endpoint }}</value>
+      </property>
+      <property>
+        <name>fs.s3a.path.style.access</name>
+        <value>{{ .Values.s3a.pathStyleAccess }}</value>
+      </property>
+      <property>
+        <name>fs.s3a.access.key</name>
+        <value>${env:AWS_ACCESS_KEY_ID}</value>
+      </property>
+      <property>
+        <name>fs.s3a.secret.key</name>
+        <value>${env:AWS_SECRET_ACCESS_KEY}</value>
+      </property>
+      <property>
+        <name>fs.s3a.connection.ssl.enabled</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>fs.s3a.impl</name>
+        <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+      </property>
+      {{- end }}
+
+      {{- range $k, $v := .Values.extraSiteProperties }}
+      <property>
+        <name>{{ $k }}</name>
+        <value>{{ $v }}</value>
+      </property>
+      {{- end }}
+    </configuration>

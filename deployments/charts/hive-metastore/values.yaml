@@ -1,0 +1,197 @@
+# =============================================================================
+# hive-metastore chart — defaults (xenoISA/isA_Cloud#239)
+# =============================================================================
+# Apache Hive Metastore standalone. Profile overrides under
+# deployments/values/{kind-local,dev-shared,customer-prod}.yaml.
+#
+# Sizing reference (sn-commercial-tower 00-infra-architecture-overview.md
+# §6.1 / §6.2):
+#
+#   kind-local       : 1 replica, embedded creds, schemaInit job runs
+#   dev-shared       : 1 replica, existingSecret, schemaInit runs
+#   customer-prod    : 2 replicas (active-active), existingSecret,
+#                      schemaInit disabled (operator pre-init via vault),
+#                      anti-affinity, PDB, NetworkPolicy on
+# =============================================================================
+
+name: hive-metastore
+namespace: isa-bigdata
+
+image:
+  registry: docker.io
+  # apache/hive ships a single image that includes both HiveServer2 and
+  # the Metastore. We launch only the metastore via `hive --service
+  # metastore`. ~700MB; Apache hasn't published a slim metastore-only
+  # image as of Hive 4.0.x, so we accept the full image.
+  repository: apache/hive
+  tag: "4.0.1"
+  pullPolicy: IfNotPresent
+
+# 1 replica is the staging/local default. HMS supports active-active —
+# customer-prod scales to 2.
+replicas: 1
+
+# Thrift port the metastore listens on. Stable across Hive versions.
+port: 9083
+
+# =============================================================================
+# Backing PostgreSQL — points at the postgres-bigdata chart's bigdata-postgresql
+# Service in the umbrella. Override host per environment if you install
+# postgres-bigdata under a different release name.
+# =============================================================================
+db:
+  driver: org.postgresql.Driver
+  host: bigdata-postgresql.isa-bigdata.svc.cluster.local
+  port: 5432
+  name: hive_metastore
+  # Two auth modes (mirrors apicurio + pgbouncer):
+  #   1. existingSecret — keys: username, password
+  #   2. plaintext (auth.create=true) — for kind dev clusters only.
+  auth:
+    create: false
+    existingSecret: hive-metastore-db
+    username: hive_metastore
+    password: ""        # required when create=true
+
+# =============================================================================
+# Schema initialization — Helm pre-install Job that runs `schematool
+# -initSchema -dbType postgres`. Idempotent: schematool exits cleanly when
+# the schema already exists. Disable in profiles where the operator
+# pre-provisions the schema externally (customer-prod with vault job).
+# =============================================================================
+schemaInit:
+  enabled: true
+  # Restart pattern: helm.sh/hook = pre-install + pre-upgrade so a
+  # version bump of HMS that ships a schema migration runs schematool
+  # -upgradeSchema automatically.
+  upgradeOnUpgrade: true
+  # backoffLimit on the Job — schematool failures are usually fatal
+  # config errors; retrying rarely helps.
+  backoffLimit: 1
+
+# =============================================================================
+# Warehouse (Paimon-on-MinIO) — HMS itself doesn't write here, but it
+# returns this path to clients (Flink CDC, Dataphin, StarRocks) when
+# they create unqualified tables. Override per environment when MinIO
+# lands.
+# =============================================================================
+warehouse:
+  # s3a://<bucket>/<prefix>/. Default is a placeholder that resolves
+  # against any S3-compatible endpoint set in `s3a.endpoint`. When the
+  # minio chart lands, point at minio.isa-bigdata.svc.cluster.local.
+  dir: "s3a://paimon/warehouse/"
+
+s3a:
+  enabled: true
+  # MinIO defaults — override in customer-prod once the minio chart is
+  # in place. The hive-site.xml renders these into fs.s3a.* keys.
+  endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+  pathStyleAccess: true
+  # Two auth modes:
+  #   1. existingSecret — keys: access-key, secret-key
+  #   2. plaintext       — for kind dev clusters only.
+  auth:
+    create: false
+    existingSecret: minio-credentials
+    accessKey: ""
+    secretKey: ""
+
+# =============================================================================
+# Extra hive-site.xml properties. Each entry becomes a <property>...</property>
+# block. Defaults below cover the metastore basics; profiles add S3A
+# tuning + Paimon-specific knobs.
+# =============================================================================
+extraSiteProperties: {}
+  # Example:
+  # metastore.notification.event.poll.interval: "60s"
+  # metastore.event.db.notification.api.auth: "false"
+
+# =============================================================================
+# Probes — HMS doesn't expose a stdlib HTTP health endpoint, so we use a
+# TCP probe on the Thrift port. Once the listener is open the Java
+# process is ready to accept catalog calls.
+# =============================================================================
+probes:
+  liveness:
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+# =============================================================================
+# Resources / scheduling
+# =============================================================================
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# JVM heap. The metastore is mostly RPC + JDBC; 1Gi heap suffices for the
+# staging tier. customer-prod overrides this to 4Gi.
+jvm:
+  xms: "512m"
+  xmx: "1024m"
+
+podSecurityContext:
+  runAsNonRoot: true
+  # Apache Hive image runs as `hive` (uid 1000) by default. The
+  # apache/hive 4.x images do NOT enforce non-root, but we pin uid here
+  # so the readOnlyRootFilesystem + RBAC story stays predictable.
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # The Hive image writes to /tmp during normal operation; we mount an
+  # emptyDir there and keep root read-only.
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 1000
+
+podDisruptionBudget:
+  enabled: true
+  # Only takes effect when replicas > 1.
+  minAvailable: 1
+
+topologySpreadConstraints: []
+
+affinity: {}
+
+priorityClassName: ""
+
+service:
+  type: ClusterIP
+  annotations: {}
+
+networkPolicy:
+  enabled: false
+  allowedNamespaces:
+    - isa-bigdata
+
+serviceMonitor:
+  # HMS exposes JMX MBeans but Apache hasn't bundled a Prometheus-friendly
+  # endpoint. ServiceMonitor here scrapes a future jmx_exporter sidecar;
+  # off by default until that follow-up lands.
+  enabled: false
+  port: metrics
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+
+podAnnotations: {}
+
+extraEnv: []
