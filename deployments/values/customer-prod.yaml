@@ -1,0 +1,122 @@
+# =============================================================================
+# isa-bigdata umbrella — customer-prod profile
+# =============================================================================
+# W4 production target. 3-broker Strimzi Kafka with iSCSI persistent claims,
+# mTLS, anti-affinity, and a dedicated NetworkPolicy. Apicurio runs 2
+# replicas against the shared postgresql-bigdata cluster.
+# =============================================================================
+
+kafka:
+  name: kafka
+  namespace: isa-bigdata
+  nodePool:
+    name: dual
+    replicas: 3
+    roles:
+      - controller
+      - broker
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "4"
+        memory: 12Gi
+    jvmOptions:
+      "-Xms": "4096m"
+      "-Xmx": "4096m"
+  storage:
+    type: persistent-claim
+    size: 80Ti
+    class: infortrend-iscsi
+    deleteClaim: false
+  listeners:
+    plain:
+      enabled: false
+      port: 9092
+    tls:
+      enabled: true
+      port: 9093
+    external:
+      enabled: false
+  tls:
+    mtls: true
+  config:
+    offsets.topic.replication.factor: 3
+    transaction.state.log.replication.factor: 3
+    transaction.state.log.min.isr: 2
+    default.replication.factor: 3
+    min.insync.replicas: 2
+    log.retention.hours: 168
+    compression.type: zstd
+  metrics:
+    enabled: true
+    renderConfigMap: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+  podAntiAffinity:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          strimzi.io/cluster: kafka
+  priorityClassName: infra-critical
+  networkPolicy:
+    enabled: true
+    allowedNamespaces:
+      - isa-bigdata
+      - isa-data
+      - isa-mcp
+  entityOperator:
+    enabled: true
+
+apicurio-registry:
+  name: apicurio-registry
+  namespace: isa-bigdata
+  replicas: 2
+  registry:
+    compatibilityLevel: BACKWARD
+    authEnabled: false
+  db:
+    host: postgresql-bigdata.isa-bigdata.svc.cluster.local
+    port: 5432
+    name: apicurio
+    auth:
+      create: false
+      existingSecret: apicurio-registry-db
+  metrics:
+    enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app: apicurio-registry
+  priorityClassName: infra-critical
+  networkPolicy:
+    enabled: true
+    allowedNamespaces:
+      - isa-bigdata
+      - isa-data
+      - isa-mcp

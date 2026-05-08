@@ -1,0 +1,148 @@
+# =============================================================================
+# kafka chart — defaults (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Strimzi-managed Kafka cluster in KRaft mode. The chart renders Strimzi
+# custom resources (KafkaNodePool + Kafka); Strimzi Operator reconciles the
+# StatefulSet, Services, PDB, and TLS material on its own.
+#
+# This file targets the staging/local profile. Environment overrides live
+# under deployments/values/{kind-local,customer-prod}.yaml.
+#
+# Sizing reference (from sn-commercial-tower bigdata-architecture.md §3,
+# §4.3 and 00-infra-architecture-overview.md §4.3):
+#
+#   kind-local       : 1 broker, ephemeral storage, plaintext, no NetworkPolicy
+#   staging (this)   : 3 brokers, 100Gi persistent-claim, TLS internal
+#   customer-prod    : 3 brokers, 80Ti iSCSI persistent-claim, mTLS, anti-affinity
+# =============================================================================
+
+# Cluster identity. The Strimzi Operator uses .Values.name as the metadata
+# name on the Kafka custom resource — broker pods will be named
+# "<name>-<nodepool>-<idx>".
+name: kafka
+namespace: isa-bigdata
+
+# Kafka image version that Strimzi will deploy. Strimzi 0.46+ supports KRaft
+# GA. Update both this and Chart.yaml's appVersion together.
+kafkaVersion: "3.7.0"
+
+# =============================================================================
+# Node pool — controller + broker dual-role pods (KRaft).
+# =============================================================================
+# In KRaft mode the controllers replace ZooKeeper. A single dual-role pool
+# is the simplest topology and matches the sizing in the architecture doc.
+nodePool:
+  name: dual
+  replicas: 3
+  roles:
+    - controller
+    - broker
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+  jvmOptions:
+    "-Xms": "2048m"
+    "-Xmx": "2048m"
+
+# =============================================================================
+# Storage — persistent-claim by default. Override class/size per environment.
+# =============================================================================
+storage:
+  type: persistent-claim
+  size: 100Gi
+  # Empty string → cluster default StorageClass. kind-local overrides to
+  # local-path; customer-prod overrides to infortrend-iscsi.
+  class: ""
+  # Strimzi keeps PVCs around when the cluster is deleted. Flip to true only
+  # for kind dev clusters where data loss is acceptable.
+  deleteClaim: false
+
+# =============================================================================
+# Listeners — internal-only by default. Plain (9092) for kind, TLS (9093)
+# everywhere else. mTLS auth toggled by .Values.tls.mtls.
+# =============================================================================
+listeners:
+  plain:
+    enabled: true
+    port: 9092
+  tls:
+    enabled: true
+    port: 9093
+  external:
+    # Off by default. Customer ops can flip on for an off-cluster operator
+    # workstation; never expose Kafka over the public internet.
+    enabled: false
+    type: nodeport
+    port: 9094
+
+tls:
+  # mTLS for client → broker. Strimzi issues client certs via KafkaUser CRs;
+  # this chart does not create users — that lives in the Flink CDC chart
+  # which actually consumes the broker.
+  mtls: false
+
+# =============================================================================
+# Replication / ISR defaults — sized for a 3-broker cluster.
+# =============================================================================
+config:
+  offsets.topic.replication.factor: 3
+  transaction.state.log.replication.factor: 3
+  transaction.state.log.min.isr: 2
+  default.replication.factor: 3
+  min.insync.replicas: 2
+  # Kafka acts as a 7-day replayable buffer (see bigdata-architecture.md §3.1):
+  # long-term storage lives in Paimon / MinIO, not Kafka.
+  log.retention.hours: 168
+  # Compression — zstd reduces broker disk and network at modest CPU cost.
+  compression.type: zstd
+
+# =============================================================================
+# Observability — JMX Prometheus Exporter.
+# =============================================================================
+metrics:
+  enabled: true
+  # When true the chart renders the JMX exporter ConfigMap below; set to
+  # false only if you've already provisioned an out-of-band ConfigMap and
+  # set its name in .Values.metrics.configMapName.
+  renderConfigMap: true
+  configMapName: ""
+  configMapKey: kafka-metrics-config.yml
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+
+# =============================================================================
+# Scheduling — anti-affinity hard rule for broker pods (one per node) once
+# replicas >= 2. Disabled automatically for single-broker kind installs.
+# =============================================================================
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+topologySpreadConstraints: []
+
+priorityClassName: ""
+
+# =============================================================================
+# Network exposure
+# =============================================================================
+networkPolicy:
+  enabled: false
+  # Namespaces whose pods may dial the broker. Strimzi already labels broker
+  # pods with strimzi.io/cluster=<name>; we use that selector below.
+  allowedNamespaces:
+    - isa-bigdata
+
+# Entity Operator (User + Topic Operator) — Strimzi sub-component. Provisions
+# KafkaUser / KafkaTopic custom resources from manifests. Off by default in
+# this chart so consumers (flink-cdc-jobs) can opt in.
+entityOperator:
+  enabled: false

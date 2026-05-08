@@ -1,0 +1,47 @@
+{{- /*
+  JMX Prometheus Exporter rules. Strimzi mounts this ConfigMap into each
+  broker pod and the exporter scrapes the Kafka MBeans, exposing metrics
+  on :9404. The ServiceMonitor below targets that port.
+
+  Rule set is the Strimzi-recommended baseline. Trim or extend per the
+  observability SLOs in 00-infra-architecture-overview.md §5.3.
+*/ -}}
+{{- if and .Values.metrics.enabled .Values.metrics.renderConfigMap (not .Values.metrics.configMapName) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kafka.metricsConfigMapName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "kafka.labels" . | nindent 4 }}
+data:
+  {{ .Values.metrics.configMapKey }}: |
+    lowercaseOutputName: true
+    rules:
+      # Special cases and very specific rules first.
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          topic: "$4"
+          partition: "$5"
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          broker: "$4:$5"
+      # Replicate the Strimzi default catch-alls.
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*, topic=(.+)><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+        labels:
+          topic: "$4"
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_$1_$2_$3_total
+        type: COUNTER
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)><>(Count|Value)
+        name: kafka_$1_$2_$3
+        type: GAUGE
+{{- end }}

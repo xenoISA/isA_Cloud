@@ -1,0 +1,23 @@
+apiVersion: v2
+name: apicurio-registry
+description: |
+  Apicurio Schema Registry (PostgreSQL backend) for the isA platform's
+  big-data foundation. Pairs with the kafka chart to provide schema
+  versioning + compatibility checks for Avro/JSON/Protobuf payloads on
+  Kafka topics. See xenoISA/isA_Cloud#234 and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5.
+type: application
+version: 0.1.0
+appVersion: "2.6.6.Final"
+keywords:
+  - apicurio
+  - schema-registry
+  - kafka
+  - bigdata
+  - data-platform
+home: https://www.apicur.io/registry/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/Apicurio/apicurio-registry
+maintainers:
+  - name: isA Platform

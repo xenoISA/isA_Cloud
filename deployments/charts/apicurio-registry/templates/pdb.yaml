@@ -1,0 +1,18 @@
+{{- /*
+  PDB only kicks in once we have >1 replica. With a single pod the chart
+  must not render a PDB or the pod becomes undisruptible during drains.
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "apicurio.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "apicurio.selectorLabels" . | nindent 6 }}
+{{- end }}

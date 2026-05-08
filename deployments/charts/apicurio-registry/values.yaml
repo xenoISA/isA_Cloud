@@ -1,0 +1,154 @@
+# =============================================================================
+# apicurio-registry chart — defaults (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Apicurio Registry 2.6 with the SQL (PostgreSQL) storage backend. Pairs
+# with the kafka chart and consumes a shared postgresql-bigdata instance
+# in production; in kind-local it points at an ephemeral Postgres.
+#
+# Compatibility mode default is BACKWARD across the board — the assumption
+# enforced by sn-commercial-tower export_kafka_apicurio_bundle.py.
+# =============================================================================
+
+name: apicurio-registry
+namespace: isa-bigdata
+
+image:
+  registry: docker.io
+  # apicurio-registry-sql is the PostgreSQL-backed variant. The -mem image
+  # is in-memory only and is unsuitable for any environment that survives
+  # a pod restart.
+  repository: apicurio/apicurio-registry-sql
+  tag: "2.6.6.Final"
+  pullPolicy: IfNotPresent
+
+# 1 replica is the staging/local default. Production overrides to 2 with a
+# PDB of maxUnavailable: 1 so a single pod loss doesn't block schema reads.
+replicas: 1
+
+# REST + UI port. Apicurio's HTTP server binds to 8080; we keep that.
+port: 8080
+
+# =============================================================================
+# Compatibility / config
+# =============================================================================
+registry:
+  # Default compatibility mode applied to new artifact groups. Must match
+  # the value the spec generator emits; see sn-commercial-tower
+  # scripts/dataphin/export_kafka_apicurio_bundle.py:DEFAULT_COMPATIBILITY_MODE.
+  compatibilityLevel: BACKWARD
+  # Auth is off by default — production should turn it on via OIDC and
+  # populate the env block below; see README for the OIDC envelope.
+  authEnabled: false
+  oidc:
+    url: ""
+    clientId: ""
+
+# =============================================================================
+# Database — PostgreSQL backend.
+# =============================================================================
+db:
+  # Connection target. Override per environment in values/*.yaml.
+  host: postgresql-bigdata.isa-bigdata.svc.cluster.local
+  port: 5432
+  name: apicurio
+  # Two auth modes (mirrors pgbouncer chart):
+  #   1. existingSecret  — keys: username, password
+  #   2. plaintext       — only when create=true; for kind dev clusters.
+  auth:
+    create: false
+    existingSecret: apicurio-registry-db
+    username: apicurio
+    password: ""
+
+# =============================================================================
+# Observability — Apicurio exposes Micrometer metrics on /q/metrics.
+# =============================================================================
+metrics:
+  enabled: true
+  path: /q/metrics
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+
+# =============================================================================
+# Network exposure
+# =============================================================================
+service:
+  type: ClusterIP
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  hosts: []
+  tls: []
+
+# =============================================================================
+# Resources / scheduling
+# =============================================================================
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 1001
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: apicurio-registry
+
+affinity: {}
+
+priorityClassName: ""
+
+networkPolicy:
+  enabled: false
+  allowedNamespaces:
+    - isa-bigdata
+
+podAnnotations: {}
+
+# Probes — Apicurio's MicroProfile health endpoints.
+probes:
+  liveness:
+    path: /health/live
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+  readiness:
+    path: /health/ready
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+extraEnv: []

@@ -1,0 +1,29 @@
+{{- /*
+  Prometheus Operator ServiceMonitor for the JMX exporter sidecar that
+  Strimzi runs on every broker. Strimzi exposes the exporter on port
+  `tcp-prometheus` (9404) of the per-pod Service.
+*/ -}}
+{{- if and .Values.metrics.enabled .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "kafka.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: {{ .Values.name }}
+      strimzi.io/kind: Kafka
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  endpoints:
+    - port: tcp-prometheus
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}
