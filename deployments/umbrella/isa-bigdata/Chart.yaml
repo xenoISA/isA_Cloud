@@ -26,3 +26,6 @@ dependencies:
   - name: apicurio-registry
     version: 0.1.0
     repository: file://../../charts/apicurio-registry
+  - name: postgres-bigdata
+    version: 0.1.0
+    repository: file://../../charts/postgres-bigdata

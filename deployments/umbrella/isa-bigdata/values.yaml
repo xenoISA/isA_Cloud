@@ -17,3 +17,6 @@ kafka:
 apicurio-registry:
   enabled: true
   namespace: isa-bigdata
+
+postgres-bigdata:
+  enabled: true
