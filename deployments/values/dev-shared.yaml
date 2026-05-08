@@ -238,3 +238,7 @@ minio:
         enabled: true
         labels:
           release: prometheus
+
+paimon-tools:
+  init:
+    enabled: true

@@ -374,3 +374,11 @@ minio:
       timeoutSeconds: 5
       failureThreshold: 60
     priorityClassName: infra-critical
+
+paimon-tools:
+  # Operator runs the V-2/V-3 smoke through a dedicated vault-driven Job
+  # once flink + paimon-tools + minio are all green. Disable the chart's
+  # built-in pre-install hook so a Helm re-install doesn't race with it.
+  init:
+    enabled: false
+  priorityClassName: infra-critical

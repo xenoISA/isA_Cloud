@@ -35,3 +35,6 @@ dependencies:
   - name: minio
     version: 0.1.0
     repository: file://../../charts/minio
+  - name: paimon-tools
+    version: 0.1.0
+    repository: file://../../charts/paimon-tools

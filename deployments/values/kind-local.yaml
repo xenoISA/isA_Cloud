@@ -229,3 +229,7 @@ minio:
     metrics:
       serviceMonitor:
         enabled: false
+
+paimon-tools:
+  init:
+    enabled: true
