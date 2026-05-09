@@ -1,0 +1,76 @@
+# =============================================================================
+# isa-bigdata — ArgoCD Application (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Single ArgoCD Application that points at the big-data foundation umbrella
+# chart. The umbrella aggregates 10 of the 11 charts shipped under epic
+# #234 (the 11th — dataphin — is awaiting vendor delivery, see #263).
+#
+# Prerequisites this Application does NOT install:
+#   - PriorityClass system-critical / infra-critical / application
+#     (apply deployments/cluster-prereqs/priorityclasses.yaml first)
+#   - Strimzi Kafka Operator (helm install strimzi-operator separately)
+#   - cert-manager + ClusterIssuer (separate story, TBD)
+#   - prometheus-operator (separate story, TBD)
+#
+# The Application is currently parameterized for kind-local; for
+# customer-prod, swap valueFiles to deployments/values/customer-prod.yaml.
+# Keep the staging/dev/prod variants as separate Application files in
+# this directory if needed (mirrors the isa-cloud-{dev,staging,production}
+# pattern).
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: isa-bigdata
+  namespace: argocd
+  labels:
+    environment: kind-local
+    project: isa-platform
+    tier: bigdata
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Display order in the ArgoCD UI — bigdata loads after the platform
+    # base (vault / apisix / pg-ha) but before the application services.
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/xenoISA/isA_Cloud.git
+    targetRevision: main
+    path: deployments/umbrella/isa-bigdata
+    helm:
+      releaseName: bigdata
+      valueFiles:
+        # Default to kind-local. Customer-prod / dev-shared variants
+        # should clone this file to isa-bigdata-{customer-prod,dev-shared}.yaml
+        # and update this list.
+        - ../../values/kind-local.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: isa-bigdata
+
+  syncPolicy:
+    # Manual sync at first — the umbrella has tight ordering requirements
+    # (Strimzi Operator must be up before kafka CRs apply; HMS schema
+    # init runs as a Helm pre-install hook). Flip `automated` on once
+    # the cluster has been through a full deploy + verification cycle.
+    automated: {}
+
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # Helm 3 hooks (used by hive-metastore schemaInit, paimon-tools
+      # smoke, starrocks catalog-init) need this for ArgoCD to honor
+      # them.
+      - RespectIgnoreDifferences=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
