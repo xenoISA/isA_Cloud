@@ -2,7 +2,7 @@ apiVersion: v2
 name: postgres-bigdata
 description: |
   Shared PostgreSQL instance for the isA platform's big-data foundation.
-  Backs hive-metastore (Paimon catalog), apicurio-registry (schema
+  Backs hive-metastore (Iceberg catalog), apicurio-registry (schema
   storage), and dataphin (vendor metadata). Wraps the bitnami/postgresql
   chart with our profile defaults (kind-local / dev-shared / customer-prod)
   and pre-creates the per-consumer databases via initdb scripts.

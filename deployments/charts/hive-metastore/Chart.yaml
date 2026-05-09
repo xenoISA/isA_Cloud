@@ -4,7 +4,7 @@ description: |
   Apache Hive Metastore (HMS) running standalone as the catalog server
   for the isA platform's big-data foundation. Backed by the
   postgres-bigdata chart (hive_metastore database). Exposes the Thrift
-  catalog API on :9083 for Paimon, Flink, StarRocks, and Dataphin to
+  catalog API on :9083 for Iceberg, Flink, StarRocks, and Dataphin to
   share table metadata.
 
   Self-written chart per design (no upstream Helm chart). See
@@ -17,7 +17,7 @@ keywords:
   - hive
   - hive-metastore
   - hms
-  - paimon
+  - iceberg
   - bigdata
   - data-platform
 home: https://hive.apache.org/

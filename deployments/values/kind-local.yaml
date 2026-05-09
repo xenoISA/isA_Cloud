@@ -157,7 +157,7 @@ hive-metastore:
   schemaInit:
     enabled: true
   warehouse:
-    dir: "s3a://paimon/warehouse/"
+    dir: "s3a://lake/warehouse/"
   s3a:
     enabled: true
     endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
@@ -213,7 +213,7 @@ minio:
       port: 9001
       nodePort: 30901
     buckets:
-      - name: paimon
+      - name: lake
         policy: none
         purge: false
       - name: flink-checkpoints
@@ -230,7 +230,7 @@ minio:
       serviceMonitor:
         enabled: false
 
-paimon-tools:
+iceberg-tools:
   init:
     enabled: true
 
@@ -311,7 +311,7 @@ flink-cdc-jobs:
     upgradeMode: stateless
   # 3 P0 sources from sn-commercial-tower data_platform/sources/. SQL is
   # a stub that uses VALUES literals as a stand-in for the Kafka source
-  # — proves the runner-jar + paimon-catalog mount + S3A creds path works
+  # — proves the runner-jar + iceberg-catalog mount + S3A creds path works
   # without needing real producers. Replace with real DDL in W7+.
   sources:
     - name: amazon_ads
@@ -320,16 +320,22 @@ flink-cdc-jobs:
       sql: |
         SET 'pipeline.name' = 'flink-cdc-stub-amazon-ads';
 
-        CREATE CATALOG paimon WITH ('type' = 'paimon');
+        CREATE CATALOG iceberg WITH (
+          'type' = 'iceberg',
+          'catalog-type' = 'hive',
+          'uri' = 'thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083',
+          'warehouse' = 's3a://lake/warehouse/'
+        );
 
-        CREATE TABLE IF NOT EXISTS paimon.`default`.`stub_amazon_ads` (
+        CREATE TABLE IF NOT EXISTS iceberg.`default`.`stub_amazon_ads` (
           campaign_id STRING,
           report_date DATE,
-          impressions BIGINT,
-          PRIMARY KEY (campaign_id, report_date) NOT ENFORCED
-        ) WITH ('bucket' = '1', 'changelog-producer' = 'input');
+          impressions BIGINT
+        )
+        PARTITIONED BY (report_date)
+        WITH ('format-version' = '2');
 
-        INSERT INTO paimon.`default`.`stub_amazon_ads`
+        INSERT INTO iceberg.`default`.`stub_amazon_ads`
         VALUES ('STUB-CAMPAIGN', DATE '1970-01-01', 0);
     - name: walmart_connect
       enabled: true
@@ -337,16 +343,22 @@ flink-cdc-jobs:
       sql: |
         SET 'pipeline.name' = 'flink-cdc-stub-walmart-connect';
 
-        CREATE CATALOG paimon WITH ('type' = 'paimon');
+        CREATE CATALOG iceberg WITH (
+          'type' = 'iceberg',
+          'catalog-type' = 'hive',
+          'uri' = 'thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083',
+          'warehouse' = 's3a://lake/warehouse/'
+        );
 
-        CREATE TABLE IF NOT EXISTS paimon.`default`.`stub_walmart_connect` (
+        CREATE TABLE IF NOT EXISTS iceberg.`default`.`stub_walmart_connect` (
           campaign_id STRING,
           report_date DATE,
-          impressions BIGINT,
-          PRIMARY KEY (campaign_id, report_date) NOT ENFORCED
-        ) WITH ('bucket' = '1', 'changelog-producer' = 'input');
+          impressions BIGINT
+        )
+        PARTITIONED BY (report_date)
+        WITH ('format-version' = '2');
 
-        INSERT INTO paimon.`default`.`stub_walmart_connect`
+        INSERT INTO iceberg.`default`.`stub_walmart_connect`
         VALUES ('STUB-CAMPAIGN', DATE '1970-01-01', 0);
     - name: shopify
       enabled: true
@@ -354,14 +366,19 @@ flink-cdc-jobs:
       sql: |
         SET 'pipeline.name' = 'flink-cdc-stub-shopify';
 
-        CREATE CATALOG paimon WITH ('type' = 'paimon');
+        CREATE CATALOG iceberg WITH (
+          'type' = 'iceberg',
+          'catalog-type' = 'hive',
+          'uri' = 'thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083',
+          'warehouse' = 's3a://lake/warehouse/'
+        );
 
-        CREATE TABLE IF NOT EXISTS paimon.`default`.`stub_shopify` (
+        CREATE TABLE IF NOT EXISTS iceberg.`default`.`stub_shopify` (
           product_id STRING,
           variant_id STRING,
-          updated_at TIMESTAMP(3),
-          PRIMARY KEY (product_id, variant_id) NOT ENFORCED
-        ) WITH ('bucket' = '1', 'changelog-producer' = 'input');
+          updated_at TIMESTAMP(3)
+        )
+        WITH ('format-version' = '2');
 
-        INSERT INTO paimon.`default`.`stub_shopify`
+        INSERT INTO iceberg.`default`.`stub_shopify`
         VALUES ('STUB-PRODUCT', 'STUB-VARIANT', TIMESTAMP '1970-01-01 00:00:00');

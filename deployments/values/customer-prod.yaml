@@ -226,7 +226,7 @@ hive-metastore:
   schemaInit:
     enabled: false
   warehouse:
-    dir: "s3a://paimon/warehouse/"
+    dir: "s3a://lake/warehouse/"
   s3a:
     enabled: true
     # Override once the minio chart lands; for now points at the planned
@@ -318,7 +318,7 @@ minio:
       # Tolerates loss of any 2 nodes/drives without data loss.
       MINIO_STORAGE_CLASS_STANDARD: "EC:2"
     buckets:
-      - name: paimon
+      - name: lake
         policy: none
         purge: false
       - name: flink-checkpoints
@@ -375,9 +375,9 @@ minio:
       failureThreshold: 60
     priorityClassName: infra-critical
 
-paimon-tools:
+iceberg-tools:
   # Operator runs the V-2/V-3 smoke through a dedicated vault-driven Job
-  # once flink + paimon-tools + minio are all green. Disable the chart's
+  # once flink + iceberg-tools + minio are all green. Disable the chart's
   # built-in pre-install hook so a Helm re-install doesn't race with it.
   init:
     enabled: false
@@ -387,7 +387,7 @@ starrocks:
   rootPassword:
     create: false
   # Operator runs combined V-2/V-3/V-4 smoke through a vault-driven Job
-  # once flink + paimon-tools + starrocks are all green; disable the
+  # once flink + iceberg-tools + starrocks are all green; disable the
   # chart's built-in catalog init so a Helm re-install doesn't race.
   catalogInit:
     enabled: false

@@ -1,0 +1,71 @@
+{{- /*
+  iceberg-catalog ConfigMap. The keys are flat properties — downstream
+  consumers (Flink table API, StarRocks external catalog DDL) read them
+  as their respective config formats.
+
+  Credentials are NOT here. The Hadoop ${env:VAR} interpolation lets
+  the same property file work whether the consumer reads
+  AWS_ACCESS_KEY_ID from a Secret-mounted env var (Flink/StarRocks
+  pods) or has it pre-set in the runtime image.
+
+  iceberg-catalog.properties is the canonical Iceberg catalog config
+  format consumed by `Catalog.create(properties)` calls in Flink/Spark
+  and by `CREATE EXTERNAL CATALOG ... PROPERTIES (...)` in StarRocks.
+
+  HMS-backed Iceberg topology (per v3 plan §四): Iceberg's catalog-impl
+  is org.apache.iceberg.hive.HiveCatalog; the metadata lives in the
+  HMS Postgres backend (via thrift), and the data files live in the
+  MinIO `lake` bucket.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "iceberg-tools.catalogConfigMapName" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "iceberg-tools.labels" . | nindent 4 }}
+data:
+  iceberg-catalog.properties: |
+    # Iceberg catalog wired to Hive Metastore + MinIO (S3A). Generated
+    # by the iceberg-tools chart (xenoISA/isA_Cloud#260, replacing the
+    # earlier paimon-tools chart). Consumers should mount this file at
+    # /etc/iceberg/iceberg-catalog.properties (or equivalent) and pass
+    # it to Catalog.create().
+
+    type = {{ .Values.catalog.type }}
+    catalog-type = {{ .Values.catalog.catalogType }}
+    catalog-impl = {{ .Values.catalog.catalogImpl }}
+    uri = {{ .Values.catalog.uri }}
+    warehouse = {{ .Values.catalog.warehouse }}
+    {{- with .Values.catalog.defaultDatabase }}
+    default-database = {{ . }}
+    {{- end }}
+
+    # S3A backend (Hadoop-style keys; both Flink and StarRocks read
+    # these directly).
+    fs.s3a.endpoint = {{ .Values.s3a.endpoint }}
+    fs.s3a.path.style.access = {{ .Values.s3a.pathStyleAccess }}
+    fs.s3a.connection.ssl.enabled = {{ .Values.s3a.sslEnabled }}
+    fs.s3a.access.key = ${env:AWS_ACCESS_KEY_ID}
+    fs.s3a.secret.key = ${env:AWS_SECRET_ACCESS_KEY}
+    fs.s3a.impl = org.apache.hadoop.fs.s3a.S3AFileSystem
+
+    # Iceberg-specific tuning. The keys below mirror what StarRocks reads
+    # via `CREATE EXTERNAL CATALOG iceberg_hms PROPERTIES (...)` (per the
+    # v3 plan §五 reference DDL).
+    aws.s3.endpoint = {{ .Values.s3a.endpoint }}
+    aws.s3.path_style_access = {{ .Values.s3a.pathStyleAccess }}
+    aws.s3.access_key = ${env:AWS_ACCESS_KEY_ID}
+    aws.s3.secret_key = ${env:AWS_SECRET_ACCESS_KEY}
+
+    {{- range $k, $v := .Values.extraCatalogProperties }}
+    {{ $k }} = {{ $v }}
+    {{- end }}
+
+  # Sidecar block: which Secret to mount as env in consumers. Charts
+  # downstream can read this metadata from the ConfigMap rather than
+  # hardcoding the Secret name.
+  consumer-credentials-secret: |
+    secretName={{ .Values.s3a.credentialsSecret.name }}
+    accessKeyKey={{ .Values.s3a.credentialsSecret.accessKeyKey }}
+    secretKeyKey={{ .Values.s3a.credentialsSecret.secretKeyKey }}

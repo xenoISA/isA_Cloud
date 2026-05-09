@@ -2,7 +2,7 @@ apiVersion: v2
 name: minio
 description: |
   MinIO object storage for the isA platform's big-data foundation —
-  Paimon warehouse, Flink checkpoints, Dataphin export staging. Wraps
+  Iceberg warehouse, Flink checkpoints, Dataphin export staging. Wraps
   the upstream minio/minio chart (v5.x) with profile-aware defaults
   (kind-local / dev-shared / customer-prod).
 
@@ -17,7 +17,7 @@ keywords:
   - minio
   - s3
   - object-storage
-  - paimon
+  - iceberg
   - bigdata
   - data-platform
 home: https://min.io/

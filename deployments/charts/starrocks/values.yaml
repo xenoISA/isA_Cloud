@@ -108,16 +108,16 @@ kube-starrocks:
       tolerations: []
 
 # =============================================================================
-# Catalog initialization — one-shot Job that registers the Paimon
+# Catalog initialization — one-shot Job that registers the Iceberg
 # external catalog in StarRocks once the FE is reachable. Mirrors the
-# contract documented in paimon-tools' paimon-catalog ConfigMap.
+# contract documented in iceberg-tools' iceberg-catalog ConfigMap.
 #
 # Helm post-install + post-upgrade hook so the StarRocksCluster CR is
 # applied first. The Job retries until FE accepts connections, then
 # issues CREATE EXTERNAL CATALOG IF NOT EXISTS — idempotent.
 #
 # customer-prod disables this; the operator runs the combined V-2/V-3/V-4
-# smoke through a vault-driven Job once flink + paimon + starrocks are
+# smoke through a vault-driven Job once flink + iceberg + starrocks are
 # all green.
 # =============================================================================
 catalogInit:
@@ -143,9 +143,9 @@ catalogInit:
     name: minio-credentials
     accessKeyKey: access-key
     secretKeyKey: secret-key
-  # Catalog properties. Defaults match paimon-tools paimon-catalog.properties.
+  # Catalog properties. Defaults match iceberg-tools iceberg-catalog.properties.
   catalog:
-    name: paimon_catalog
+    name: iceberg_hms
     hiveMetastoreUri: thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083
     s3Endpoint: http://minio.isa-bigdata.svc.cluster.local:9000
     s3PathStyleAccess: true

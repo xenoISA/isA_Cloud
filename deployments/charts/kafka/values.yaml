@@ -95,7 +95,7 @@ config:
   default.replication.factor: 3
   min.insync.replicas: 2
   # Kafka acts as a 7-day replayable buffer (see bigdata-architecture.md §3.1):
-  # long-term storage lives in Paimon / MinIO, not Kafka.
+  # long-term storage lives in Iceberg / MinIO, not Kafka.
   log.retention.hours: 168
   # Compression — zstd reduces broker disk and network at modest CPU cost.
   compression.type: zstd

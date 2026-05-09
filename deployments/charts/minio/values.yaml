@@ -37,13 +37,13 @@ minio:
   rootPassword: ""
   existingSecret: ""
 
-  # Buckets the chart creates on first install. The `paimon` bucket is
-  # the warehouse the hive-metastore chart points its `s3a://paimon/...`
+  # Buckets the chart creates on first install. The `lake` bucket is
+  # the warehouse the hive-metastore chart points its `s3a://lake/...`
   # path at. flink-checkpoints and dataphin-export are reserved for
   # the next big-data charts (flink, dataphin) so we don't churn this
   # chart's release cycle every time a new consumer lands.
   buckets:
-    - name: paimon
+    - name: lake
       policy: none
       purge: false
     - name: flink-checkpoints

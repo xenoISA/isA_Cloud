@@ -70,7 +70,7 @@ schemaInit:
   backoffLimit: 1
 
 # =============================================================================
-# Warehouse (Paimon-on-MinIO) — HMS itself doesn't write here, but it
+# Warehouse (Iceberg-on-MinIO) — HMS itself doesn't write here, but it
 # returns this path to clients (Flink CDC, Dataphin, StarRocks) when
 # they create unqualified tables. Override per environment when MinIO
 # lands.
@@ -79,7 +79,7 @@ warehouse:
   # s3a://<bucket>/<prefix>/. Default is a placeholder that resolves
   # against any S3-compatible endpoint set in `s3a.endpoint`. When the
   # minio chart lands, point at minio.isa-bigdata.svc.cluster.local.
-  dir: "s3a://paimon/warehouse/"
+  dir: "s3a://lake/warehouse/"
 
 s3a:
   enabled: true
@@ -99,7 +99,7 @@ s3a:
 # =============================================================================
 # Extra hive-site.xml properties. Each entry becomes a <property>...</property>
 # block. Defaults below cover the metastore basics; profiles add S3A
-# tuning + Paimon-specific knobs.
+# tuning + Iceberg-specific knobs.
 # =============================================================================
 extraSiteProperties: {}
   # Example:

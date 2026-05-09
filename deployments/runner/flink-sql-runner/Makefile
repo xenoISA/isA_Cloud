@@ -12,11 +12,11 @@
 #   make checksums                               # emits sha256 lines for jars.txt (paste back manually)
 # =============================================================================
 
-# Image identity. Tag encodes the Flink + Operator + Paimon versions so
+# Image identity. Tag encodes the Flink + Operator + Iceberg versions so
 # a `helm install` referencing this tag lines up with the chart matrix
 # documented in the README.
 IMAGE_NAME ?= flink-sql-runner
-IMAGE_TAG  ?= 1.20.0-runner-1.10.0-paimon-1.0.0
+IMAGE_TAG  ?= 1.20.0-runner-1.10.0-iceberg-1.6.1
 REGISTRY   ?= ghcr.io/xenoisa
 
 IMAGE      := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)

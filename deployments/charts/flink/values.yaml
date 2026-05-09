@@ -58,7 +58,7 @@ session:
   #     session:
   #       image:
   #         repository: ghcr.io/xenoisa/flink-sql-runner
-  #         tag: 1.20.0-runner-1.10.0-paimon-1.0.0
+  #         tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
   image:
     repository: apache/flink
     tag: "1.20.0-scala_2.12-java17"
@@ -129,13 +129,13 @@ session:
     port: 8081
 
 # -----------------------------------------------------------------------------
-# paimon-catalog mount — produced by the paimon-tools chart (#244). The
+# iceberg-catalog mount — produced by the iceberg-tools chart (#244). The
 # session cluster pods mount this as a file so jobs can `LOAD CATALOG`.
 # -----------------------------------------------------------------------------
-paimonCatalog:
-  configMapName: paimon-catalog
-  mountPath: "/etc/paimon/paimon-catalog.properties"
-  subPath: "paimon-catalog.properties"
+icebergCatalog:
+  configMapName: iceberg-catalog
+  mountPath: "/etc/iceberg/iceberg-catalog.properties"
+  subPath: "iceberg-catalog.properties"
 
 # -----------------------------------------------------------------------------
 # MinIO creds — Secret produced by the minio chart (#242). Env-injected

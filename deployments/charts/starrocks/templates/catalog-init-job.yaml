@@ -8,7 +8,7 @@
   and chart upgrades.
 
   Catalog properties mirror the contract in
-  deployments/charts/paimon-tools/templates/configmap.yaml so the same
+  deployments/charts/iceberg-tools/templates/configmap.yaml so the same
   Paimon tables that flink-cdc-jobs writes to are queryable from
   StarRocks without any extra config.
 
@@ -99,8 +99,8 @@ spec:
               mysql -h "${FE_HOST}" -P "${FE_PORT}" -u root --password="${ROOT_PASSWORD}" <<SQL
                 CREATE EXTERNAL CATALOG IF NOT EXISTS \`${CATALOG_NAME}\`
                 PROPERTIES (
-                  "type" = "paimon",
-                  "paimon.catalog.type" = "hive",
+                  "type" = "iceberg",
+                  "iceberg.catalog.type" = "hive",
                   "hive.metastore.uris" = "${HMS_URI}",
                   "aws.s3.endpoint" = "${S3_ENDPOINT}",
                   "aws.s3.access_key" = "${AWS_ACCESS_KEY_ID}",

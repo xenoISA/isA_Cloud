@@ -1,7 +1,7 @@
 # minio (big-data foundation)
 
 MinIO object storage for the isA platform's big-data foundation —
-Paimon warehouse, Flink checkpoints, Dataphin export staging.
+Iceberg warehouse, Flink checkpoints, Dataphin export staging.
 Tracking issue: [isA_Cloud#241](https://github.com/xenoISA/isA_Cloud/issues/241).
 
 ## What this chart does
@@ -15,7 +15,7 @@ bucket-creation Job. This chart only:
 - Renders an optional `Secret` (`minio-credentials`) when `auth.create=true`
   with keys (`access-key`, `secret-key`) matching what `hive-metastore`'s
   S3A client reads, plus (`rootUser`, `rootPassword`) for the upstream chart
-- Pre-creates `paimon`, `flink-checkpoints`, `dataphin-export` buckets
+- Pre-creates `lake`, `flink-checkpoints`, `dataphin-export` buckets
 
 ## Why a separate chart from the existing isA platform MinIO
 
@@ -48,7 +48,7 @@ for this PR.
 
 | Bucket | Consumer | Notes |
 |---|---|---|
-| `paimon` | hive-metastore warehouse path; flink-cdc-jobs writes here; starrocks reads here | Primary big-data bucket |
+| `lake` | hive-metastore warehouse path; flink-cdc-jobs writes here; starrocks reads here | Primary big-data bucket |
 | `flink-checkpoints` | flink-jobmanager / flink-cdc-jobs (future) | Reserved; off-peak retention recommended |
 | `dataphin-export` | dataphin (future) | Reserved for vendor export drops |
 

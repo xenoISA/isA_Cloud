@@ -1,14 +1,17 @@
 apiVersion: v2
 name: fluss
 description: |
-  Apache Fluss chart shell — placeholder for the W12+ Paimon 1.3
-  upgrade-path decision. Disabled by default at all profiles. Renders
-  a single placeholder ConfigMap only when `enabled=true`. Activates
-  in W12+ if the team decides to enable Fluss for real-time analytics.
+  Apache Fluss chart shell — DEPRECATED-IN-WAITING as of 2026-05-09.
+  The big-data foundation pivoted from Paimon to Iceberg per the v3
+  plan (xenoISA/isA_Cloud#260). Fluss is Paimon-derived; without
+  Paimon, the W12+ activation gate is unsatisfiable. The chart stays
+  in the umbrella at enabled=false until ADR-0003 ratifies the
+  Iceberg path on 2026-05-13, after which it will be removed in a
+  follow-up cleanup PR. Do not flip enabled=true.
 
-  See xenoISA/isA_Cloud#253, xenoISA/isA_Cloud#234, and
-  xenoISA/sn-commercial-tower ADR-0002 §A2.2 / 00-infra-architecture-overview.md
-  §6.5 (Phase 3.2 Fluss enablement decision gate).
+  See xenoISA/isA_Cloud#260 (Iceberg migration), xenoISA/isA_Cloud#253
+  (original story, now superseded), and xenoISA/sn-commercial-tower
+  commit 6c6bb4d / appendix-architecture-v3-iceberg.md.
 type: application
 version: 0.1.0
 # Sentinel appVersion. Bump to a real Fluss release tag when this
@@ -17,7 +20,7 @@ version: 0.1.0
 appVersion: "0.0.0-shell"
 keywords:
   - fluss
-  - paimon
+  - deprecated
   - real-time
   - bigdata
   - data-platform

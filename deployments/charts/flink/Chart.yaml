@@ -5,7 +5,7 @@ description: |
   the isA platform's big-data foundation. Wraps the upstream
   flink-kubernetes-operator chart (v1.10.0, Flink 1.18-1.20 compatible)
   with profile-aware defaults and renders a FlinkDeployment session
-  cluster CR pre-wired for Paimon-on-MinIO via the paimon-catalog
+  cluster CR pre-wired for Iceberg-on-MinIO via the iceberg-catalog
   ConfigMap (#244) and minio-credentials Secret (#242).
 
   Last critical-path piece for live V-2 / V-3 / V-5 verification.
@@ -21,7 +21,7 @@ appVersion: "1.20.0"
 keywords:
   - flink
   - flink-cdc
-  - paimon
+  - iceberg
   - bigdata
   - data-platform
 home: https://flink.apache.org/

@@ -17,8 +17,8 @@ On top of that this chart adds:
   `rootPassword.create=true` (kind only; production pre-provisions externally)
 - **`Job` `starrocks-catalog-init`** (gated by `catalogInit.enabled`) —
   Helm `post-install`/`post-upgrade` hook that polls FE on `:9030` until
-  reachable, then issues `CREATE EXTERNAL CATALOG IF NOT EXISTS paimon_catalog`
-  with the same wiring as `paimon-tools`' `paimon-catalog` ConfigMap
+  reachable, then issues `CREATE EXTERNAL CATALOG IF NOT EXISTS iceberg_hms`
+  with the same wiring as `iceberg-tools`' `iceberg-catalog` ConfigMap
 
 The Job is idempotent (`IF NOT EXISTS`) so re-installs and chart upgrades
 re-run safely.
@@ -47,22 +47,22 @@ follow the same pattern.
 | FE storage | local-path 5Gi | default-class 10Gi | infortrend-iscsi 50Gi |
 | BE storage | local-path 20Gi | default-class 50Gi | infortrend-iscsi 200Gi |
 | Root password | rendered (`rootPassword.create=true`) | `existingSecret: starrocks-root-credentials` | `existingSecret` (vault-provisioned) |
-| Catalog init Job | runs (registers `paimon_catalog`) | runs | **disabled** (operator runs combined V-2/V-3/V-4 smoke) |
+| Catalog init Job | runs (registers `iceberg_hms`) | runs | **disabled** (operator runs combined V-2/V-3/V-4 smoke) |
 | FE/BE anti-affinity | n/a (1 of each) | n/a | per-host hard rule (FE + BE separately) |
 | PDB | n/a | n/a | minAvailable=2 each |
 | NetworkPolicy | off | off | on |
 | ServiceMonitor | off | on | on |
 | PriorityClass | (none) | (none) | `infra-critical` |
 
-## paimon_catalog DDL contract
+## iceberg_hms DDL contract
 
 The init Job runs the equivalent of:
 
 ```sql
-CREATE EXTERNAL CATALOG IF NOT EXISTS paimon_catalog
+CREATE EXTERNAL CATALOG IF NOT EXISTS iceberg_hms
 PROPERTIES (
-  "type" = "paimon",
-  "paimon.catalog.type" = "hive",
+  "type" = "iceberg",
+  "iceberg.catalog.type" = "hive",
   "hive.metastore.uris" = "thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083",
   "aws.s3.endpoint" = "http://minio.isa-bigdata.svc.cluster.local:9000",
   "aws.s3.access_key" = "${env:AWS_ACCESS_KEY_ID}",
@@ -72,9 +72,9 @@ PROPERTIES (
 );
 ```
 
-Once the catalog is registered, query Paimon tables via
-`SELECT * FROM paimon_catalog.<db>.<table>` from any StarRocks client.
-Until `flink-cdc-jobs` lands and writes to Paimon, the catalog will
+Once the catalog is registered, query Iceberg tables via
+`SELECT * FROM iceberg_hms.<db>.<table>` from any StarRocks client.
+Until `flink-cdc-jobs` lands and writes to Iceberg, the catalog will
 list zero tables — but registration succeeds and the connection test
 proves V-4 plumbing.
 
@@ -108,15 +108,15 @@ mysql -h 127.0.0.1 -P 9030 -u root --password="<from secret>"
 ## Out of scope (follow-ups)
 
 - **CN (Compute Node) separation-of-storage** — current chart uses BE; CN-mode is a future optimization
-- **Iceberg / Hudi / Hive-only external catalogs** — only `paimon` for V-4
+- **Iceberg / Hudi / Hive-only external catalogs** — only `lake` for V-4
 - **OIDC SSO + RBAC role wiring** — separate auth story
 - **StarRocks Manager UI / dashboard** — out of scope
-- **Live V-4 verification on a real kind cluster** — needs flink-cdc-jobs first to populate Paimon tables; separate story
+- **Live V-4 verification on a real kind cluster** — needs flink-cdc-jobs first to populate Iceberg tables; separate story
 - **Routine query / bulk load benchmarks** — separate perf story
 
 ## Cross-repo context
 
 - xenoISA/isA_Cloud#234 — parent epic
-- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 — kafka, postgres-bigdata, hive-metastore, minio, paimon-tools (already merged)
+- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 — kafka, postgres-bigdata, hive-metastore, minio, iceberg-tools (already merged)
 - xenoISA/sn-commercial-tower ADR-0002 §2.5 — chart layout
 - xenoISA/sn-commercial-tower `docs/design/00-infra-architecture-overview.md` §6.1 (W2 kind 1+1) and §6.2 (W3 prod 3+3)

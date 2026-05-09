@@ -4,11 +4,11 @@ description: |
   StarRocks OLAP query layer for the isA platform's big-data foundation.
   Wraps the upstream starrocks/kube-starrocks chart (operator +
   StarRocksCluster CR + FE/BE specs) with profile-aware defaults and a
-  one-time Job that registers a Paimon external catalog so StarRocks
-  can query the Paimon tables landed by hive-metastore + minio +
-  paimon-tools.
+  one-time Job that registers a Iceberg external catalog so StarRocks
+  can query the Iceberg tables landed by hive-metastore + minio +
+  iceberg-tools.
 
-  V-4 unblocker (StarRocks Paimon external catalog query).
+  V-4 unblocker (StarRocks Iceberg external catalog query).
 
   See xenoISA/isA_Cloud#245, xenoISA/isA_Cloud#234, and
   xenoISA/sn-commercial-tower ADR-0002 §2.5 / 00-infra-architecture-overview.md
@@ -19,7 +19,7 @@ appVersion: "3.5"
 keywords:
   - starrocks
   - olap
-  - paimon
+  - iceberg
   - external-catalog
   - bigdata
   - data-platform
