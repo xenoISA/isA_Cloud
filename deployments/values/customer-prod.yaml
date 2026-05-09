@@ -382,3 +382,65 @@ paimon-tools:
   init:
     enabled: false
   priorityClassName: infra-critical
+
+starrocks:
+  rootPassword:
+    create: false
+  # Operator runs combined V-2/V-3/V-4 smoke through a vault-driven Job
+  # once flink + paimon-tools + starrocks are all green; disable the
+  # chart's built-in catalog init so a Helm re-install doesn't race.
+  catalogInit:
+    enabled: false
+  priorityClassName: infra-critical
+  kube-starrocks:
+    operator:
+      starrocksOperator:
+        replicaCount: 1
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+    starrocks:
+      starrocksFESpec:
+        replicas: 3
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+        storageSpec:
+          name: fe-meta
+          storageClassName: infortrend-iscsi
+          storageSize: 50Gi
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: fe
+                topologyKey: kubernetes.io/hostname
+      starrocksBeSpec:
+        replicas: 3
+        resources:
+          requests:
+            cpu: "2"
+            memory: 8Gi
+          limits:
+            cpu: "4"
+            memory: 16Gi
+        storageSpec:
+          name: be-storage
+          storageClassName: infortrend-iscsi
+          storageSize: 200Gi
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: be
+                topologyKey: kubernetes.io/hostname

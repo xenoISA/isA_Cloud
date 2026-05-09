@@ -1,0 +1,36 @@
+apiVersion: v2
+name: starrocks
+description: |
+  StarRocks OLAP query layer for the isA platform's big-data foundation.
+  Wraps the upstream starrocks/kube-starrocks chart (operator +
+  StarRocksCluster CR + FE/BE specs) with profile-aware defaults and a
+  one-time Job that registers a Paimon external catalog so StarRocks
+  can query the Paimon tables landed by hive-metastore + minio +
+  paimon-tools.
+
+  V-4 unblocker (StarRocks Paimon external catalog query).
+
+  See xenoISA/isA_Cloud#245, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5 / 00-infra-architecture-overview.md
+  §6.1 (1+1) and §6.2 (3+3).
+type: application
+version: 0.1.0
+appVersion: "3.5"
+keywords:
+  - starrocks
+  - olap
+  - paimon
+  - external-catalog
+  - bigdata
+  - data-platform
+home: https://www.starrocks.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/StarRocks/starrocks
+  - https://github.com/StarRocks/starrocks-kubernetes-operator
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: kube-starrocks
+    version: "1.11.4"
+    repository: https://starrocks.github.io/starrocks-kubernetes-operator

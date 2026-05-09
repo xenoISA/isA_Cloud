@@ -1,0 +1,123 @@
+{{- /*
+  Paimon external catalog init Job.
+
+  Runs as a Helm post-install + post-upgrade hook so the
+  StarRocksCluster CR (created by the upstream chart) is applied first.
+  Polls FE on :9030 until it accepts connections, then issues
+  CREATE EXTERNAL CATALOG IF NOT EXISTS — idempotent across re-installs
+  and chart upgrades.
+
+  Catalog properties mirror the contract in
+  deployments/charts/paimon-tools/templates/configmap.yaml so the same
+  Paimon tables that flink-cdc-jobs writes to are queryable from
+  StarRocks without any extra config.
+
+  ttlSecondsAfterFinished + before-hook-creation + hook-succeeded delete
+  policy keep the namespace tidy.
+*/ -}}
+{{- if .Values.catalogInit.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: starrocks-catalog-init
+  labels:
+    {{- include "starrocks-bigdata.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.catalogInit.backoffLimit }}
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "starrocks-bigdata.labels" . | nindent 8 }}
+        component: catalog-init
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: catalog-init
+          image: "{{ .Values.catalogInit.image.registry }}/{{ .Values.catalogInit.image.repository }}:{{ .Values.catalogInit.image.tag }}"
+          imagePullPolicy: {{ .Values.catalogInit.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: FE_HOST
+              value: {{ .Values.catalogInit.feService.host | quote }}
+            - name: FE_PORT
+              value: {{ .Values.catalogInit.feService.queryPort | quote }}
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.catalogInit.rootPasswordSecret.name }}
+                  key: {{ .Values.catalogInit.rootPasswordSecret.key }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.catalogInit.minioCredentialsSecret.name }}
+                  key: {{ .Values.catalogInit.minioCredentialsSecret.accessKeyKey }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.catalogInit.minioCredentialsSecret.name }}
+                  key: {{ .Values.catalogInit.minioCredentialsSecret.secretKeyKey }}
+            - name: CATALOG_NAME
+              value: {{ .Values.catalogInit.catalog.name | quote }}
+            - name: HMS_URI
+              value: {{ .Values.catalogInit.catalog.hiveMetastoreUri | quote }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.catalogInit.catalog.s3Endpoint | quote }}
+            - name: S3_PATH_STYLE
+              value: {{ .Values.catalogInit.catalog.s3PathStyleAccess | quote }}
+            - name: S3_SSL
+              value: {{ .Values.catalogInit.catalog.s3SslEnabled | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "[catalog-init] waiting for FE at ${FE_HOST}:${FE_PORT}..."
+              # Poll up to ~10 minutes for FE readiness (the FE pod can take
+              # several minutes to elect leader + accept queries on first install).
+              attempts=0
+              max_attempts=120
+              until mysql -h "${FE_HOST}" -P "${FE_PORT}" -u root --password="${ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; do
+                attempts=$((attempts + 1))
+                if [ "${attempts}" -ge "${max_attempts}" ]; then
+                  echo "[catalog-init] FAIL: FE never became reachable after ${attempts} tries"
+                  exit 1
+                fi
+                sleep 5
+              done
+              echo "[catalog-init] FE reachable; registering ${CATALOG_NAME}..."
+              mysql -h "${FE_HOST}" -P "${FE_PORT}" -u root --password="${ROOT_PASSWORD}" <<SQL
+                CREATE EXTERNAL CATALOG IF NOT EXISTS \`${CATALOG_NAME}\`
+                PROPERTIES (
+                  "type" = "paimon",
+                  "paimon.catalog.type" = "hive",
+                  "hive.metastore.uris" = "${HMS_URI}",
+                  "aws.s3.endpoint" = "${S3_ENDPOINT}",
+                  "aws.s3.access_key" = "${AWS_ACCESS_KEY_ID}",
+                  "aws.s3.secret_key" = "${AWS_SECRET_ACCESS_KEY}",
+                  "aws.s3.enable_path_style_access" = "${S3_PATH_STYLE}",
+                  "aws.s3.enable_ssl" = "${S3_SSL}"
+                );
+              SQL
+              echo "[catalog-init] verifying catalog list..."
+              mysql -h "${FE_HOST}" -P "${FE_PORT}" -u root --password="${ROOT_PASSWORD}" -e "SHOW CATALOGS;"
+              echo "[catalog-init] PASS (${CATALOG_NAME} registered)"
+          resources:
+            {{- toYaml .Values.catalogInit.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

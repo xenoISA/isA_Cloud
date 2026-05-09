@@ -38,3 +38,6 @@ dependencies:
   - name: paimon-tools
     version: 0.1.0
     repository: file://../../charts/paimon-tools
+  - name: starrocks
+    version: 0.1.0
+    repository: file://../../charts/starrocks

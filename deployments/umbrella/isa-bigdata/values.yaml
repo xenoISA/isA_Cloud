@@ -31,3 +31,6 @@ minio:
 paimon-tools:
   enabled: true
   namespace: isa-bigdata
+
+starrocks:
+  enabled: true

@@ -1,0 +1,183 @@
+# =============================================================================
+# starrocks chart — defaults (xenoISA/isA_Cloud#245)
+# =============================================================================
+# Wraps starrocks/kube-starrocks v1.11.4 (StarRocks 3.5). The upstream
+# chart is a parent with two subcharts:
+#   operator:  the StarRocks Kubernetes Operator
+#   starrocks: the StarRocksCluster CR + FE/BE component specs
+#
+# Triple nesting note: from a profile values file under
+# deployments/values/<profile>.yaml the override path becomes
+#   starrocks.kube-starrocks.starrocks.starrocksFESpec.replicas: …
+# The first `starrocks` is our chart name in the umbrella; the
+# `kube-starrocks` is the upstream parent; the second `starrocks` is
+# the upstream subchart key. Inelegant but unavoidable without forking.
+#
+# Sizing reference (sn-commercial-tower 00-infra-architecture-overview.md):
+#   kind-local       : 1 FE + 1 BE, ephemeral 20Gi (V-4 smoke)
+#   dev-shared       : 1 FE + 1 BE, default-class 50Gi
+#   customer-prod    : 3 FE + 3 BE, infortrend-iscsi 200Gi, anti-affinity
+#                      per host, PDB minAvailable=2 each, infra-critical
+# =============================================================================
+
+# Subchart pass-through. Defaults below match the staging tier.
+kube-starrocks:
+  operator:
+    nameOverride: starrocks
+    starrocksOperator:
+      enabled: true
+      replicaCount: 1
+      # The operator manages the cluster CR cluster-wide by default. We
+      # don't restrict watchNamespace — needed for cross-ns catalog
+      # init Jobs in customer-prod.
+      watchNamespace: ""
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+  starrocks:
+    nameOverride: starrocks
+
+    # Root password set on first install via a Secret. Production must
+    # pre-provision the Secret externally (vault / external-secrets).
+    initPassword:
+      enabled: true
+      isInstall: true
+      passwordSecret: starrocks-root-credentials
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 250m
+          memory: 512Mi
+
+    starrocksCluster:
+      name: starrocks
+      enabledCn: false      # CN (compute node) separation off; BE handles compute+storage
+      enabledFeProxy: false # No FE proxy — clients dial FE Service directly
+
+    # ------------------------------ Frontend ------------------------------
+    starrocksFESpec:
+      replicas: 1
+      image:
+        repository: starrocks/fe-ubuntu
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      service:
+        type: ClusterIP
+      storageSpec:
+        name: fe-meta
+        storageClassName: ""
+        storageSize: 10Gi
+      # FE config knobs are passed via a configmap; these defaults are
+      # safe for staging.
+      feEnvVars: []
+      feHostAliasName: ""
+      affinity: {}
+      tolerations: []
+
+    # ------------------------------ Backend -------------------------------
+    starrocksBeSpec:
+      replicas: 1
+      image:
+        repository: starrocks/be-ubuntu
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      service:
+        type: ClusterIP
+      storageSpec:
+        name: be-storage
+        storageClassName: ""
+        storageSize: 50Gi
+      affinity: {}
+      tolerations: []
+
+# =============================================================================
+# Catalog initialization — one-shot Job that registers the Paimon
+# external catalog in StarRocks once the FE is reachable. Mirrors the
+# contract documented in paimon-tools' paimon-catalog ConfigMap.
+#
+# Helm post-install + post-upgrade hook so the StarRocksCluster CR is
+# applied first. The Job retries until FE accepts connections, then
+# issues CREATE EXTERNAL CATALOG IF NOT EXISTS — idempotent.
+#
+# customer-prod disables this; the operator runs the combined V-2/V-3/V-4
+# smoke through a vault-driven Job once flink + paimon + starrocks are
+# all green.
+# =============================================================================
+catalogInit:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: mysql
+    tag: "8.4"
+    pullPolicy: IfNotPresent
+  # FE Service the Job dials. The upstream chart names the FE Service
+  # `<release>-starrocks-fe-service` after the StarRocksCluster.name. The
+  # umbrella release name "bigdata" makes this `bigdata-starrocks-fe-service`.
+  feService:
+    host: bigdata-starrocks-fe-service.isa-bigdata.svc.cluster.local
+    queryPort: 9030
+  # Where the FE root password lives. Same Secret used by initPassword above.
+  rootPasswordSecret:
+    name: starrocks-root-credentials
+    key: password
+  # MinIO creds for the catalog DDL. Reuses the contract from #242 / #244:
+  # secret name minio-credentials, keys access-key / secret-key.
+  minioCredentialsSecret:
+    name: minio-credentials
+    accessKeyKey: access-key
+    secretKeyKey: secret-key
+  # Catalog properties. Defaults match paimon-tools paimon-catalog.properties.
+  catalog:
+    name: paimon_catalog
+    hiveMetastoreUri: thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083
+    s3Endpoint: http://minio.isa-bigdata.svc.cluster.local:9000
+    s3PathStyleAccess: true
+    s3SslEnabled: false
+  backoffLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+# Whether to render a plaintext starrocks-root-credentials Secret at
+# this layer. Kind only; production must pre-provision.
+rootPassword:
+  create: false
+  password: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 1000
+
+priorityClassName: ""
