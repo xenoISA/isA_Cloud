@@ -21,6 +21,8 @@ from .async_base_client import AsyncBaseClient
 
 logger = logging.getLogger(__name__)
 
+DOCKER_DESKTOP_HOST_GATEWAY_IP = "192.168.65.254"
+
 
 def _is_loopback(host: str) -> bool:
     """Return True if *host* is a loopback address (127.x.x.x, ::1, localhost)."""
@@ -80,7 +82,7 @@ def _desktop_gateway_host() -> Optional[str]:
     if sys.platform != "darwin" or os.getenv("KUBERNETES_SERVICE_HOST"):
         return None
 
-    return _first_non_loopback_ip("host.docker.internal")
+    return os.getenv("DOCKER_DESKTOP_HOST_GATEWAY_IP") or DOCKER_DESKTOP_HOST_GATEWAY_IP
 
 
 def _normalize_service_host(host: Optional[str]) -> Optional[str]:
@@ -96,6 +98,9 @@ def _normalize_service_host(host: Optional[str]) -> Optional[str]:
 
     if sys.platform != "darwin" or os.getenv("KUBERNETES_SERVICE_HOST"):
         return host
+
+    if host == "host.docker.internal":
+        return _desktop_gateway_host() or _first_non_loopback_ip(host) or host
 
     try:
         ipaddress.ip_address(host)

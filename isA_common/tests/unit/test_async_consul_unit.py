@@ -55,13 +55,28 @@ class TestAsyncConsulRegistryInit:
             from isa_common.consul_client import AsyncConsulRegistry
 
             with patch("isa_common.consul_client.sys.platform", "darwin"), \
+                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
+                 patch.dict("os.environ", {}, clear=True):
+                registry = AsyncConsulRegistry(
+                    service_name="test-service",
+                    service_port=8080,
+                    lazy_connect=True,
+                )
+
+        assert registry.service_host == "192.168.65.254"
+        assert registry.service_id == "test-service-192.168.65.254-8080"
+
+    def test_init_uses_stable_desktop_gateway_even_when_host_alias_resolves_differently(self):
+        with patch("isa_common.consul_client.consul.Consul"):
+            from isa_common.consul_client import AsyncConsulRegistry
+
+            with patch("isa_common.consul_client.sys.platform", "darwin"), \
                  patch(
                      "isa_common.consul_client.socket.getaddrinfo",
                      return_value=[
-                         (2, None, None, None, ("192.168.65.254", 0)),
+                         (2, None, None, None, ("198.18.0.177", 0)),
                      ],
                  ), \
-                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
                  patch.dict("os.environ", {}, clear=True):
                 registry = AsyncConsulRegistry(
                     service_name="test-service",
