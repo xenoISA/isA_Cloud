@@ -1,0 +1,39 @@
+apiVersion: v2
+name: cert-manager
+description: |
+  cert-manager wrapper. Installs jetstack/cert-manager (operator + CRDs)
+  cluster-wide and renders a default selfsigned ClusterIssuer. Optional
+  templates for internal-CA and vault-backed ClusterIssuers are gated
+  by values.
+
+  Used for HTTPS endpoints across the platform (Apicurio Registry,
+  StarRocks FE web UI, Flink JM web UI, Grafana, future Ingresses).
+  Strimzi Kafka uses its own built-in CA for broker mTLS — does not
+  depend on this chart.
+
+  This chart is a STRICT PREREQUISITE for any chart that issues
+  Certificate or ClusterIssuer CRs. Install BEFORE the umbrella when
+  HTTPS / mTLS / customer Ingresses are in scope.
+
+  Pinned to cert-manager v1.20.2. See xenoISA/isA_Cloud#234 (parent epic)
+  and the deployment-readiness audit.
+type: application
+version: 0.1.0
+appVersion: "v1.20.2"
+keywords:
+  - cert-manager
+  - tls
+  - mtls
+  - pki
+  - bigdata
+  - data-platform
+home: https://cert-manager.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/cert-manager/cert-manager
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: cert-manager
+    version: "v1.20.2"
+    repository: https://charts.jetstack.io

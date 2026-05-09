@@ -38,11 +38,21 @@ helm dependency update deployments/charts/prometheus-operator
 helm install prometheus-operator deployments/charts/prometheus-operator \
   --namespace monitoring
 
-# 4. (TBD by separate stories — not yet in this dir)
-#    - cert-manager + ClusterIssuer (xenoISA/isA_Cloud#TBD)
+# 4. cert-manager + ClusterIssuer (CRDs for Certificate / Issuer /
+#    ClusterIssuer / Order / Challenge)
+#    REQUIRED when any chart issues Certificate or Issuer CRs (HTTPS
+#    Ingress, mTLS, customer-facing endpoints). Renders a default
+#    selfsigned-issuer ClusterIssuer; flip clusterIssuers.internalCA
+#    or clusterIssuers.acme on per environment.
+kubectl create namespace cert-manager
+helm dependency update deployments/charts/cert-manager
+helm install cert-manager deployments/charts/cert-manager \
+  --namespace cert-manager
+
+# 5. (TBD by separate stories — not yet in this dir)
 #    - vault + external-secrets (customer-prod only)
 
-# 5. Big-data umbrella
+# 6. Big-data umbrella
 helm dependency update deployments/charts/postgres-bigdata
 helm dependency update deployments/charts/minio
 helm dependency update deployments/charts/starrocks
@@ -65,6 +75,7 @@ helm install bigdata deployments/umbrella/isa-bigdata \
 |---|---|
 | `strimzi-operator` (xenoISA/isA_Cloud#259) | Owns Kafka / KafkaNodePool / KafkaUser / KafkaTopic / KafkaConnect / KafkaConnector / KafkaMirrorMaker2 / KafkaRebalance CRDs. Must apply before the umbrella's kafka chart. |
 | `prometheus-operator` (xenoISA/isA_Cloud#234) | Owns ServiceMonitor / PodMonitor / Prometheus / AlertManager / PrometheusRule / etc. CRDs. Must apply before the umbrella when any profile flips `serviceMonitor.enabled: true`. |
+| `cert-manager` (xenoISA/isA_Cloud#234) | Owns Certificate / CertificateRequest / Issuer / ClusterIssuer / Order / Challenge CRDs. Must apply before any chart that issues `Certificate` CRs (HTTPS Ingress / mTLS / customer-facing TLS). |
 
 ## Why PriorityClass not in a chart?
 

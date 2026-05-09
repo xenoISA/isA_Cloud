@@ -1,0 +1,116 @@
+# =============================================================================
+# cert-manager chart — defaults (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Cluster-scoped operator + CRDs. Single replica is the supported topology
+# (cert-manager controllers use leader election; HA-by-restart).
+#
+# CRDs installed: Certificate, CertificateRequest, ClusterIssuer, Issuer,
+# Order, Challenge.
+#
+# Install order (STRICT):
+#   1. helm install cert-manager . (this chart) — CRDs install
+#   2. helm install isa-bigdata umbrella/...    — Certificate/Issuer CRs
+#                                                  apply (when any chart
+#                                                  flips on TLS-via-cert-manager)
+#
+# Reversing the order makes step 2 fail on missing CRDs (no matches for
+# kind "Certificate" in version "cert-manager.io/v1").
+# =============================================================================
+
+# Upstream subchart pass-through.
+cert-manager:
+  # Install the cert-manager CRDs as part of this chart's install. The
+  # alternative (separate `kubectl apply -f https://...` of a CRD bundle)
+  # adds a manual step we can avoid.
+  installCRDs: true
+
+  # Single replica with leader election. HA-by-restart: a failed
+  # controller pod is replaced by the K8s scheduler; certificate
+  # issuance pauses for the leader-election timeout (~15s) on
+  # restart. Production-acceptable.
+  replicaCount: 1
+
+  # Default DNS resolver for ACME challenges. Empty means use the
+  # cluster's CoreDNS. Override per environment if customer mandates
+  # a specific DNS source for ACME validation.
+  dns01RecursiveNameservers: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  webhook:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  cainjector:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# =============================================================================
+# ClusterIssuer rendering
+# =============================================================================
+# Three issuer types we support:
+#
+#   selfsigned   — always available; suitable for kind/dev and any
+#                  internal-only TLS (consumer doesn't validate the cert
+#                  chain). Default ON.
+#
+#   internalCA   — wraps a pre-provisioned root CA stored as a K8s Secret.
+#                  Suitable for on-prem environments where the customer's
+#                  PKI team issues a signing CA.
+#
+#   acme         — Let's Encrypt or other ACME-compatible CA. Suitable
+#                  for customer-facing Ingress endpoints (Grafana, etc.).
+#                  Requires DNS01 / HTTP01 challenge config.
+#
+# Each ClusterIssuer is gated independently. Profile values can flip
+# multiple on simultaneously.
+# =============================================================================
+clusterIssuers:
+  selfsigned:
+    enabled: true
+    name: selfsigned-issuer
+
+  internalCA:
+    enabled: false
+    name: internal-ca-issuer
+    # Secret containing tls.crt + tls.key for the root CA. Must be
+    # pre-provisioned in the cert-manager namespace before this chart
+    # is installed.
+    caSecretName: internal-ca
+
+  acme:
+    enabled: false
+    name: letsencrypt-prod
+    # ACME server URL — letsencrypt-staging vs letsencrypt-prod or any
+    # other ACME-compatible endpoint.
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Email contact for the ACME registration. Required.
+    email: ""
+    # Solver type: http01 or dns01. Default http01 with the standard
+    # ingress class; dns01 requires per-provider config (out of scope
+    # of the chart shell — operator must extend this template).
+    solver:
+      http01:
+        ingressClass: nginx
+
+# Optional priorityClass at the wrapper layer. Customer-prod uses
+# infra-critical so cert renewal keeps running through node drains.
+priorityClassName: ""
