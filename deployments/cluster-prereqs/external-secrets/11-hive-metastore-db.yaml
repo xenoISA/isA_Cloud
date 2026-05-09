@@ -1,0 +1,28 @@
+# Hive Metastore → postgres-bigdata.hive_metastore database credentials.
+# Synced into K8s Secret `hive-metastore-db` in the `isa-bigdata`
+# namespace; consumed by the hive-metastore chart's
+# `db.auth.existingSecret` reference in customer-prod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hive-metastore-db
+  namespace: isa-bigdata
+  labels:
+    app.kubernetes.io/part-of: isa-platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: isa-bigdata-vault
+    kind: ClusterSecretStore
+  target:
+    name: hive-metastore-db
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: isa-bigdata/hive-metastore-db
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: isa-bigdata/hive-metastore-db
+        property: password

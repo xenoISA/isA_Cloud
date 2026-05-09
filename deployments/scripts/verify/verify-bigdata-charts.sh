@@ -26,6 +26,7 @@ FLUSS_CHART="${DEPLOYMENTS}/charts/fluss"
 STRIMZI_CHART="${DEPLOYMENTS}/charts/strimzi-operator"
 PROMETHEUS_CHART="${DEPLOYMENTS}/charts/prometheus-operator"
 CERT_MANAGER_CHART="${DEPLOYMENTS}/charts/cert-manager"
+ESO_CHART="${DEPLOYMENTS}/charts/external-secrets-operator"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -135,6 +136,9 @@ main() {
   step "helm dependency update ${CERT_MANAGER_CHART}"
   helm dependency update "${CERT_MANAGER_CHART}"
 
+  step "helm dependency update ${ESO_CHART}"
+  helm dependency update "${ESO_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
@@ -148,6 +152,7 @@ main() {
   lint_chart "${STRIMZI_CHART}"
   lint_chart "${PROMETHEUS_CHART}"
   lint_chart "${CERT_MANAGER_CHART}"
+  lint_chart "${ESO_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -183,6 +188,11 @@ main() {
   # before the umbrella. Verified standalone (NOT included in any
   # umbrella render).
   template_chart "${CERT_MANAGER_CHART}"
+  # external-secrets-operator is a STRICT prerequisite when
+  # customer-prod existingSecret references are vault-driven (the 5
+  # CRs under cluster-prereqs/external-secrets/). Installed separately
+  # before the umbrella. Verified standalone (NOT in umbrella render).
+  template_chart "${ESO_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

@@ -1,0 +1,39 @@
+# postgres-bigdata Postgres credentials (postgres superuser + bigdata
+# app user + replication user).
+# Synced into K8s Secret `postgres-bigdata-auth` in the `isa-bigdata`
+# namespace; consumed by the postgres-bigdata chart's bitnami
+# postgresql subchart via `existingSecret`.
+#
+# Bitnami's postgresql chart expects exactly these keys when
+# auth.existingSecret is used:
+#   - postgres-password    (postgres superuser)
+#   - password             (auth.username's password)
+#   - replication-password (replication user, only when architecture: replication)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: postgres-bigdata-auth
+  namespace: isa-bigdata
+  labels:
+    app.kubernetes.io/part-of: isa-platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: isa-bigdata-vault
+    kind: ClusterSecretStore
+  target:
+    name: postgres-bigdata-auth
+    creationPolicy: Owner
+  data:
+    - secretKey: postgres-password
+      remoteRef:
+        key: isa-bigdata/postgres-bigdata-auth
+        property: postgres-password
+    - secretKey: password
+      remoteRef:
+        key: isa-bigdata/postgres-bigdata-auth
+        property: password
+    - secretKey: replication-password
+      remoteRef:
+        key: isa-bigdata/postgres-bigdata-auth
+        property: replication-password

@@ -1,0 +1,35 @@
+apiVersion: v2
+name: external-secrets-operator
+description: |
+  External Secrets Operator (ESO) wrapper. Wraps the upstream
+  external-secrets/external-secrets chart so vault-stored secrets
+  can be projected into K8s Secrets via ExternalSecret /
+  ClusterSecretStore CRs.
+
+  Used to satisfy the 5 customer-prod existingSecret references
+  (apicurio-registry-db, hive-metastore-db, minio-credentials,
+  starrocks-root-credentials, postgres-bigdata-auth) without
+  committing plaintext to git or hand-creating Secrets.
+
+  Pinned to external-secrets v2.4.1 (graduated CNCF project).
+  See xenoISA/isA_Cloud#234 (parent epic) and the deployment-readiness
+  audit row #4 (vault + Secret pre-creation).
+type: application
+version: 0.1.0
+appVersion: "v2.4.1"
+keywords:
+  - external-secrets
+  - vault
+  - secrets-management
+  - bigdata
+  - data-platform
+home: https://external-secrets.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/external-secrets/external-secrets
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: external-secrets
+    version: "2.4.1"
+    repository: https://charts.external-secrets.io
