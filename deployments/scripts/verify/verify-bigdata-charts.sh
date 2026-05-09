@@ -18,12 +18,13 @@ APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
 POSTGRES_CHART="${DEPLOYMENTS}/charts/postgres-bigdata"
 HMS_CHART="${DEPLOYMENTS}/charts/hive-metastore"
 MINIO_CHART="${DEPLOYMENTS}/charts/minio"
-PAIMON_CHART="${DEPLOYMENTS}/charts/iceberg-tools"
+ICEBERG_CHART="${DEPLOYMENTS}/charts/iceberg-tools"
 STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
 FLINK_CHART="${DEPLOYMENTS}/charts/flink"
 FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
 FLUSS_CHART="${DEPLOYMENTS}/charts/fluss"
 STRIMZI_CHART="${DEPLOYMENTS}/charts/strimzi-operator"
+PROMETHEUS_CHART="${DEPLOYMENTS}/charts/prometheus-operator"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -127,17 +128,21 @@ main() {
   step "helm dependency update ${STRIMZI_CHART}"
   helm dependency update "${STRIMZI_CHART}"
 
+  step "helm dependency update ${PROMETHEUS_CHART}"
+  helm dependency update "${PROMETHEUS_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
   lint_chart "${HMS_CHART}"
   lint_chart "${MINIO_CHART}"
-  lint_chart "${PAIMON_CHART}"
+  lint_chart "${ICEBERG_CHART}"
   lint_chart "${STARROCKS_CHART}"
   lint_chart "${FLINK_CHART}"
   lint_chart "${FLINK_CDC_CHART}"
   lint_chart "${FLUSS_CHART}"
   lint_chart "${STRIMZI_CHART}"
+  lint_chart "${PROMETHEUS_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -147,7 +152,7 @@ main() {
     --set s3a.auth.create=true --set s3a.auth.accessKey=test --set s3a.auth.secretKey=test
   template_chart "${MINIO_CHART}" \
     --set auth.create=true --set auth.rootUser=test --set auth.rootPassword=testtesttest
-  template_chart "${PAIMON_CHART}"
+  template_chart "${ICEBERG_CHART}"
   template_chart "${STARROCKS_CHART}" \
     --set rootPassword.create=true --set rootPassword.password=test
   template_chart "${FLINK_CHART}"
@@ -164,6 +169,10 @@ main() {
   # chart — installed separately before the umbrella. Verified standalone
   # (NOT included in any umbrella render).
   template_chart "${STRIMZI_CHART}"
+  # prometheus-operator is a STRICT prerequisite when customer-prod
+  # ServiceMonitors are enabled — installed separately before the
+  # umbrella. Verified standalone (NOT included in any umbrella render).
+  template_chart "${PROMETHEUS_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

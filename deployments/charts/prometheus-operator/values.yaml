@@ -1,0 +1,148 @@
+# =============================================================================
+# prometheus-operator chart — defaults (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Cluster-scoped operator + monitoring stack. Single-replica Prometheus
+# is the default; customer-prod overrides to 2 replicas for HA.
+#
+# ServiceMonitor selector convention: customer-prod values across the
+# big-data charts label their ServiceMonitor CRs with `release: prometheus`,
+# matching the upstream chart's default `serviceMonitorSelector` /
+# `podMonitorSelector` / `ruleSelector` filters.
+#
+# Install order (STRICT, mirrors Strimzi Operator precedent):
+#   1. helm install prometheus-operator . (this chart)  — CRDs install
+#   2. helm install isa-bigdata umbrella/...            — ServiceMonitor CRs apply
+#
+# Reversing the order makes step 2 fail on missing CRDs (no matches for
+# kind "ServiceMonitor" in version "monitoring.coreos.com/v1").
+# =============================================================================
+
+# Upstream subchart pass-through.
+kube-prometheus-stack:
+  # Operator pod sits in its own namespace. The stack's default
+  # release naming creates `<release>-prometheus-operator`; with a
+  # release name of `prometheus-operator` that becomes
+  # `prometheus-operator-prometheus-operator`.
+  fullnameOverride: prometheus-operator
+
+  # Use Prometheus Operator's standard ServiceMonitor selector. All
+  # ServiceMonitor CRs in the big-data charts carry `release: prometheus`
+  # so we match that label here.
+  prometheus:
+    prometheusSpec:
+      serviceMonitorSelectorNilUsesHelmValues: false
+      serviceMonitorSelector:
+        matchLabels:
+          release: prometheus
+      podMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelector:
+        matchLabels:
+          release: prometheus
+      ruleSelectorNilUsesHelmValues: false
+      ruleSelector:
+        matchLabels:
+          release: prometheus
+      retention: 30d
+      retentionSize: 50GiB
+      replicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: ""
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 50Gi
+
+  alertmanager:
+    alertmanagerSpec:
+      replicas: 1
+      retention: 120h
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 250m
+          memory: 512Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: ""
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 5Gi
+
+  grafana:
+    enabled: true
+    adminPassword: ""        # Override per env; never commit a default
+    persistence:
+      enabled: false
+      storageClassName: ""
+      size: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    sidecar:
+      datasources:
+        defaultDatasourceEnabled: true
+      dashboards:
+        enabled: true
+        # Auto-discover dashboard ConfigMaps with this label across
+        # all namespaces. Big-data charts can opt in by labeling
+        # their ConfigMaps `grafana_dashboard: "1"`.
+        searchNamespace: ALL
+        label: grafana_dashboard
+        labelValue: "1"
+
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # Cluster-wide infrastructure metrics (node-exporter, kube-state-metrics).
+  # Both default-on; flip off if you have an existing cluster-wide installation.
+  nodeExporter:
+    enabled: true
+  kube-state-metrics:
+    enabled: true
+
+  # The default kubeApiServer / kubeControllerManager / kubeScheduler
+  # / kubeProxy ServiceMonitors assume managed-K8s endpoints; toggle
+  # off when running on a kind cluster (see kind-local profile).
+  kubeApiServer:
+    enabled: true
+  kubeControllerManager:
+    enabled: true
+  kubeScheduler:
+    enabled: true
+  kubeProxy:
+    enabled: true
+  kubelet:
+    enabled: true
+  coreDns:
+    enabled: true
+  kubeEtcd:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Optional priorityClass at the wrapper layer. Customer-prod uses
+# infra-critical so monitoring keeps running through node drains.
+# -----------------------------------------------------------------------------
+priorityClassName: ""

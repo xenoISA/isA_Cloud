@@ -1,0 +1,39 @@
+apiVersion: v2
+name: prometheus-operator
+description: |
+  Prometheus Operator wrapper. Installs prometheus-community's
+  kube-prometheus-stack (Prometheus + Grafana + AlertManager +
+  Operator + CRDs) cluster-wide so the ServiceMonitor CRs from the
+  big-data charts (postgres-bigdata, hive-metastore, minio,
+  iceberg-tools, starrocks, flink) actually get scraped.
+
+  This chart is a STRICT PREREQUISITE for the isa-bigdata umbrella
+  when customer-prod is in use — the umbrella's ServiceMonitor CRs
+  fail to apply without the prometheus-operator CRDs (`monitoring.coreos.com/v1`)
+  being installed first.
+
+  Pinned to kube-prometheus-stack v84.5.0 (prometheus-operator v0.90.1).
+  See xenoISA/isA_Cloud#234 and the deployment-readiness audit
+  rolled into the customer-prod profile values.
+type: application
+version: 0.1.0
+appVersion: "0.90.1"
+keywords:
+  - prometheus
+  - grafana
+  - alertmanager
+  - monitoring
+  - observability
+  - bigdata
+  - data-platform
+home: https://prometheus.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/prometheus-community/helm-charts
+  - https://github.com/prometheus-operator/prometheus-operator
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: kube-prometheus-stack
+    version: "84.5.0"
+    repository: https://prometheus-community.github.io/helm-charts
