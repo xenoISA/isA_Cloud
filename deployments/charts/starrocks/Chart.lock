@@ -1,0 +1,6 @@
+dependencies:
+- name: kube-starrocks
+  repository: https://starrocks.github.io/starrocks-kubernetes-operator
+  version: 1.11.4
+digest: sha256:134c4f3d2c2cfc3b6cfb69251e718e7c5920ac6d69ae2705e66feec9a4a3d1aa
+generated: "2026-05-09T09:26:53.508676+08:00"

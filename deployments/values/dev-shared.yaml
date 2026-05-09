@@ -242,3 +242,40 @@ minio:
 paimon-tools:
   init:
     enabled: true
+
+starrocks:
+  rootPassword:
+    create: false
+  catalogInit:
+    enabled: true
+  kube-starrocks:
+    operator:
+      starrocksOperator:
+        replicaCount: 1
+    starrocks:
+      starrocksFESpec:
+        replicas: 1
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        storageSpec:
+          name: fe-meta
+          storageClassName: ""
+          storageSize: 10Gi
+      starrocksBeSpec:
+        replicas: 1
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        storageSpec:
+          name: be-storage
+          storageClassName: ""
+          storageSize: 50Gi
