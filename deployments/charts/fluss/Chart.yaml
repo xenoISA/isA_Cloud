@@ -1,0 +1,30 @@
+apiVersion: v2
+name: fluss
+description: |
+  Apache Fluss chart shell — placeholder for the W12+ Paimon 1.3
+  upgrade-path decision. Disabled by default at all profiles. Renders
+  a single placeholder ConfigMap only when `enabled=true`. Activates
+  in W12+ if the team decides to enable Fluss for real-time analytics.
+
+  See xenoISA/isA_Cloud#253, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §A2.2 / 00-infra-architecture-overview.md
+  §6.5 (Phase 3.2 Fluss enablement decision gate).
+type: application
+version: 0.1.0
+# Sentinel appVersion. Bump to a real Fluss release tag when this
+# chart is activated and the placeholder template is replaced with
+# real StatefulSet / Service / catalog-integration manifests.
+appVersion: "0.0.0-shell"
+keywords:
+  - fluss
+  - paimon
+  - real-time
+  - bigdata
+  - data-platform
+  - shell
+home: https://fluss.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/fluss
+maintainers:
+  - name: isA Platform

@@ -41,3 +41,8 @@ flink:
 flink-cdc-jobs:
   enabled: true
   namespace: isa-bigdata
+
+# Shell chart — disabled by default at all profiles. Flip post-W12 ADR.
+# See deployments/charts/fluss/README.md for the activation gate.
+fluss:
+  enabled: false

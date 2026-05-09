@@ -22,6 +22,7 @@ PAIMON_CHART="${DEPLOYMENTS}/charts/paimon-tools"
 STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
 FLINK_CHART="${DEPLOYMENTS}/charts/flink"
 FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
+FLUSS_CHART="${DEPLOYMENTS}/charts/fluss"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -131,6 +132,7 @@ main() {
   lint_chart "${STARROCKS_CHART}"
   lint_chart "${FLINK_CHART}"
   lint_chart "${FLINK_CDC_CHART}"
+  lint_chart "${FLUSS_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -149,6 +151,10 @@ main() {
     --set 'sources[0].name=smoke' \
     --set 'sources[0].enabled=true' \
     --set 'sources[0].sql=SELECT 1;'
+  # fluss is a shell — default disabled at all profiles. Standalone
+  # template with --set enabled=true exercises the placeholder render
+  # path so helper / labels / ConfigMap regressions are caught here.
+  template_chart "${FLUSS_CHART}" --set enabled=true
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

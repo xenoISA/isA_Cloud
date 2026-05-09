@@ -1,0 +1,67 @@
+# =============================================================================
+# fluss chart — shell defaults (xenoISA/isA_Cloud#253)
+# =============================================================================
+# Deliberately tiny. The chart renders ZERO resources by default — every
+# template file gates on `.Values.enabled`. When the W12+ activation
+# decision goes "go", this values.yaml gets fleshed out (StatefulSet
+# replicas, storage class, Fluss-Paimon catalog integration, etc.) and
+# the placeholder.yaml template is replaced with real manifests.
+#
+# Until then, the chart's value is purely structural — it lets the
+# umbrella's chart inventory match the design's 11-chart spec without
+# anyone accidentally deploying a half-built service.
+# =============================================================================
+
+# Master toggle. Default `false` — no resources render. Flip to `true`
+# only when:
+#   - Apache Fluss is GA (currently incubating)
+#   - Paimon 1.3 GA with Fluss interop verified
+#   - Capacity check confirms the 3-node KSi5008U cluster has headroom
+#   - A follow-up ADR records the activation decision
+enabled: false
+
+# Optional message embedded in the placeholder ConfigMap when
+# enabled=true. Useful for ops to grep for "shell-not-implemented" in
+# any cluster that mistakenly gets Fluss flipped on too early.
+placeholder:
+  status: "shell-not-implemented"
+  reason: "Awaiting W12+ Fluss-GA + Paimon-1.3 activation decision (xenoISA/isA_Cloud#234)"
+
+# -----------------------------------------------------------------------------
+# Fields below are RESERVED for the W12+ activation. Each entry is a
+# stub with a TODO comment to make the activation diff legible: when
+# someone fills in the real values, the structure is already in place
+# and `helm diff` shows just the value changes.
+# -----------------------------------------------------------------------------
+namespace: isa-bigdata
+
+# TODO: pick once Fluss publishes an official image
+image:
+  repository: ""           # e.g., apache/fluss
+  tag: ""                  # e.g., 0.6.0
+  pullPolicy: IfNotPresent
+
+# TODO: size when activated; sn-commercial-tower bigdata-architecture.md §4.1
+# pencils in 1 broker for kind, 3 for prod, mirroring kafka.
+replicas: 0
+
+# TODO: storage when activated; expect to mirror the kafka chart's
+# storage pattern (local-path for kind, infortrend-iscsi for prod).
+storage:
+  enabled: false
+  size: ""
+  storageClass: ""
+
+# TODO: the integration point with HMS — Fluss tables register in the
+# same Hive Metastore as Paimon does today (#240).
+catalog:
+  enabled: false
+  hiveMetastoreUri: ""
+
+# TODO: NetworkPolicy + PDB + ServiceMonitor when activated.
+networkPolicy:
+  enabled: false
+podDisruptionBudget:
+  enabled: false
+serviceMonitor:
+  enabled: false

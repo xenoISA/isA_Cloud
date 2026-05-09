@@ -47,3 +47,6 @@ dependencies:
   - name: flink-cdc-jobs
     version: 0.1.0
     repository: file://../../charts/flink-cdc-jobs
+  - name: fluss
+    version: 0.1.0
+    repository: file://../../charts/fluss
