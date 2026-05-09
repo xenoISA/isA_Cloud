@@ -1,0 +1,160 @@
+# =============================================================================
+# flink chart — defaults (xenoISA/isA_Cloud#248)
+# =============================================================================
+# Three-tier model:
+#   1. Operator (upstream chart, manages the FlinkDeployment / FlinkSessionJob CRDs cluster-wide)
+#   2. Session cluster (FlinkDeployment CR rendered by THIS chart, long-running JM + TMs)
+#   3. Per-job submissions (FlinkSessionJob CRs from flink-cdc-jobs, NOT in this chart)
+#
+# Sizing reference (sn-commercial-tower 00-infra-architecture-overview.md):
+#   kind-local       : 1 JM + 1 TM, 2GB heap, ephemeral
+#   dev-shared       : 1 JM + 1 TM, 4GB heap, persistent S3 checkpoints
+#   customer-prod    : 1 JM + 3 TM, 8/16GB heap, native HA, anti-affinity
+#                      per host (TM only), NetworkPolicy on, infra-critical
+# =============================================================================
+
+name: flink
+namespace: isa-bigdata
+
+# -----------------------------------------------------------------------------
+# Upstream Operator chart pass-through. The operator runs cluster-wide and
+# reconciles FlinkDeployment/FlinkSessionJob CRs into Pods/Services.
+# -----------------------------------------------------------------------------
+flink-kubernetes-operator:
+  watchNamespaces:
+    - isa-bigdata
+  operatorPod:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webhook:
+    create: true
+  metrics:
+    port: 9999
+
+# -----------------------------------------------------------------------------
+# Session cluster — FlinkDeployment CR rendered by this chart.
+# -----------------------------------------------------------------------------
+session:
+  enabled: true
+  # CR metadata.name; the operator names produced Pods after this.
+  name: flink-session
+  # Apache Flink runtime image. The operator chart's CRD validation
+  # accepts any apache/flink:* tag matching the operator's supported
+  # range.
+  image:
+    repository: apache/flink
+    tag: "1.20.0-scala_2.12-java17"
+    pullPolicy: IfNotPresent
+
+  # JobManager spec.
+  jobManager:
+    replicas: 1
+    resource:
+      cpu: 1
+      memory: "2Gi"
+    podTemplate:
+      spec:
+        priorityClassName: ""
+        affinity: {}
+
+  # TaskManager spec.
+  taskManager:
+    replicas: 1
+    resource:
+      cpu: 1
+      memory: "2Gi"
+    # Slot count. Each slot runs one parallel task; CDC jobs are usually
+    # 1-2 slots wide. Bump for higher-fanout topologies.
+    numberOfTaskSlots: 2
+    podTemplate:
+      spec:
+        priorityClassName: ""
+        affinity: {}
+
+  # Native HA (no ZooKeeper) for prod. Flink 1.18+ leader election uses
+  # Kubernetes ConfigMaps. Off in kind/dev to keep the chart light.
+  highAvailability:
+    enabled: false
+    type: kubernetes
+    storageDir: "s3a://flink-checkpoints/ha/"
+
+  # flink-conf.yaml entries merged into the FlinkDeployment.spec.flinkConfiguration.
+  # Keys are flat. Credentials referenced via Hadoop's ${env:VAR}
+  # interpolation — env-injected from minio-credentials Secret (#242).
+  flinkConfiguration:
+    # Kubernetes deploy mode.
+    kubernetes.cluster-id: flink-session
+    # State + checkpoints — persisted to MinIO bucket created by #242.
+    state.backend.type: rocksdb
+    state.backend.incremental: "true"
+    state.checkpoints.dir: "s3a://flink-checkpoints/checkpoints/"
+    state.savepoints.dir: "s3a://flink-checkpoints/savepoints/"
+    execution.checkpointing.interval: "30s"
+    execution.checkpointing.min-pause: "5s"
+    execution.checkpointing.timeout: "10min"
+    execution.checkpointing.unaligned: "true"
+    # S3A wiring against MinIO (chart-deployed minio Service).
+    s3.endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    s3.path.style.access: "true"
+    s3.access.key: "${env:AWS_ACCESS_KEY_ID}"
+    s3.secret.key: "${env:AWS_SECRET_ACCESS_KEY}"
+    # Memory tuning. Override per profile.
+    jobmanager.memory.process.size: "2g"
+    taskmanager.memory.process.size: "2g"
+    # Metrics — Prometheus reporter pulls JM + TM JMX metrics on :9249.
+    metrics.reporter.prom.factory.class: "org.apache.flink.metrics.prometheus.PrometheusReporterFactory"
+    metrics.reporter.prom.port: "9249"
+
+  # Service / network exposure for the JobManager web UI.
+  service:
+    type: ClusterIP
+    port: 8081
+
+# -----------------------------------------------------------------------------
+# paimon-catalog mount — produced by the paimon-tools chart (#244). The
+# session cluster pods mount this as a file so jobs can `LOAD CATALOG`.
+# -----------------------------------------------------------------------------
+paimonCatalog:
+  configMapName: paimon-catalog
+  mountPath: "/etc/paimon/paimon-catalog.properties"
+  subPath: "paimon-catalog.properties"
+
+# -----------------------------------------------------------------------------
+# MinIO creds — Secret produced by the minio chart (#242). Env-injected
+# into JM + TM pods so the ${env:VAR} interpolation in flinkConfiguration
+# resolves correctly.
+# -----------------------------------------------------------------------------
+minioCredentials:
+  secretName: minio-credentials
+  accessKeyKey: access-key
+  secretKeyKey: secret-key
+
+# -----------------------------------------------------------------------------
+# Optional NetworkPolicy on the session cluster pods (customer-prod only).
+# Operator pods are scoped by the upstream chart's own NP if any.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  allowedNamespaces:
+    - isa-bigdata
+
+# Pod Disruption Budgets (TM only — JM is a single pod with HA leader
+# election; PDB on a single-replica deployment makes drains painful).
+podDisruptionBudget:
+  jobManager:
+    enabled: false
+    minAvailable: 1
+  taskManager:
+    enabled: false
+    minAvailable: 1
+
+priorityClassName: ""
+
+extraEnv: []
+
+podAnnotations: {}

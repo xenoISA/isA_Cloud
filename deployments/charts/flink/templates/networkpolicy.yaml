@@ -1,0 +1,50 @@
+{{- /*
+  Optional ingress restriction on the JobManager web UI + RPC ports.
+  Operator pods are scoped by the upstream chart's own NP (if any).
+
+  TaskManager pods don't need ingress from outside the cluster — they
+  only accept traffic from the JM. We use the operator's standard label
+  `app: <FlinkDeployment.name>` for the podSelector.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.session.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "flink.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "flink.sessionSelector" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.allowedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+        # Allow JM <-> TM intra-cluster traffic.
+        - podSelector:
+            matchLabels:
+              {{- include "flink.sessionSelector" . | nindent 14 }}
+      ports:
+        # JobManager web UI / REST API.
+        - protocol: TCP
+          port: {{ .Values.session.service.port }}
+        # JobManager RPC.
+        - protocol: TCP
+          port: 6123
+        # JobManager blob server (jar / class distribution).
+        - protocol: TCP
+          port: 6124
+        # TaskManager data port.
+        - protocol: TCP
+          port: 6121
+        # Prometheus metrics.
+        - protocol: TCP
+          port: 9249
+{{- end }}

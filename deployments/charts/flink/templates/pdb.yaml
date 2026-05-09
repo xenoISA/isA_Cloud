@@ -1,0 +1,36 @@
+{{- /*
+  PDBs only when explicitly enabled AND replicas > 1. JM is a single pod
+  with native HA leader election (PDB on a single-pod deployment blocks
+  drains). TM is the natural place for a PDB once replicas >= 2.
+*/ -}}
+{{- if and .Values.podDisruptionBudget.taskManager.enabled (gt (int .Values.session.taskManager.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.session.name }}-tm
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "flink.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.taskManager.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "flink.sessionSelector" . | nindent 6 }}
+      component: taskmanager
+{{- end }}
+{{- if and .Values.podDisruptionBudget.jobManager.enabled (gt (int .Values.session.jobManager.replicas) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.session.name }}-jm
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "flink.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.jobManager.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "flink.sessionSelector" . | nindent 6 }}
+      component: jobmanager
+{{- end }}

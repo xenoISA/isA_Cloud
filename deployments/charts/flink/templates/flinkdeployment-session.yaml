@@ -1,0 +1,123 @@
+{{- /*
+  FlinkDeployment session cluster CR.
+
+  The operator (deployed by the flink-kubernetes-operator subchart)
+  reconciles this CR into the actual JobManager Deployment + TaskManager
+  Deployment + Services + ConfigMaps + leader-election ConfigMap.
+
+  pod-template merges paimon-catalog ConfigMap mount + minio-credentials
+  env-vars into both JM + TM pods. The flinkConfiguration block is the
+  flink-conf.yaml that ships into the cluster on startup.
+
+  helm template will render this even if the FlinkDeployment CRD is not
+  installed yet — `kubectl apply` enforces validation, not `helm template`.
+*/ -}}
+{{- if .Values.session.enabled }}
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: {{ .Values.session.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "flink.labels" . | nindent 4 }}
+spec:
+  image: "{{ .Values.session.image.repository }}:{{ .Values.session.image.tag }}"
+  imagePullPolicy: {{ .Values.session.image.pullPolicy }}
+  flinkVersion: v1_20
+  serviceAccount: flink
+
+  flinkConfiguration:
+    {{- range $k, $v := .Values.session.flinkConfiguration }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- if .Values.session.highAvailability.enabled }}
+    high-availability.type: {{ .Values.session.highAvailability.type | quote }}
+    high-availability.storageDir: {{ .Values.session.highAvailability.storageDir | quote }}
+    {{- end }}
+
+  jobManager:
+    replicas: {{ .Values.session.jobManager.replicas }}
+    resource:
+      cpu: {{ .Values.session.jobManager.resource.cpu }}
+      memory: {{ .Values.session.jobManager.resource.memory | quote }}
+    podTemplate:
+      spec:
+        {{- with .Values.session.jobManager.podTemplate.spec.priorityClassName }}
+        priorityClassName: {{ . }}
+        {{- end }}
+        {{- with .Values.session.jobManager.podTemplate.spec.affinity }}
+        affinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        containers:
+          - name: flink-main-container
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.minioCredentials.secretName }}
+                    key: {{ .Values.minioCredentials.accessKeyKey }}
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.minioCredentials.secretName }}
+                    key: {{ .Values.minioCredentials.secretKeyKey }}
+              {{- with .Values.extraEnv }}
+              {{- toYaml . | nindent 14 }}
+              {{- end }}
+            volumeMounts:
+              - name: paimon-catalog
+                mountPath: {{ .Values.paimonCatalog.mountPath | quote }}
+                subPath: {{ .Values.paimonCatalog.subPath | quote }}
+                readOnly: true
+        volumes:
+          - name: paimon-catalog
+            configMap:
+              name: {{ .Values.paimonCatalog.configMapName }}
+              items:
+                - key: paimon-catalog.properties
+                  path: paimon-catalog.properties
+
+  taskManager:
+    replicas: {{ .Values.session.taskManager.replicas }}
+    resource:
+      cpu: {{ .Values.session.taskManager.resource.cpu }}
+      memory: {{ .Values.session.taskManager.resource.memory | quote }}
+    podTemplate:
+      spec:
+        {{- with .Values.session.taskManager.podTemplate.spec.priorityClassName }}
+        priorityClassName: {{ . }}
+        {{- end }}
+        {{- with .Values.session.taskManager.podTemplate.spec.affinity }}
+        affinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        containers:
+          - name: flink-main-container
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.minioCredentials.secretName }}
+                    key: {{ .Values.minioCredentials.accessKeyKey }}
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.minioCredentials.secretName }}
+                    key: {{ .Values.minioCredentials.secretKeyKey }}
+              {{- with .Values.extraEnv }}
+              {{- toYaml . | nindent 14 }}
+              {{- end }}
+            volumeMounts:
+              - name: paimon-catalog
+                mountPath: {{ .Values.paimonCatalog.mountPath | quote }}
+                subPath: {{ .Values.paimonCatalog.subPath | quote }}
+                readOnly: true
+        volumes:
+          - name: paimon-catalog
+            configMap:
+              name: {{ .Values.paimonCatalog.configMapName }}
+              items:
+                - key: paimon-catalog.properties
+                  path: paimon-catalog.properties
+{{- end }}
