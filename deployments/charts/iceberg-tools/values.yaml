@@ -21,9 +21,11 @@ namespace: isa-bigdata
 
 # Iceberg version this chart targets. Determines the connector jars
 # baked into the flink-sql-runner image (xenoISA/isA_Cloud#258); the
-# two pins must stay in sync. Apache Iceberg 1.6.x supports Flink 1.18
-# / 1.19 / 1.20 with the iceberg-flink-runtime-1.20-1.6.x.jar.
-icebergVersion: "1.6.1"
+# two pins must stay in sync. Iceberg 1.7.x is the first release that
+# publishes a Flink 1.20 runtime
+# (`iceberg-flink-runtime-1.20-<version>.jar`); 1.6.x supports Flink
+# 1.18 / 1.19 only.
+icebergVersion: "1.7.2"
 
 # =============================================================================
 # Catalog properties — rendered into the iceberg-catalog ConfigMap.

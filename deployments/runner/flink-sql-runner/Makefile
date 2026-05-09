@@ -15,9 +15,10 @@
 # Image identity. Tag encodes the Flink + Operator + Iceberg versions so
 # a `helm install` referencing this tag lines up with the chart matrix
 # documented in the README.
-IMAGE_NAME ?= flink-sql-runner
-IMAGE_TAG  ?= 1.20.0-runner-1.10.0-iceberg-1.6.1
-REGISTRY   ?= ghcr.io/xenoisa
+IMAGE_NAME       ?= flink-sql-runner
+IMAGE_TAG        ?= 1.20.0-runner-1.10.0-iceberg-1.7.2
+REGISTRY         ?= ghcr.io/xenoisa
+OPERATOR_VERSION ?= 1.10.0
 
 IMAGE      := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 DOCKERFILE := Dockerfile
@@ -29,7 +30,9 @@ help: ## Print this help (default).
 	@awk 'BEGIN {FS = ":.*##"} /^[A-Za-z_-]+:.*##/ {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 build: ## Build the image locally.
-	docker build -f $(DOCKERFILE) -t $(IMAGE) $(CONTEXT)
+	docker build -f $(DOCKERFILE) \
+	  --build-arg OPERATOR_VERSION=$(OPERATOR_VERSION) \
+	  -t $(IMAGE) $(CONTEXT)
 
 push: build ## Push the image to $(REGISTRY).
 	docker push $(IMAGE)
