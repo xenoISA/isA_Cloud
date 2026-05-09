@@ -1,0 +1,53 @@
+# =============================================================================
+# flink-cdc-jobs chart — defaults (xenoISA/isA_Cloud#250)
+# =============================================================================
+# Each entry in `sources` produces:
+#   - one ConfigMap: flink-cdc-<name>-sql        (the SQL script)
+#   - one FlinkSessionJob CR: flink-cdc-<name>   (submits to flink-session)
+#
+# The chart writes to the long-running session cluster from the flink
+# chart (#249) via FlinkSessionJob.spec.deploymentName. Per-job
+# secrets (Kafka, Apicurio, MinIO creds) are NOT rendered here — the
+# session cluster pods already have them mounted/injected by #249.
+# =============================================================================
+
+name: flink-cdc-jobs
+namespace: isa-bigdata
+
+# Session cluster the FlinkSessionJob CRs submit to. Must match
+# .Values.session.name in the flink chart.
+sessionDeploymentName: flink-session
+
+# Path to the flink-sql-runner jar, resolved INSIDE the session cluster
+# image. Out of scope of this chart: how the jar gets into the image
+# (custom Dockerfile, init container, or remote URL fetcher). Override
+# per profile if a different runner is used.
+runnerJar: "local:///opt/flink/usrlib/flink-sql-runner.jar"
+
+# Default knobs applied to each FlinkSessionJob unless the source
+# overrides them.
+defaults:
+  parallelism: 1
+  upgradeMode: stateless
+  state: running
+
+# Per-source list. Each entry produces a ConfigMap + a FlinkSessionJob.
+# The `sql` block is rendered into the ConfigMap as-is; the runner reads
+# it via --scriptUri (configmap path baked at template time).
+#
+# V0.1: SQL uses a `VALUES` literal as a stand-in source while real
+# producers + per-source Avro schemas are still being validated. Once
+# W7+ source onboarding is complete, replace each source's `sql` with
+# the real Kafka source DDL emitted from
+# sn-commercial-tower#235's scripts/dataphin/export_kafka_apicurio_bundle.py.
+sources: []
+
+# ConfigMap name prefix. Each source's ConfigMap is named
+# "<configMapPrefix>-<source.name>-sql".
+configMapPrefix: flink-cdc
+
+# Job name prefix. Each source's FlinkSessionJob is named
+# "<jobPrefix>-<source.name>".
+jobPrefix: flink-cdc
+
+podAnnotations: {}

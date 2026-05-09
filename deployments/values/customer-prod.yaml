@@ -490,3 +490,79 @@ flink:
     taskManager:
       enabled: true
       minAvailable: 2
+
+flink-cdc-jobs:
+  defaults:
+    parallelism: 4
+    upgradeMode: last-state
+  # All 22 sources from sn-commercial-tower data_platform/sources/.
+  # All disabled by default; operators flip individual sources on as
+  # W7+ source onboarding completes (real Kafka producer + Apicurio
+  # schema + per-source DDL replacing the stub).
+  sources:
+    - name: amazon_ads
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML for landing.raw_amazon_ads_campaign_performance"
+    - name: walmart_connect
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML for landing.raw_walmart_connect_campaign_performance"
+    - name: shopify
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML for landing.raw_shopify_catalog_products"
+    - name: amazon_spapi_listings
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: amazon_spapi_orders
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: agent_approval_execution_audit
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: agent_learner_feedback_labels
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: agent_recommendation_events
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: brand_public_narratives
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: category_market_benchmarks
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: competitor_market_observations
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: competitor_match_registry
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: ga4_channel_sessions
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: google_ads_campaign_performance
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: macro_market_context
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: marketplace_reviews_and_ratings
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: meta_ads_campaign_performance
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: public_search_interest_trends
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: search_console_queries
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: social_listening_mentions
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: tiktok_shop_orders
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"
+    - name: walmart_marketplace_inventory
+      enabled: false
+      sql: "-- W7 onboarding: replace with real DDL/DML"

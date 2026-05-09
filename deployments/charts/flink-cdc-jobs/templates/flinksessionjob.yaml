@@ -1,0 +1,47 @@
+{{- /*
+  Per-source FlinkSessionJob CR. Submits the SQL ConfigMap (rendered by
+  sql-configmap.yaml above) to the long-running session cluster
+  produced by the flink chart (#249).
+
+  Args reference the SQL ConfigMap's mount path inside the session
+  cluster pods. The session cluster's JM + TM podTemplate (defined in
+  #249) does NOT mount these per-job ConfigMaps automatically — the
+  flink-sql-runner is expected to fetch the script via
+  configmap:// or HTTP URI. For V0.1 we pass a configmap:// URI; the
+  runner's exact URI scheme is documented in the chart README and may
+  need profile-specific overrides as the runner image evolves.
+
+  upgradeMode `stateless` (default) does not preserve checkpoint state
+  across job upgrades. customer-prod uses `last-state` to keep the
+  checkpoint pointer across chart upgrades.
+
+  helm template renders this even if the FlinkSessionJob CRD is not
+  installed yet — `kubectl apply` enforces validation. Same caveat as
+  the FlinkDeployment in the flink chart (#249).
+*/ -}}
+{{- range .Values.sources }}
+{{- if .enabled }}
+{{- $source := . }}
+{{- $parallelism := default $.Values.defaults.parallelism .parallelism }}
+{{- $upgradeMode := default $.Values.defaults.upgradeMode .upgradeMode }}
+{{- $state := default $.Values.defaults.state .state }}
+---
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkSessionJob
+metadata:
+  name: {{ include "flink-cdc-jobs.jobName" (list $ $source) }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "flink-cdc-jobs.sourceLabels" (list $ $source) | nindent 4 }}
+spec:
+  deploymentName: {{ $.Values.sessionDeploymentName }}
+  job:
+    jarURI: {{ $.Values.runnerJar | quote }}
+    parallelism: {{ $parallelism }}
+    upgradeMode: {{ $upgradeMode | quote }}
+    state: {{ $state | quote }}
+    args:
+      - "--scriptUri"
+      - "configmap://{{ include "flink-cdc-jobs.configMapName" (list $ $source) }}/job.sql"
+{{- end }}
+{{- end }}
