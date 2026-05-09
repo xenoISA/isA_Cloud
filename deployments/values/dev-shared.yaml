@@ -279,3 +279,22 @@ starrocks:
           name: be-storage
           storageClassName: ""
           storageSize: 50Gi
+
+flink:
+  session:
+    jobManager:
+      replicas: 1
+      resource:
+        cpu: 2
+        memory: "4Gi"
+    taskManager:
+      replicas: 1
+      resource:
+        cpu: 2
+        memory: "4Gi"
+      numberOfTaskSlots: 4
+    flinkConfiguration:
+      jobmanager.memory.process.size: "4g"
+      taskmanager.memory.process.size: "4g"
+  networkPolicy:
+    enabled: false

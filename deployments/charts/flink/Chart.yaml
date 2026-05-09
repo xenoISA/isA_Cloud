@@ -1,0 +1,36 @@
+apiVersion: v2
+name: flink
+description: |
+  Apache Flink Kubernetes Operator + a long-running session cluster for
+  the isA platform's big-data foundation. Wraps the upstream
+  flink-kubernetes-operator chart (v1.10.0, Flink 1.18-1.20 compatible)
+  with profile-aware defaults and renders a FlinkDeployment session
+  cluster CR pre-wired for Paimon-on-MinIO via the paimon-catalog
+  ConfigMap (#244) and minio-credentials Secret (#242).
+
+  Last critical-path piece for live V-2 / V-3 / V-5 verification.
+  Per-job submission is the responsibility of the flink-cdc-jobs chart
+  (next).
+
+  See xenoISA/isA_Cloud#248, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5 / 00-infra-architecture-overview.md
+  §6.1 (1 JM + 1 TM) and §6.2 (1 JM + 3 TM).
+type: application
+version: 0.1.0
+appVersion: "1.20.0"
+keywords:
+  - flink
+  - flink-cdc
+  - paimon
+  - bigdata
+  - data-platform
+home: https://flink.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/flink-kubernetes-operator
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: flink-kubernetes-operator
+    version: "1.10.0"
+    repository: https://archive.apache.org/dist/flink/flink-kubernetes-operator-1.10.0/

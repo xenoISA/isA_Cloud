@@ -20,6 +20,7 @@ HMS_CHART="${DEPLOYMENTS}/charts/hive-metastore"
 MINIO_CHART="${DEPLOYMENTS}/charts/minio"
 PAIMON_CHART="${DEPLOYMENTS}/charts/paimon-tools"
 STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
+FLINK_CHART="${DEPLOYMENTS}/charts/flink"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -90,6 +91,10 @@ template_umbrella_with_profile() {
     echo "[fail] no StarRocksCluster CR in ${profile}" >&2
     exit 4
   fi
+  if ! grep -q "kind: FlinkDeployment" <<<"${out}"; then
+    echo "[fail] no FlinkDeployment CR in ${profile}" >&2
+    exit 4
+  fi
 }
 
 main() {
@@ -104,6 +109,9 @@ main() {
   step "helm dependency update ${STARROCKS_CHART}"
   helm dependency update "${STARROCKS_CHART}"
 
+  step "helm dependency update ${FLINK_CHART}"
+  helm dependency update "${FLINK_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
@@ -111,6 +119,7 @@ main() {
   lint_chart "${MINIO_CHART}"
   lint_chart "${PAIMON_CHART}"
   lint_chart "${STARROCKS_CHART}"
+  lint_chart "${FLINK_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -123,6 +132,7 @@ main() {
   template_chart "${PAIMON_CHART}"
   template_chart "${STARROCKS_CHART}" \
     --set rootPassword.create=true --set rootPassword.password=test
+  template_chart "${FLINK_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

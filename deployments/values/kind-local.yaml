@@ -278,3 +278,29 @@ starrocks:
           name: be-storage
           storageClassName: local-path
           storageSize: 20Gi
+
+flink:
+  session:
+    image:
+      tag: "1.20.0-scala_2.12-java17"
+    jobManager:
+      replicas: 1
+      resource:
+        cpu: 1
+        memory: "2Gi"
+    taskManager:
+      replicas: 1
+      resource:
+        cpu: 1
+        memory: "2Gi"
+      numberOfTaskSlots: 2
+    flinkConfiguration:
+      jobmanager.memory.process.size: "2g"
+      taskmanager.memory.process.size: "2g"
+  networkPolicy:
+    enabled: false
+  podDisruptionBudget:
+    jobManager:
+      enabled: false
+    taskManager:
+      enabled: false

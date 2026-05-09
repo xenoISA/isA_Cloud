@@ -34,3 +34,6 @@ paimon-tools:
 
 starrocks:
   enabled: true
+
+flink:
+  enabled: true

@@ -444,3 +444,49 @@ starrocks:
                   matchLabels:
                     app.kubernetes.io/component: be
                 topologyKey: kubernetes.io/hostname
+
+flink:
+  priorityClassName: infra-critical
+  session:
+    jobManager:
+      replicas: 1
+      resource:
+        cpu: 4
+        memory: "8Gi"
+      podTemplate:
+        spec:
+          priorityClassName: infra-critical
+    taskManager:
+      replicas: 3
+      resource:
+        cpu: 4
+        memory: "16Gi"
+      numberOfTaskSlots: 4
+      podTemplate:
+        spec:
+          priorityClassName: infra-critical
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      component: taskmanager
+                      app: flink-session
+                  topologyKey: kubernetes.io/hostname
+    highAvailability:
+      enabled: true
+      type: kubernetes
+      storageDir: "s3a://flink-checkpoints/ha/"
+    flinkConfiguration:
+      jobmanager.memory.process.size: "8g"
+      taskmanager.memory.process.size: "16g"
+  networkPolicy:
+    enabled: true
+    allowedNamespaces:
+      - isa-bigdata
+      - isa-data
+      - isa-mcp
+  podDisruptionBudget:
+    taskManager:
+      enabled: true
+      minAvailable: 2
