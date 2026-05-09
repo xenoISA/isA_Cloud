@@ -1,5 +1,5 @@
 {{- /*
-  Paimon external catalog init Job.
+  Iceberg external catalog init Job.
 
   Runs as a Helm post-install + post-upgrade hook so the
   StarRocksCluster CR (created by the upstream chart) is applied first.
@@ -9,7 +9,7 @@
 
   Catalog properties mirror the contract in
   deployments/charts/iceberg-tools/templates/configmap.yaml so the same
-  Paimon tables that flink-cdc-jobs writes to are queryable from
+  Iceberg tables that flink-cdc-jobs writes to are queryable from
   StarRocks without any extra config.
 
   ttlSecondsAfterFinished + before-hook-creation + hook-succeeded delete
