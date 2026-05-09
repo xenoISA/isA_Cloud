@@ -27,12 +27,22 @@ kubectl create namespace strimzi-system
 helm install strimzi-operator deployments/charts/strimzi-operator \
   --namespace strimzi-system
 
-# 3. (TBD by separate stories — not yet in this dir)
+# 3. Prometheus Operator stack (CRDs for ServiceMonitor /
+#    PodMonitor / Prometheus / AlertManager / etc.)
+#    REQUIRED when customer-prod profile (or any profile with
+#    `serviceMonitor.enabled: true`) is in use; otherwise
+#    ServiceMonitor CRs from the umbrella fail with "no matches for
+#    kind ServiceMonitor in version monitoring.coreos.com/v1".
+kubectl create namespace monitoring
+helm dependency update deployments/charts/prometheus-operator
+helm install prometheus-operator deployments/charts/prometheus-operator \
+  --namespace monitoring
+
+# 4. (TBD by separate stories — not yet in this dir)
 #    - cert-manager + ClusterIssuer (xenoISA/isA_Cloud#TBD)
-#    - prometheus-operator (xenoISA/isA_Cloud#TBD)
 #    - vault + external-secrets (customer-prod only)
 
-# 4. Big-data umbrella
+# 5. Big-data umbrella
 helm dependency update deployments/charts/postgres-bigdata
 helm dependency update deployments/charts/minio
 helm dependency update deployments/charts/starrocks
@@ -43,19 +53,29 @@ helm install bigdata deployments/umbrella/isa-bigdata \
   --values deployments/values/customer-prod.yaml
 ```
 
-## Files
+## Files in this directory
 
 | File | What it creates |
 |---|---|
 | `priorityclasses.yaml` | 3 cluster-scoped `PriorityClass` objects: `system-critical` (1,000,000), `infra-critical` (100,000), `application` (1,000, globalDefault) — referenced by `customer-prod.yaml` profile values across kafka / postgres / hms / minio / starrocks / flink / iceberg-tools |
 
-## Why not in a chart?
+## Sibling cluster-wide prereqs (Helm charts in `deployments/charts/`)
+
+| Chart | Why it's a prereq |
+|---|---|
+| `strimzi-operator` (xenoISA/isA_Cloud#259) | Owns Kafka / KafkaNodePool / KafkaUser / KafkaTopic / KafkaConnect / KafkaConnector / KafkaMirrorMaker2 / KafkaRebalance CRDs. Must apply before the umbrella's kafka chart. |
+| `prometheus-operator` (xenoISA/isA_Cloud#234) | Owns ServiceMonitor / PodMonitor / Prometheus / AlertManager / PrometheusRule / etc. CRDs. Must apply before the umbrella when any profile flips `serviceMonitor.enabled: true`. |
+
+## Why PriorityClass not in a chart?
 
 Helm 3 supports cluster-scoped resources but ties their lifecycle to the
 chart release. PriorityClass should outlive any single chart upgrade —
 deleting and re-creating it during a release cycle would temporarily
 strip priority from running pods and trigger reschedules. Keeping them
-as raw manifests applied once at cluster bring-up sidesteps that.
+as raw manifests applied once at cluster bring-up sidesteps that. Same
+reasoning applies to the operator + CRD charts — they live in
+`deployments/charts/` (so Helm can manage their version pins) but get
+installed BEFORE the umbrella, not as umbrella subcharts.
 
 ## Cross-repo context
 
