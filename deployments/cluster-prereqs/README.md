@@ -5,7 +5,18 @@ Cluster-wide K8s objects that the `isa-bigdata` umbrella expects to exist
 (no Helm), since these are cluster-scoped and shouldn't be coupled to the
 release lifecycle of any single chart.
 
-## Apply order
+## One-shot path (recommended)
+
+```bash
+# Steps 1-2 + 4 below in one command.
+deployments/scripts/setup-datalake.sh -p customer-prod
+# Or for kind:
+deployments/scripts/setup-datalake.sh -p kind-local
+# Try --dry-run first:
+deployments/scripts/setup-datalake.sh -p customer-prod --dry-run
+```
+
+## Manual path (if scripting is unavailable)
 
 ```bash
 # 1. PriorityClass tiers (system-critical / infra-critical / application)
@@ -22,6 +33,11 @@ helm install strimzi-operator deployments/charts/strimzi-operator \
 #    - vault + external-secrets (customer-prod only)
 
 # 4. Big-data umbrella
+helm dependency update deployments/charts/postgres-bigdata
+helm dependency update deployments/charts/minio
+helm dependency update deployments/charts/starrocks
+helm dependency update deployments/charts/flink
+helm dependency update deployments/umbrella/isa-bigdata
 helm install bigdata deployments/umbrella/isa-bigdata \
   --namespace isa-bigdata --create-namespace \
   --values deployments/values/customer-prod.yaml
