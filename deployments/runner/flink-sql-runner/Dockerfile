@@ -40,11 +40,23 @@ ADD https://archive.apache.org/dist/flink/flink-kubernetes-operator-${OPERATOR_V
 
 RUN set -eu; \
     tar xzf /build/operator-src.tgz -C /build; \
-    cd /build/flink-kubernetes-operator-${OPERATOR_VERSION}/flink-sql-runner-example; \
-    mvn -B package -DskipTests; \
-    # The build output is target/flink-sql-runner-${OPERATOR_VERSION}.jar
-    # (or similar). Copy it to a stable filename for stage 3.
-    JAR=$(ls target/flink-sql-runner-*.jar | head -n1); \
+    # The flink-sql-runner-example module lives under examples/ in the
+    # operator source tree. Run Maven from the project root with `-pl`
+    # + `-am` so the parent pom + any sibling deps build first.
+    cd /build/flink-kubernetes-operator-${OPERATOR_VERSION}; \
+    mvn -B -DskipTests \
+      -pl examples/flink-sql-runner-example -am \
+      package; \
+    # The build output is examples/flink-sql-runner-example/target/.
+    # Some Maven plugins also produce a `-shaded.jar` (fat jar with
+    # deps) — prefer that when present, otherwise fall back to the
+    # plain jar (excluding sources / javadoc / original).
+    cd examples/flink-sql-runner-example/target; \
+    JAR=$(ls flink-sql-runner-example-*-shaded.jar 2>/dev/null | head -n1); \
+    if [ -z "${JAR}" ]; then \
+      JAR=$(ls flink-sql-runner-example-*.jar 2>/dev/null | grep -vE "sources|javadoc|original" | head -n1); \
+    fi; \
+    test -n "${JAR}" || { echo "[runner-build] no flink-sql-runner-example-*.jar produced"; exit 1; }; \
     cp "${JAR}" /build/flink-sql-runner.jar; \
     test -f /build/flink-sql-runner.jar
 
