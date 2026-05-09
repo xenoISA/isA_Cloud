@@ -1,0 +1,36 @@
+# =============================================================================
+# Connector + runner jars baked into the flink-sql-runner image.
+#
+# Format: one entry per line, two whitespace-separated fields:
+#   <download-url>  <sha256-checksum>
+#
+# Lines beginning with `#` and blank lines are ignored.
+#
+# Checksum policy: the build script verifies sha256 BEFORE copying jars
+# into the final image. If a checksum is `-` the build skips verification
+# for that jar (use only for transient development; production builds
+# should pin every checksum). Bumping a version REQUIRES regenerating
+# the checksum — see Makefile target `make checksums`.
+#
+# Version-compat matrix (xenoISA/sn-commercial-tower
+# 00-infra-architecture-overview.md §6.2 documents the upstream pins):
+#   Apache Flink:           1.20.0
+#   Flink Kubernetes Op:    1.10.0   (release-1.10.0 in github releases)
+#   Apache Paimon:          1.0.0    (paimon-flink-1.20-1.0.0)
+#   Flink Kafka SQL conn:   3.2.0-1.20
+#   Flink Avro Confluent:   1.20.0
+# =============================================================================
+
+# Flink SQL runner — entry point for FlinkSessionJob CRs (xenoISA/isA_Cloud#252).
+# Sourced from the Apache Flink Kubernetes Operator release tarballs.
+https://github.com/apache/flink-kubernetes-operator/releases/download/release-1.10.0/flink-sql-runner.jar  -
+
+# Apache Paimon Flink connector — Paimon table read/write from Flink SQL.
+https://repo1.maven.org/maven2/org/apache/paimon/paimon-flink-1.20/1.0.0/paimon-flink-1.20-1.0.0.jar  -
+
+# Apache Flink Kafka SQL connector — Kafka source/sink for streaming SQL.
+https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.20/flink-sql-connector-kafka-3.2.0-1.20.jar  -
+
+# Apache Flink Avro Confluent registry — decodes Avro payloads against
+# Apicurio's Confluent-compatible /apis/ccompat/v6 endpoint.
+https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro-confluent-registry/1.20.0/flink-sql-avro-confluent-registry-1.20.0.jar  -

@@ -46,6 +46,19 @@ session:
   # Apache Flink runtime image. The operator chart's CRD validation
   # accepts any apache/flink:* tag matching the operator's supported
   # range.
+  #
+  # NOTE: the stock `apache/flink:1.20.0-scala_2.12-java17` image does
+  # NOT include flink-sql-runner.jar — FlinkSessionJob CRs from the
+  # flink-cdc-jobs chart (#252) reach RECONCILED but never RUNNING
+  # against this default. For live jobs, override to the
+  # flink-sql-runner image built by deployments/runner/flink-sql-runner/
+  # (xenoISA/isA_Cloud#255). Sample override:
+  #
+  #   flink:
+  #     session:
+  #       image:
+  #         repository: ghcr.io/xenoisa/flink-sql-runner
+  #         tag: 1.20.0-runner-1.10.0-paimon-1.0.0
   image:
     repository: apache/flink
     tag: "1.20.0-scala_2.12-java17"
