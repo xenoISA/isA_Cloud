@@ -1,0 +1,64 @@
+{{- /*
+  ClusterIssuers rendered by this chart. Each block is independently
+  gated; profile values can enable any subset.
+
+  All ClusterIssuers depend on cert-manager.io/v1 CRDs being present,
+  which the upstream subchart (with installCRDs=true) installs. Use
+  helm.sh/hook annotations so the issuers apply AFTER the CRDs land,
+  even on a fresh install.
+*/ -}}
+
+{{- if .Values.clusterIssuers.selfsigned.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.clusterIssuers.selfsigned.name }}
+  labels:
+    {{- include "cert-manager-bigdata.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+spec:
+  selfSigned: {}
+{{- end }}
+
+{{- if .Values.clusterIssuers.internalCA.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.clusterIssuers.internalCA.name }}
+  labels:
+    {{- include "cert-manager-bigdata.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+spec:
+  ca:
+    secretName: {{ .Values.clusterIssuers.internalCA.caSecretName }}
+{{- end }}
+
+{{- if .Values.clusterIssuers.acme.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.clusterIssuers.acme.name }}
+  labels:
+    {{- include "cert-manager-bigdata.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+spec:
+  acme:
+    server: {{ .Values.clusterIssuers.acme.server }}
+    email: {{ required "clusterIssuers.acme.email is required when acme.enabled=true" .Values.clusterIssuers.acme.email | quote }}
+    privateKeySecretRef:
+      name: {{ .Values.clusterIssuers.acme.name }}-account-key
+    solvers:
+      {{- with .Values.clusterIssuers.acme.solver.http01 }}
+      - http01:
+          ingress:
+            class: {{ .ingressClass }}
+      {{- end }}
+{{- end }}

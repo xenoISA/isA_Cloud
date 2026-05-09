@@ -25,6 +25,7 @@ FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
 FLUSS_CHART="${DEPLOYMENTS}/charts/fluss"
 STRIMZI_CHART="${DEPLOYMENTS}/charts/strimzi-operator"
 PROMETHEUS_CHART="${DEPLOYMENTS}/charts/prometheus-operator"
+CERT_MANAGER_CHART="${DEPLOYMENTS}/charts/cert-manager"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -131,6 +132,9 @@ main() {
   step "helm dependency update ${PROMETHEUS_CHART}"
   helm dependency update "${PROMETHEUS_CHART}"
 
+  step "helm dependency update ${CERT_MANAGER_CHART}"
+  helm dependency update "${CERT_MANAGER_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
@@ -143,6 +147,7 @@ main() {
   lint_chart "${FLUSS_CHART}"
   lint_chart "${STRIMZI_CHART}"
   lint_chart "${PROMETHEUS_CHART}"
+  lint_chart "${CERT_MANAGER_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -173,6 +178,11 @@ main() {
   # ServiceMonitors are enabled — installed separately before the
   # umbrella. Verified standalone (NOT included in any umbrella render).
   template_chart "${PROMETHEUS_CHART}"
+  # cert-manager is a STRICT prerequisite when any chart issues
+  # Certificate / Issuer / ClusterIssuer CRs — installed separately
+  # before the umbrella. Verified standalone (NOT included in any
+  # umbrella render).
+  template_chart "${CERT_MANAGER_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"
