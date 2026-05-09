@@ -1,37 +1,52 @@
 # =============================================================================
-# paimon-tools chart — defaults (xenoISA/isA_Cloud#243)
+# iceberg-tools chart — defaults (xenoISA/isA_Cloud#260)
 # =============================================================================
 # Self-written. Renders only:
-#   - ConfigMap "paimon-catalog" with the catalog properties consumed
-#     by Flink + StarRocks once those charts land
+#   - ConfigMap "iceberg-catalog" with the catalog properties consumed
+#     by Flink + StarRocks
 #   - Optional init Job that smoke-tests reachability of HMS + MinIO
 #     (DNS + nc + bucket list)
 #
-# Profile defaults below match the staging tier.
+# HMS-backed Iceberg topology — no separate Iceberg REST catalog server
+# (per v3 plan §四 "Iceberg REST 不必装"). HMS owns the metadata; MinIO
+# owns the data; Iceberg is a table-format library bundled into the
+# Flink + StarRocks images.
+#
+# Replaces the earlier paimon-tools chart. Profile defaults below match
+# the staging tier.
 # =============================================================================
 
-name: paimon-tools
+name: iceberg-tools
 namespace: isa-bigdata
 
-# Paimon-aware metadata. The image below is only used by the init Job.
-# Downstream compute charts (flink-cdc-jobs, starrocks) load Paimon JARs
-# from their own images; this chart does NOT ship JARs (see README).
-paimonVersion: "1.0.0"
+# Iceberg version this chart targets. Determines the connector jars
+# baked into the flink-sql-runner image (xenoISA/isA_Cloud#258); the
+# two pins must stay in sync. Apache Iceberg 1.6.x supports Flink 1.18
+# / 1.19 / 1.20 with the iceberg-flink-runtime-1.20-1.6.x.jar.
+icebergVersion: "1.6.1"
 
 # =============================================================================
-# Catalog properties — rendered into the paimon-catalog ConfigMap.
+# Catalog properties — rendered into the iceberg-catalog ConfigMap.
 # Consumers mount this ConfigMap and pass these as Flink/StarRocks
 # catalog options. Hostnames default to the in-cluster Services produced
 # by the hive-metastore + minio charts.
+#
+# Property keys mirror Iceberg's `Catalog.create()` API surface:
+#   type=iceberg, catalog-impl=org.apache.iceberg.hive.HiveCatalog
+#   uri=thrift://...:9083, warehouse=s3a://lake/warehouse/
 # =============================================================================
 catalog:
-  type: hive
-  metastore: hive
+  # Iceberg's Flink/StarRocks catalog type. The HMS implementation lives
+  # at org.apache.iceberg.hive.HiveCatalog; downstream consumers pass
+  # this as `type=iceberg` + `catalog-type=hive`.
+  type: iceberg
+  catalogType: hive
+  catalogImpl: org.apache.iceberg.hive.HiveCatalog
   uri: "thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083"
-  warehouse: "s3a://paimon/warehouse/"
+  warehouse: "s3a://lake/warehouse/"
   # Default database the consumers look up tables under. Optional —
   # downstream charts may override per-job.
-  defaultDatabase: paimon_default
+  defaultDatabase: iceberg_default
 
 s3a:
   endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
@@ -46,21 +61,21 @@ s3a:
     secretKeyKey: secret-key
 
 # Free-form passthrough. Each entry becomes a key in the ConfigMap.
-# Useful for Paimon-specific tuning (snapshot.expire.execution-mode,
-# write-buffer-size, etc.) without re-templating.
+# Useful for Iceberg-specific tuning (write.format.default,
+# commit.retry.num-retries, etc.) without re-templating.
 extraCatalogProperties: {}
   # Example:
-  # snapshot.expire.execution-mode: sync
-  # write-buffer-size: 256MB
+  # write.format.default: parquet
+  # commit.retry.num-retries: "3"
 
 # =============================================================================
 # Init Job — smoke test for HMS + MinIO reachability.
 #
-# Why so light: the actual V-2 / V-3 verification (Paimon table create →
+# Why so light: the actual V-2 / V-3 verification (Iceberg table create →
 # Flink CDC write → StarRocks read) requires a running Flink cluster,
 # which is a separate chart. Until then, a lightweight DNS + nc + bucket-
 # list check catches the most common deploy mistakes (wrong host, wrong
-# port, missing bucket) without pulling a multi-hundred-MB Paimon image.
+# port, missing bucket) without pulling a multi-hundred-MB Iceberg image.
 #
 # Helm hook: pre-install + pre-upgrade. ttlSecondsAfterFinished cleans
 # the Pod after success.
@@ -88,7 +103,7 @@ init:
   # test; only DNS / TCP failures block.
   bucketProbe:
     endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
-    bucket: paimon
+    bucket: lake
   backoffLimit: 2
   resources:
     requests:

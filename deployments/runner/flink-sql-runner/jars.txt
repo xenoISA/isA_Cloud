@@ -16,7 +16,7 @@
 # 00-infra-architecture-overview.md §6.2 documents the upstream pins):
 #   Apache Flink:           1.20.0
 #   Flink Kubernetes Op:    1.10.0   (release-1.10.0 in github releases)
-#   Apache Paimon:          1.0.0    (paimon-flink-1.20-1.0.0)
+#   Apache Iceberg:          1.0.0    (iceberg-flink-runtime-1.20-1.6.1)
 #   Flink Kafka SQL conn:   3.2.0-1.20
 #   Flink Avro Confluent:   1.20.0
 # =============================================================================
@@ -25,8 +25,8 @@
 # Sourced from the Apache Flink Kubernetes Operator release tarballs.
 https://github.com/apache/flink-kubernetes-operator/releases/download/release-1.10.0/flink-sql-runner.jar  -
 
-# Apache Paimon Flink connector — Paimon table read/write from Flink SQL.
-https://repo1.maven.org/maven2/org/apache/paimon/paimon-flink-1.20/1.0.0/paimon-flink-1.20-1.0.0.jar  -
+# Apache Iceberg Flink connector — Iceberg table read/write from Flink SQL.
+https://repo1.maven.org/maven2/org/apache/iceberg/iceberg/iceberg-flink-runtime-1.20/1.6.1/iceberg-flink-runtime-1.20-1.6.1.jar  -
 
 # Apache Flink Kafka SQL connector — Kafka source/sink for streaming SQL.
 https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.20/flink-sql-connector-kafka-3.2.0-1.20.jar  -

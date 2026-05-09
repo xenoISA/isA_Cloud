@@ -72,7 +72,7 @@ data:
       </property>
 
       {{- if .Values.s3a.enabled }}
-      <!-- ============== S3A (MinIO) — Paimon warehouse ============== -->
+      <!-- ============== S3A (MinIO) — Iceberg warehouse ============== -->
       <property>
         <name>fs.s3a.endpoint</name>
         <value>{{ .Values.s3a.endpoint }}</value>

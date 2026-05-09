@@ -19,7 +19,7 @@ appVersion: "1.20.0"
 keywords:
   - flink
   - flink-cdc
-  - paimon
+  - iceberg
   - kafka
   - bigdata
   - data-platform

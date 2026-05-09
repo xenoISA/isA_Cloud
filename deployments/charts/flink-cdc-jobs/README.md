@@ -13,25 +13,25 @@ For each entry in `values.sources`, renders:
   to the long-running session cluster from the `flink` chart (#249)
 
 No Deployments, no StatefulSets, no Services. The session cluster's
-JM + TM pods are pre-wired with `paimon-catalog` ConfigMap mounts and
+JM + TM pods are pre-wired with `iceberg-catalog` ConfigMap mounts and
 `minio-credentials` env injection via the flink chart, so per-job
 templates don't need to repeat any of that.
 
 ## V0.1 scope clarification
 
 The "cdc" in `flink-cdc-jobs` refers to the **CDC-shaped pipeline** —
-binlog/WAL/event-stream → Kafka → Flink → Paimon → HMS — NOT the Apache
+binlog/WAL/event-stream → Kafka → Flink → Iceberg → HMS — NOT the Apache
 Flink CDC connector library specifically.
 
 For W2 V-2/V-3 verification, the real DB binlog sources don't exist
 yet (those land in W7+ when actual customer DBs connect). So this
-chart's V0.1 scope is the **Kafka → Avro (via Apicurio) → Paimon** path
+chart's V0.1 scope is the **Kafka → Avro (via Apicurio) → Iceberg** path
 only:
 
 ```
 Kafka topic (landing.<source>)
   ─► Flink Avro decode via Apicurio schema (landing.<source>-value)
-    ─► Flink Paimon sink writing to s3a://paimon/warehouse/<source>
+    ─► Flink Iceberg sink writing to s3a://lake/warehouse/<source>
       ─► HMS catalog entry visible to Dataphin + StarRocks
 ```
 
@@ -72,9 +72,9 @@ sources:
         'scan.startup.mode' = 'earliest-offset'
       );
 
-      -- Paimon sink (catalog already loaded from /etc/paimon/paimon-catalog.properties).
-      CREATE CATALOG paimon WITH ('type' = 'paimon');
-      USE CATALOG paimon;
+      -- Iceberg sink (catalog already loaded from /etc/iceberg/iceberg-catalog.properties).
+      CREATE CATALOG iceberg WITH ('type' = 'iceberg', 'catalog-type' = 'hive', 'uri' = 'thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083', 'warehouse' = 's3a://lake/warehouse/');
+      USE CATALOG iceberg;
 
       CREATE TABLE IF NOT EXISTS `default`.`amazon_ads` (
         profile_id     STRING,
@@ -114,12 +114,12 @@ W7+). Concretely:
 ```sql
 SET 'pipeline.name' = 'flink-cdc-stub-amazon-ads';
 
-CREATE CATALOG paimon WITH ('type' = 'paimon');
+CREATE CATALOG iceberg WITH ('type' = 'iceberg', 'catalog-type' = 'hive', 'uri' = 'thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083', 'warehouse' = 's3a://lake/warehouse/');
 
-CREATE TABLE IF NOT EXISTS paimon.`default`.`stub_amazon_ads` (...);
+CREATE TABLE IF NOT EXISTS iceberg.`default`.`stub_amazon_ads` (...);
 
 -- VALUES literal stands in for the Kafka source until the real producer lands.
-INSERT INTO paimon.`default`.`stub_amazon_ads`
+INSERT INTO iceberg.`default`.`stub_amazon_ads`
 VALUES ('STUB-CAMPAIGN', DATE '1970-01-01', 0, 0, 0.00);
 ```
 
@@ -165,7 +165,7 @@ consumers. To survive a schema bump:
    it removes/renames fields.
 3. The Flink job's `kafka_<source>` table reads the new schema on the
    next message; missing fields default to NULL on the consumer side.
-4. The Paimon sink schema can absorb the new fields by ALTER TABLE +
+4. The Iceberg sink schema can absorb the new fields by ALTER TABLE +
    chart re-deploy (`upgradeMode: last-state` keeps the checkpoint
    pointer).
 
@@ -198,7 +198,7 @@ source's ConfigMap + FlinkSessionJob; untouched sources stay as-is.
 ## Cross-repo context
 
 - xenoISA/isA_Cloud#234 — parent epic
-- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 / #247 / #249 — kafka, postgres, hms, minio, paimon-tools, starrocks, flink (already merged)
+- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 / #247 / #249 — kafka, postgres, hms, minio, iceberg-tools, starrocks, flink (already merged)
 - xenoISA/sn-commercial-tower#235 — `scripts/dataphin/export_kafka_apicurio_bundle.py` produces the per-source topic + Apicurio subject contract this chart consumes
 - xenoISA/sn-commercial-tower ADR-0002 §2.5 — chart layout
 - xenoISA/sn-commercial-tower `docs/design/bigdata-architecture.md` §3.1 (4 ingestion paths)

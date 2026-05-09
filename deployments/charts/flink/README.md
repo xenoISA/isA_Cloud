@@ -26,7 +26,7 @@ layer 3.
 
 - **Wraps** `flink-operator/flink-kubernetes-operator` v1.10.0 (operator + CRDs)
 - **Renders** a `FlinkDeployment` CR for the session cluster, pre-wired for:
-  - Paimon-on-MinIO (mounts the `paimon-catalog` ConfigMap from #244 at `/etc/paimon/paimon-catalog.properties`)
+  - Iceberg-on-MinIO (mounts the `iceberg-catalog` ConfigMap from #244 at `/etc/iceberg/iceberg-catalog.properties`)
   - S3A creds env-injected from `minio-credentials` Secret (#242)
   - State backend: RocksDB with incremental checkpoints to `s3a://flink-checkpoints/`
   - Prometheus metrics on `:9249`
@@ -54,16 +54,16 @@ session cluster's REST API. They don't need extra mounts — the JM + TM
 pods already have:
 
 ```
-/etc/paimon/paimon-catalog.properties   # via ConfigMap mount (this chart)
+/etc/iceberg/iceberg-catalog.properties   # via ConfigMap mount (this chart)
 $AWS_ACCESS_KEY_ID + $AWS_SECRET_ACCESS_KEY   # via Secret env-vars (this chart)
 ```
 
 Jobs reference the catalog with:
 
 ```sql
-CREATE CATALOG paimon WITH (
-  'type'='paimon',
-  -- properties read from /etc/paimon/paimon-catalog.properties
+CREATE CATALOG iceberg WITH (
+  'type'='iceberg',
+  -- properties read from /etc/iceberg/iceberg-catalog.properties
 );
 ```
 
@@ -118,6 +118,6 @@ overridden in `kind-local.yaml` (default `ClusterIP`).
 ## Cross-repo context
 
 - xenoISA/isA_Cloud#234 — parent epic
-- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 / #247 — kafka, postgres, hms, minio, paimon-tools, starrocks (already merged)
+- xenoISA/isA_Cloud#235 / #238 / #240 / #242 / #244 / #247 — kafka, postgres, hms, minio, iceberg-tools, starrocks (already merged)
 - xenoISA/sn-commercial-tower ADR-0002 §2.5 — chart layout
 - xenoISA/sn-commercial-tower `docs/design/00-infra-architecture-overview.md` §6.1 (W2 1JM+1TM), §6.2 (W3 1JM+3TM)

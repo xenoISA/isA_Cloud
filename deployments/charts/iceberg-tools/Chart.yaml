@@ -1,0 +1,38 @@
+apiVersion: v2
+name: iceberg-tools
+description: |
+  Apache Iceberg catalog config + init Job for the isA platform's
+  big-data foundation. Self-written chart. Provides a single ConfigMap
+  with the catalog properties consumed by downstream compute charts
+  (flink-cdc-jobs, starrocks) and an optional one-shot init Job that
+  smoke-tests reachability of hive-metastore + minio.
+
+  Replaces the earlier paimon-tools chart per the v3 architecture
+  revision (sn-commercial-tower commit 6c6bb4d / appendix-architecture-v3-iceberg.md):
+  vendor (Alibaba Dataphin) confirmed they cannot write Paimon, and
+  StarRocks supports Iceberg DDL but Paimon catalog is read-only.
+
+  Note: this chart does NOT deploy a long-running service. Iceberg is
+  a lakehouse table format library; actual reads/writes happen on
+  Flink and StarRocks workers in their respective charts. We use the
+  HMS-backed catalog topology (no separate Iceberg REST catalog
+  server) per the v3 plan §四.
+
+  See xenoISA/isA_Cloud#260 (migration epic) and
+  xenoISA/sn-commercial-tower docs/project-plan/appendix-architecture-v3-iceberg.md.
+type: application
+version: 0.2.0
+appVersion: "1.6.1"
+keywords:
+  - iceberg
+  - lakehouse
+  - hive-metastore
+  - s3a
+  - bigdata
+  - data-platform
+home: https://iceberg.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/iceberg
+maintainers:
+  - name: isA Platform

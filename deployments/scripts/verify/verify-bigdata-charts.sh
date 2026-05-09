@@ -18,7 +18,7 @@ APICURIO_CHART="${DEPLOYMENTS}/charts/apicurio-registry"
 POSTGRES_CHART="${DEPLOYMENTS}/charts/postgres-bigdata"
 HMS_CHART="${DEPLOYMENTS}/charts/hive-metastore"
 MINIO_CHART="${DEPLOYMENTS}/charts/minio"
-PAIMON_CHART="${DEPLOYMENTS}/charts/paimon-tools"
+PAIMON_CHART="${DEPLOYMENTS}/charts/iceberg-tools"
 STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
 FLINK_CHART="${DEPLOYMENTS}/charts/flink"
 FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
@@ -86,8 +86,8 @@ template_umbrella_with_profile() {
     echo "[fail] no minio rendering in ${profile}" >&2
     exit 4
   fi
-  if ! grep -q "paimon-catalog" <<<"${out}"; then
-    echo "[fail] no paimon-tools rendering in ${profile}" >&2
+  if ! grep -q "iceberg-catalog" <<<"${out}"; then
+    echo "[fail] no iceberg-tools rendering in ${profile}" >&2
     exit 4
   fi
   if ! grep -q "kind: StarRocksCluster" <<<"${out}"; then

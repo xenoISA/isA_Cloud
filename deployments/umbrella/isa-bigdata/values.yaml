@@ -28,7 +28,7 @@ hive-metastore:
 minio:
   enabled: true
 
-paimon-tools:
+iceberg-tools:
   enabled: true
   namespace: isa-bigdata
 

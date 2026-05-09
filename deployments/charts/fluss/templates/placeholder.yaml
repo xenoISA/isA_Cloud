@@ -23,6 +23,7 @@ data:
   status: {{ .Values.placeholder.status | quote }}
   reason: {{ .Values.placeholder.reason | quote }}
   activation-criteria: |
-    See deployments/charts/fluss/README.md for the full activation gate.
-    Summary: Apache Fluss GA + Paimon 1.3 GA + 3-node capacity check + ADR.
+    DEPRECATED-IN-WAITING (2026-05-09). The W12+ Paimon-1.3 activation
+    gate is moot because the big-data foundation pivoted Paimon → Iceberg
+    per xenoISA/isA_Cloud#260. Removal scheduled post-ADR-0003.
 {{- end }}

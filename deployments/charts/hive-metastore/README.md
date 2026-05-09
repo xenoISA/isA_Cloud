@@ -58,9 +58,9 @@ re-install does not race with the live database.
 | NetworkPolicy | off | off | on (`isa-bigdata` / `isa-data` / `isa-mcp`) |
 | PriorityClass | (none) | (none) | `infra-critical` |
 
-## Warehouse path (Paimon-on-MinIO)
+## Warehouse path (Iceberg-on-MinIO)
 
-`warehouse.dir` defaults to `s3a://paimon/warehouse/`. HMS doesn't write
+`warehouse.dir` defaults to `s3a://lake/warehouse/`. HMS doesn't write
 there — it returns this path to clients (Flink CDC, Dataphin, StarRocks)
 when they create unqualified tables. The S3A endpoint defaults to
 `http://minio.isa-bigdata.svc.cluster.local:9000`; override per profile
@@ -79,7 +79,7 @@ once the minio chart lands.
 
 - **Kerberos auth** — HMS supports it but adds significant config; opt-in later
 - **JMX-Prometheus sidecar** — needed for real metrics; ServiceMonitor stub is in place
-- **Live V-2 / V-3 verification** — separate story, depends on minio + flink + paimon-tools
+- **Live V-2 / V-3 verification** — separate story, depends on minio + flink + iceberg-tools
 
 ## Cross-repo context
 

@@ -1,7 +1,7 @@
 # flink-sql-runner
 
 Custom Apache Flink session-cluster image with `flink-sql-runner.jar` and
-the connector jars (Paimon, Kafka, Avro Confluent registry) needed to
+the connector jars (Iceberg, Kafka, Avro Confluent registry) needed to
 execute the FlinkSessionJob CRs from the `flink-cdc-jobs` chart
 ([xenoISA/isA_Cloud#252](https://github.com/xenoISA/isA_Cloud/pull/252)).
 
@@ -27,7 +27,7 @@ real kind cluster.
 | Jar | Source | Why |
 |---|---|---|
 | `flink-sql-runner.jar` | Apache Flink Operator release-1.10.0 | Entry point for FlinkSessionJob CRs |
-| `paimon-flink-1.20-1.0.0.jar` | Maven Central, `org.apache.paimon` | Paimon table read/write from Flink SQL |
+| `iceberg-flink-runtime-1.20-1.6.1.jar` | Maven Central, `org.apache.iceberg` | Iceberg table read/write from Flink SQL |
 | `flink-sql-connector-kafka-3.2.0-1.20.jar` | Maven Central, `org.apache.flink` | Kafka source/sink for streaming SQL |
 | `flink-sql-avro-confluent-registry-1.20.0.jar` | Maven Central, `org.apache.flink` | Avro decode against Apicurio's `/apis/ccompat/v6` endpoint |
 
@@ -48,9 +48,9 @@ make push REGISTRY=ghcr.io/xenoisa     # push to the org's GHCR
 The image tag (`IMAGE_TAG` in the Makefile) encodes the version matrix:
 
 ```
-1.20.0-runner-1.10.0-paimon-1.0.0
-│      │      │      │      └─ Apache Paimon
-│      │      │      └─ Paimon connector pinned in jars.txt
+1.20.0-runner-1.10.0-iceberg-1.6.1
+│      │      │      │      └─ Apache Iceberg
+│      │      │      └─ Iceberg connector pinned in jars.txt
 │      │      └─ Flink Kubernetes Operator
 │      └─ Operator-version label (release-1.10.0)
 └─ Apache Flink runtime (apache/flink:1.20.0-scala_2.12-java17 base)
@@ -72,7 +72,7 @@ flink:
   session:
     image:
       repository: ghcr.io/xenoisa/flink-sql-runner
-      tag: 1.20.0-runner-1.10.0-paimon-1.0.0
+      tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
 ```
 
 ### customer-prod (after Harbor mirror sync)
@@ -82,7 +82,7 @@ flink:
   session:
     image:
       repository: harbor.customer.local/isa-platform/flink-sql-runner
-      tag: 1.20.0-runner-1.10.0-paimon-1.0.0
+      tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
 ```
 
 The customer's Harbor mirror is the air-gap-friendly path per
@@ -93,7 +93,7 @@ The customer's Harbor mirror is the air-gap-friendly path per
 
 When bumping versions, all four jars must stay compatible:
 
-| Flink | Operator | Paimon | Kafka conn | Avro Confluent |
+| Flink | Operator | Iceberg | Kafka conn | Avro Confluent |
 |---|---|---|---|---|
 | 1.18 | 1.9 | 0.9 | 3.0-1.18 | 1.18 |
 | 1.20 | 1.10 | 1.0 | 3.2-1.20 | 1.20 |

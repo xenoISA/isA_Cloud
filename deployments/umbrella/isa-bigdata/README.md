@@ -17,7 +17,7 @@ Per `docs/design/bigdata-architecture.md` §4.1 in xenoISA/sn-commercial-tower:
 - `hive-metastore`
 - `flink-operator`, `flink-jobmanager`, `flink-taskmanager`
 - `flink-cdc-jobs`
-- `paimon-tools`
+- `iceberg-tools`
 - `starrocks-fe`, `starrocks-be`
 
 ## Usage

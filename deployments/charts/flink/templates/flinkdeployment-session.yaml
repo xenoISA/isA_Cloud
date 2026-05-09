@@ -5,7 +5,7 @@
   reconciles this CR into the actual JobManager Deployment + TaskManager
   Deployment + Services + ConfigMaps + leader-election ConfigMap.
 
-  pod-template merges paimon-catalog ConfigMap mount + minio-credentials
+  pod-template merges iceberg-catalog ConfigMap mount + minio-credentials
   env-vars into both JM + TM pods. The flinkConfiguration block is the
   flink-conf.yaml that ships into the cluster on startup.
 
@@ -66,17 +66,17 @@ spec:
               {{- toYaml . | nindent 14 }}
               {{- end }}
             volumeMounts:
-              - name: paimon-catalog
-                mountPath: {{ .Values.paimonCatalog.mountPath | quote }}
-                subPath: {{ .Values.paimonCatalog.subPath | quote }}
+              - name: iceberg-catalog
+                mountPath: {{ .Values.icebergCatalog.mountPath | quote }}
+                subPath: {{ .Values.icebergCatalog.subPath | quote }}
                 readOnly: true
         volumes:
-          - name: paimon-catalog
+          - name: iceberg-catalog
             configMap:
-              name: {{ .Values.paimonCatalog.configMapName }}
+              name: {{ .Values.icebergCatalog.configMapName }}
               items:
-                - key: paimon-catalog.properties
-                  path: paimon-catalog.properties
+                - key: iceberg-catalog.properties
+                  path: iceberg-catalog.properties
 
   taskManager:
     replicas: {{ .Values.session.taskManager.replicas }}
@@ -109,15 +109,15 @@ spec:
               {{- toYaml . | nindent 14 }}
               {{- end }}
             volumeMounts:
-              - name: paimon-catalog
-                mountPath: {{ .Values.paimonCatalog.mountPath | quote }}
-                subPath: {{ .Values.paimonCatalog.subPath | quote }}
+              - name: iceberg-catalog
+                mountPath: {{ .Values.icebergCatalog.mountPath | quote }}
+                subPath: {{ .Values.icebergCatalog.subPath | quote }}
                 readOnly: true
         volumes:
-          - name: paimon-catalog
+          - name: iceberg-catalog
             configMap:
-              name: {{ .Values.paimonCatalog.configMapName }}
+              name: {{ .Values.icebergCatalog.configMapName }}
               items:
-                - key: paimon-catalog.properties
-                  path: paimon-catalog.properties
+                - key: iceberg-catalog.properties
+                  path: iceberg-catalog.properties
 {{- end }}
