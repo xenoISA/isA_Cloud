@@ -1,0 +1,36 @@
+apiVersion: v2
+name: strimzi-operator
+description: |
+  Strimzi Kafka Operator wrapper. Installs the Strimzi Operator
+  cluster-wide so the KafkaCluster + KafkaNodePool CRs from the kafka
+  chart (#235) reconcile into actual broker pods. Cluster-scoped CRDs
+  for Kafka, KafkaNodePool, KafkaUser, KafkaTopic, KafkaConnect,
+  KafkaConnector, KafkaMirrorMaker2, and KafkaRebalance are installed
+  as part of this chart.
+
+  This chart is a STRICT PREREQUISITE for the isa-bigdata umbrella —
+  install it FIRST, then helm install the umbrella. Otherwise the
+  umbrella's kafka chart fails on missing CRDs.
+
+  Pinned to Strimzi 0.46.1 to match the kafka chart's Kafka 3.7.0 target
+  (KRaft GA landed in 0.46). See xenoISA/isA_Cloud#256 and
+  xenoISA/sn-commercial-tower 00-infra-architecture-overview.md §6.1.
+type: application
+version: 0.1.0
+appVersion: "0.46.1"
+keywords:
+  - strimzi
+  - kafka
+  - operator
+  - bigdata
+  - data-platform
+home: https://strimzi.io/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/strimzi/strimzi-kafka-operator
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: strimzi-kafka-operator
+    version: "0.46.1"
+    repository: https://strimzi.io/charts/

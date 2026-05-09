@@ -1,0 +1,75 @@
+# =============================================================================
+# strimzi-operator chart — defaults (xenoISA/isA_Cloud#256)
+# =============================================================================
+# Cluster-scoped operator. Single-replica is the supported topology
+# (operator uses leader election via lease lock; HA is not its design).
+#
+# watchNamespaces scopes RBAC + reconciliation. We default to
+# isa-bigdata (matches the kafka chart's namespace from #235); add
+# additional namespaces here if Kafka clusters land in isa-data /
+# isa-mcp / etc.
+#
+# Install order (STRICT):
+#   1. helm install strimzi-operator . (this chart)  — CRDs install
+#   2. helm install isa-bigdata umbrella/...         — kafka CRs apply
+#
+# Reversing the order makes step 2 fail on missing CRDs.
+# =============================================================================
+
+# Upstream subchart pass-through.
+strimzi-kafka-operator:
+  # Operator pod sits in its own namespace. Default `strimzi-system` —
+  # match the upstream guidance; create the namespace before install.
+  watchNamespaces:
+    - isa-bigdata
+
+  # The operator runs as a single replica. Leader election handles the
+  # case where a node hosts a stale operator pod during a drain.
+  replicas: 1
+
+  # Image — pinned via Chart.yaml's appVersion / dependency version.
+  # Override the registry only for air-gap installs (Harbor mirror).
+  image:
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 384Mi
+
+  # RBAC scoping. The operator needs ClusterRole/ClusterRoleBinding for
+  # the cluster-scoped CRDs (Kafka et al.); the upstream chart sets
+  # this up correctly when createGlobalResources=true.
+  createGlobalResources: true
+
+  # Topic + User Operators. Off here — they're configured per-cluster
+  # via the kafka chart's `entityOperator.enabled` toggle.
+  topicOperator:
+    enabled: false
+  userOperator:
+    enabled: false
+
+  # Image pull secrets for air-gap registries. Empty by default.
+  imagePullSecrets: []
+
+  podDisruptionBudget:
+    # PDB on a single-replica deployment blocks node drains. Off here;
+    # the operator's leader-election handles failover within ~10s on
+    # restart.
+    create: false
+
+  serviceMonitor:
+    enabled: false
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Optional priorityClass at the wrapper layer. Customer-prod uses
+# infra-critical; kind/dev leave it empty.
+# -----------------------------------------------------------------------------
+priorityClassName: ""
