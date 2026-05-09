@@ -2,11 +2,18 @@
 # flink-sql-runner image — Apache Flink 1.20 + connector + runner jars.
 # Tracking issue: xenoISA/isA_Cloud#255.
 #
-# Two-stage build:
-#   1. fetcher (alpine + curl): downloads jars per jars.txt and verifies
-#      sha256 checksums when supplied (see jars.txt for the policy).
-#   2. final (apache/flink:1.20): copies the verified jars into
-#      /opt/flink/usrlib/ owned by `flink:flink`.
+# Three-stage build:
+#   1. runner-build (maven:eclipse-temurin-17): clones the Apache Flink
+#      Kubernetes Operator source at $OPERATOR_VERSION, compiles the
+#      flink-sql-runner-example module, copies the resulting jar.
+#      (Apache does NOT publish a pre-built flink-sql-runner.jar; we
+#      build from source.)
+#   2. fetcher (alpine + curl): downloads connector jars from Maven
+#      Central per jars.txt, verifies sha256 when supplied (see
+#      jars.txt for the policy).
+#   3. final (apache/flink:1.20): copies the runner jar (from stage 1)
+#      and connector jars (from stage 2) into /opt/flink/usrlib/ owned
+#      by `flink:flink`.
 #
 # The jars under /opt/flink/usrlib/ are auto-loaded by the Flink runtime,
 # so FlinkSessionJob CRs from the flink-cdc-jobs chart (xenoISA/isA_Cloud#252)
@@ -19,7 +26,29 @@
 #   make push REGISTRY=harbor.customer.local/isa-platform
 # =============================================================================
 
-# -------- Stage 1: fetch + verify jars --------
+# -------- Stage 1: build flink-sql-runner.jar from operator source --------
+ARG OPERATOR_VERSION=1.10.0
+FROM maven:3.9-eclipse-temurin-17 AS runner-build
+
+ARG OPERATOR_VERSION
+WORKDIR /build
+
+# Download + extract the operator source tarball pinned by
+# OPERATOR_VERSION. archive.apache.org is the canonical mirror; build
+# overrides via --build-arg OPERATOR_VERSION=... when bumping.
+ADD https://archive.apache.org/dist/flink/flink-kubernetes-operator-${OPERATOR_VERSION}/flink-kubernetes-operator-${OPERATOR_VERSION}-src.tgz /build/operator-src.tgz
+
+RUN set -eu; \
+    tar xzf /build/operator-src.tgz -C /build; \
+    cd /build/flink-kubernetes-operator-${OPERATOR_VERSION}/flink-sql-runner-example; \
+    mvn -B package -DskipTests; \
+    # The build output is target/flink-sql-runner-${OPERATOR_VERSION}.jar
+    # (or similar). Copy it to a stable filename for stage 3.
+    JAR=$(ls target/flink-sql-runner-*.jar | head -n1); \
+    cp "${JAR}" /build/flink-sql-runner.jar; \
+    test -f /build/flink-sql-runner.jar
+
+# -------- Stage 2: fetch connector jars from Maven Central --------
 FROM alpine:3.19 AS fetcher
 
 RUN apk add --no-cache curl coreutils
@@ -49,14 +78,20 @@ RUN set -eu; \
       fi; \
     done < /jars.txt
 
-# -------- Stage 2: final image --------
+# -------- Stage 3: final image --------
 FROM apache/flink:1.20.0-scala_2.12-java17
 
 # The base image already runs as `flink` user (uid 9999) and has
-# /opt/flink/usrlib/ as the standard auto-load directory.
+# /opt/flink/usrlib/ as the standard auto-load directory. Copy the
+# runner jar (built in stage 1) and the connector jars (fetched in
+# stage 2) into that directory.
+COPY --from=runner-build --chown=flink:flink /build/flink-sql-runner.jar /opt/flink/usrlib/flink-sql-runner.jar
 COPY --from=fetcher --chown=flink:flink /jars/*.jar /opt/flink/usrlib/
 
-# Sanity check — fail the build if the runner jar is missing.
-RUN test -f /opt/flink/usrlib/flink-sql-runner.jar
+# Sanity check — fail the build if any required jar is missing.
+RUN test -f /opt/flink/usrlib/flink-sql-runner.jar && \
+    ls /opt/flink/usrlib/iceberg-flink-runtime-1.20-*.jar >/dev/null && \
+    ls /opt/flink/usrlib/flink-sql-connector-kafka-*.jar >/dev/null && \
+    ls /opt/flink/usrlib/flink-sql-avro-confluent-registry-*.jar >/dev/null
 
 USER flink

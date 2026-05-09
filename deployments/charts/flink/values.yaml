@@ -58,7 +58,7 @@ session:
   #     session:
   #       image:
   #         repository: ghcr.io/xenoisa/flink-sql-runner
-  #         tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
+  #         tag: 1.20.0-runner-1.10.0-iceberg-1.7.2
   image:
     repository: apache/flink
     tag: "1.20.0-scala_2.12-java17"

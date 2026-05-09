@@ -77,7 +77,7 @@ aws.s3.secret_key = ${env:AWS_SECRET_ACCESS_KEY}
 | Mount path `/etc/paimon/paimon-catalog.properties` | `/etc/iceberg/iceberg-catalog.properties` |
 | Properties: `catalog.type`, `catalog.metastore`, `catalog.uri`, `warehouse` | `type`, `catalog-type`, `catalog-impl`, `uri`, `warehouse` |
 | Bucket: `paimon` | `lake` |
-| Connector jar: `paimon-flink-1.20-1.0.0.jar` | `iceberg-flink-runtime-1.20-1.6.1.jar` |
+| Connector jar: `paimon-flink-1.20-1.0.0.jar` | `iceberg-flink-runtime-1.20-1.7.2.jar` |
 | StarRocks DDL: `CREATE EXTERNAL CATALOG paimon_catalog (type=paimon)` | `CREATE EXTERNAL CATALOG iceberg_hms (type=iceberg)` |
 
 ## Bumping Iceberg

@@ -26,9 +26,9 @@ real kind cluster.
 
 | Jar | Source | Why |
 |---|---|---|
-| `flink-sql-runner.jar` | Apache Flink Operator release-1.10.0 | Entry point for FlinkSessionJob CRs |
-| `iceberg-flink-runtime-1.20-1.6.1.jar` | Maven Central, `org.apache.iceberg` | Iceberg table read/write from Flink SQL |
-| `flink-sql-connector-kafka-3.2.0-1.20.jar` | Maven Central, `org.apache.flink` | Kafka source/sink for streaming SQL |
+| `flink-sql-runner.jar` | Apache Flink Operator 1.10.0 (built from source) | Entry point for FlinkSessionJob CRs |
+| `iceberg-flink-runtime-1.20-1.7.2.jar` | Maven Central, `org.apache.iceberg` | Iceberg table read/write from Flink SQL |
+| `flink-sql-connector-kafka-3.3.0-1.20.jar` | Maven Central, `org.apache.flink` | Kafka source/sink for streaming SQL |
 | `flink-sql-avro-confluent-registry-1.20.0.jar` | Maven Central, `org.apache.flink` | Avro decode against Apicurio's `/apis/ccompat/v6` endpoint |
 
 Versions are pinned in [`jars.txt`](./jars.txt). Each entry can carry a
@@ -48,11 +48,11 @@ make push REGISTRY=ghcr.io/xenoisa     # push to the org's GHCR
 The image tag (`IMAGE_TAG` in the Makefile) encodes the version matrix:
 
 ```
-1.20.0-runner-1.10.0-iceberg-1.6.1
+1.20.0-runner-1.10.0-iceberg-1.7.2
 │      │      │      │      └─ Apache Iceberg
 │      │      │      └─ Iceberg connector pinned in jars.txt
 │      │      └─ Flink Kubernetes Operator
-│      └─ Operator-version label (release-1.10.0)
+│      └─ Operator-version label (1.10.0; runner jar built from operator source)
 └─ Apache Flink runtime (apache/flink:1.20.0-scala_2.12-java17 base)
 ```
 
@@ -72,7 +72,7 @@ flink:
   session:
     image:
       repository: ghcr.io/xenoisa/flink-sql-runner
-      tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
+      tag: 1.20.0-runner-1.10.0-iceberg-1.7.2
 ```
 
 ### customer-prod (after Harbor mirror sync)
@@ -82,7 +82,7 @@ flink:
   session:
     image:
       repository: harbor.customer.local/isa-platform/flink-sql-runner
-      tag: 1.20.0-runner-1.10.0-iceberg-1.6.1
+      tag: 1.20.0-runner-1.10.0-iceberg-1.7.2
 ```
 
 The customer's Harbor mirror is the air-gap-friendly path per

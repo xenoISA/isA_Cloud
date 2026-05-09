@@ -22,7 +22,7 @@ description: |
   xenoISA/sn-commercial-tower docs/project-plan/appendix-architecture-v3-iceberg.md.
 type: application
 version: 0.2.0
-appVersion: "1.6.1"
+appVersion: "1.7.2"
 keywords:
   - iceberg
   - lakehouse
