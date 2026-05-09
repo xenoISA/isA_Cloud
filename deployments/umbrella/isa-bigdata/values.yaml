@@ -37,3 +37,7 @@ starrocks:
 
 flink:
   enabled: true
+
+flink-cdc-jobs:
+  enabled: true
+  namespace: isa-bigdata

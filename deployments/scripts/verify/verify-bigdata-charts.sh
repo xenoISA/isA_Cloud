@@ -21,6 +21,7 @@ MINIO_CHART="${DEPLOYMENTS}/charts/minio"
 PAIMON_CHART="${DEPLOYMENTS}/charts/paimon-tools"
 STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
 FLINK_CHART="${DEPLOYMENTS}/charts/flink"
+FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -95,6 +96,15 @@ template_umbrella_with_profile() {
     echo "[fail] no FlinkDeployment CR in ${profile}" >&2
     exit 4
   fi
+  # FlinkSessionJob CRs only render when at least one source is enabled.
+  # kind-local + dev-shared have 3 P0 sources enabled; customer-prod has
+  # all 22 sources but disabled-by-default — treat its absence as OK.
+  if [[ "${profile}" != "customer-prod" ]]; then
+    if ! grep -q "kind: FlinkSessionJob" <<<"${out}"; then
+      echo "[fail] no FlinkSessionJob CR in ${profile}" >&2
+      exit 4
+    fi
+  fi
 }
 
 main() {
@@ -120,6 +130,7 @@ main() {
   lint_chart "${PAIMON_CHART}"
   lint_chart "${STARROCKS_CHART}"
   lint_chart "${FLINK_CHART}"
+  lint_chart "${FLINK_CDC_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -133,6 +144,11 @@ main() {
   template_chart "${STARROCKS_CHART}" \
     --set rootPassword.create=true --set rootPassword.password=test
   template_chart "${FLINK_CHART}"
+  # flink-cdc-jobs renders nothing when sources is empty; pass a smoke source.
+  template_chart "${FLINK_CDC_CHART}" \
+    --set 'sources[0].name=smoke' \
+    --set 'sources[0].enabled=true' \
+    --set 'sources[0].sql=SELECT 1;'
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"

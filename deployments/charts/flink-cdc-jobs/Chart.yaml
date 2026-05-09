@@ -1,0 +1,31 @@
+apiVersion: v2
+name: flink-cdc-jobs
+description: |
+  Per-source FlinkSessionJob templates for the isA platform's big-data
+  foundation. Self-written chart per design — for each source declared
+  in values.sources, renders a Flink SQL ConfigMap and a
+  FlinkSessionJob CR that submits the SQL to the long-running session
+  cluster shipped by the flink chart (#249).
+
+  V0.1 scope: the Kafka → Avro (via Apicurio) → Paimon path. Real
+  Flink CDC connector wiring (mysql-cdc, postgres-cdc) is out of scope
+  until W7+ when real DB binlog sources land.
+
+  See xenoISA/isA_Cloud#250, xenoISA/isA_Cloud#234, and
+  xenoISA/sn-commercial-tower ADR-0002 §2.5.
+type: application
+version: 0.1.0
+appVersion: "1.20.0"
+keywords:
+  - flink
+  - flink-cdc
+  - paimon
+  - kafka
+  - bigdata
+  - data-platform
+home: https://flink.apache.org/
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/apache/flink-cdc
+maintainers:
+  - name: isA Platform

@@ -1,0 +1,22 @@
+{{- /*
+  Per-source SQL ConfigMap. Each source's `sql` block is rendered
+  verbatim. The flink-sql-runner reads the file mounted from this
+  ConfigMap at job submission time.
+*/ -}}
+{{- range .Values.sources }}
+{{- if .enabled }}
+{{- $source := . }}
+{{- $ctx := dict "Values" $.Values "Release" $.Release "Chart" $.Chart "Files" $.Files -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "flink-cdc-jobs.configMapName" (list $ $source) }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "flink-cdc-jobs.sourceLabels" (list $ $source) | nindent 4 }}
+data:
+  job.sql: |
+{{ $source.sql | indent 4 }}
+{{- end }}
+{{- end }}
