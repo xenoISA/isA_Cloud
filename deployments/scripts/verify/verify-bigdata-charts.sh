@@ -23,6 +23,7 @@ STARROCKS_CHART="${DEPLOYMENTS}/charts/starrocks"
 FLINK_CHART="${DEPLOYMENTS}/charts/flink"
 FLINK_CDC_CHART="${DEPLOYMENTS}/charts/flink-cdc-jobs"
 FLUSS_CHART="${DEPLOYMENTS}/charts/fluss"
+STRIMZI_CHART="${DEPLOYMENTS}/charts/strimzi-operator"
 
 PROFILES=("kind-local" "dev-shared" "customer-prod")
 
@@ -123,6 +124,9 @@ main() {
   step "helm dependency update ${FLINK_CHART}"
   helm dependency update "${FLINK_CHART}"
 
+  step "helm dependency update ${STRIMZI_CHART}"
+  helm dependency update "${STRIMZI_CHART}"
+
   lint_chart "${KAFKA_CHART}"
   lint_chart "${APICURIO_CHART}"
   lint_chart "${POSTGRES_CHART}"
@@ -133,6 +137,7 @@ main() {
   lint_chart "${FLINK_CHART}"
   lint_chart "${FLINK_CDC_CHART}"
   lint_chart "${FLUSS_CHART}"
+  lint_chart "${STRIMZI_CHART}"
 
   template_chart "${KAFKA_CHART}"
   template_chart "${APICURIO_CHART}" --set db.auth.create=true --set db.auth.password=test
@@ -155,6 +160,10 @@ main() {
   # template with --set enabled=true exercises the placeholder render
   # path so helper / labels / ConfigMap regressions are caught here.
   template_chart "${FLUSS_CHART}" --set enabled=true
+  # strimzi-operator is a STRICT prerequisite for the umbrella's kafka
+  # chart — installed separately before the umbrella. Verified standalone
+  # (NOT included in any umbrella render).
+  template_chart "${STRIMZI_CHART}"
 
   step "helm dependency update ${UMBRELLA}"
   helm dependency update "${UMBRELLA}"
