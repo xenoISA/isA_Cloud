@@ -1,0 +1,63 @@
+# =============================================================================
+# external-secrets-operator chart — defaults (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Cluster-scoped operator that reconciles ExternalSecret /
+# ClusterSecretStore / ClusterExternalSecret CRs into K8s Secrets
+# by reading from a backing secret store (vault, AWS SM, GCP SM, etc.).
+#
+# Single replica is the supported topology. The controller uses leader
+# election; HA-by-restart.
+#
+# CRDs installed: ClusterSecretStore, SecretStore, ClusterExternalSecret,
+# ExternalSecret, ClusterPushSecret, PushSecret, etc.
+#
+# Install order (STRICT):
+#   1. helm install external-secrets-operator . (this chart) — CRDs install
+#   2. kubectl apply -f deployments/cluster-prereqs/external-secrets/   # ClusterSecretStore + 5 ExternalSecret CRs
+#   3. helm install isa-bigdata umbrella/...
+#
+# Reversing the order makes step 2 fail on missing CRDs (no matches for
+# kind "ExternalSecret" in version "external-secrets.io/v1beta1").
+# =============================================================================
+
+# Upstream subchart pass-through.
+external-secrets:
+  # Install the ESO CRDs as part of this chart's install.
+  installCRDs: true
+
+  # Single replica with leader election. HA-by-restart pattern; reading
+  # secrets is local-cached so a controller failover doesn't drop in-flight
+  # SyncSecret events.
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  webhook:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  certController:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# Optional priorityClass at the wrapper layer. Customer-prod uses
+# infra-critical so secret refresh keeps running through node drains.
+priorityClassName: ""
