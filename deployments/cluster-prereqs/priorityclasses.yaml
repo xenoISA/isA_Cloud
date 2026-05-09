@@ -1,0 +1,68 @@
+# =============================================================================
+# Cluster-wide PriorityClass definitions (xenoISA/isA_Cloud#234)
+# =============================================================================
+# Per xenoISA/sn-commercial-tower docs/design/bigdata-architecture.md §12.4
+# (and 00-infra-architecture-overview.md §3 / §6.2 sizing tables), the
+# big-data foundation expects three priority tiers on the cluster:
+#
+#   system-critical  > infra-critical  > application
+#
+# The customer-prod profile values reference `priorityClassName:
+# infra-critical` on broker / FE / BE / TM / HMS / postgres-primary
+# pods. Without these PriorityClass objects the helm install fails with
+# "no PriorityClass with name infra-critical" — apply this manifest
+# BEFORE the umbrella.
+#
+# Apply order (post K8s install, pre umbrella install):
+#   kubectl apply -f deployments/cluster-prereqs/priorityclasses.yaml
+#   helm install strimzi-operator deployments/charts/strimzi-operator -n strimzi-system
+#   helm install bigdata deployments/umbrella/isa-bigdata -n isa-bigdata --create-namespace ...
+# =============================================================================
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: system-critical
+  labels:
+    app.kubernetes.io/part-of: isa-platform
+value: 1000000
+globalDefault: false
+description: |
+  Highest priority — vault, etcd, EonKube agent. Pods at this tier
+  preempt anything at infra-critical or application. Reserved for the
+  cluster control plane components that must run for the cluster
+  itself to remain healthy.
+preemptionPolicy: PreemptLowerPriority
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: infra-critical
+  labels:
+    app.kubernetes.io/part-of: isa-platform
+value: 100000
+globalDefault: false
+description: |
+  Second priority — MinIO replicas, Kafka brokers, PostgreSQL
+  primary/replicas, StarRocks FE/BE, Hive Metastore, Flink JobManager
+  + TaskManagers, Strimzi Operator. Stateful + storage-bound services
+  whose loss would interrupt all downstream work. Preempts only
+  application tier; never preempts system-critical.
+preemptionPolicy: PreemptLowerPriority
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: application
+  labels:
+    app.kubernetes.io/part-of: isa-platform
+value: 1000
+globalDefault: true
+description: |
+  Default tier — Commercial_Tower BFF + agents, vLLM model servers,
+  Ray clusters, JupyterHub, Dataphin (when vendor delivers), and any
+  user-namespaced workload. globalDefault=true so pods that don't
+  specify a priorityClassName land here. Preempts nothing.
+preemptionPolicy: Never
