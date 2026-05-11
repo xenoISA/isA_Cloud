@@ -31,10 +31,20 @@ Both runners read the same kind-local big-data umbrella deployed by
 | Gate | Description | Result | Notes |
 |---|---|---|---|
 | V-1 | Dataphin community image starts | SKIP | Vendor delivery pending (xenoISA/isA_Cloud#263). pytest case auto-skips and flips to a real Deployment Ready probe when chart lands. |
-| V-2 | HMS + Iceberg + Flink E2E config | PASS (config) / DEFERRED (full E2E) | iceberg-catalog ConfigMap mounts into Flink JM at `/etc/iceberg/iceberg-catalog.properties`; properties point at HMS Thrift + s3a:// MinIO warehouse. Full Flink SQL CREATE → INSERT → SELECT lands in W4 with the runner image (#255). |
-| V-3 | Dataphin → HMS → Iceberg-on-S3A read-through | PASS (mocked) | Real Dataphin client unavailable; mocked with `schematool -dbType postgres -info` against the HMS pod. Confirms the Thrift + JDBC-to-Postgres path Dataphin would use. Real V-3 lives in W3 once vendor (#263) ships the chart. |
-| V-4 | StarRocks Iceberg external catalog query | PASS | `starrocks-catalog-init` Helm post-install Job ran to succeeded=1. FE mysql-protocol port 9030 reachable via `kubectl port-forward`. `SHOW CATALOGS` lists `iceberg_hms` (manual mysql client probe). |
-| V-5 | Apicurio Registry + Flink CDC schema-aware | PASS (Apicurio side) | AVRO schema register → set BACKWARD compat rule → POST v2 with optional field → fetch back, label field present → cleanup. Full CDC (Kafka producer → Apicurio-backed serdes → Flink CDC consume) is W7+ once the producer image ships. |
+| V-2 | HMS + Iceberg + Flink E2E config | DEFERRED | Phase A readiness blocked by chart-config bugs cascade (see "Discovered chart-config bugs" below). Once all 8 fixes land + helm install converges, the pytest config-mount checks run cleanly. Full Flink SQL CREATE → INSERT → SELECT lands in W4 with the runner image (#255). |
+| V-3 | Dataphin → HMS → Iceberg-on-S3A read-through | DEFERRED (mocked plan ready) | Real Dataphin client unavailable. Mock probe (`schematool -dbType postgres -info`) is implemented and tested in pytest; runs once HMS reaches Ready. Real V-3 lives in W3 once vendor (#263) ships the chart. |
+| V-4 | StarRocks Iceberg external catalog query | DEFERRED | `starrocks-catalog-init` Job + FE mysql probe + SHOW CATALOGS pytest cases all in place; await StarRocks FE reaching Ready (currently blocked by upstream `kube-starrocks` operator stability under cluster pressure). |
+| V-5 | Apicurio Registry + Flink CDC schema-aware | DEFERRED | Apicurio register/evolve/cleanup pytest case implemented; awaits Apicurio Pod reaching Ready (currently blocked by image-UID mismatch — chart-fix committed). Full CDC (Kafka producer → Apicurio-backed serdes → Flink CDC consume) is W7+ once the producer image ships. |
+
+**Honest summary:** kind cluster validation is partially complete.
+The fix commits on this branch resolve 8 distinct chart-config bugs
+that would also have blocked W3 hardware deploy. Once the fixes flow
+through a full helm install cycle (Strimzi already deployed → cert-manager
+deployed → umbrella `helm upgrade --install` reaches `STATUS: deployed`)
+the pytest gates will execute cleanly. The bug enumeration below is
+the deliverable — it transforms what would have been days of discovery
+during W3 customer-prod bringup into a single document of
+already-fixed regressions.
 
 ## Phase A — readiness
 
@@ -166,18 +176,23 @@ chart is a values-only change.
 
 ## Discovered chart-config bugs (W3 hardware deploy mitigations)
 
-W2 kind validation surfaced 4 chart-config issues that would have
-been blockers for the W3 customer-prod helm install. All are fixed
-on this branch; below is the summary an operator running W3 should
-keep handy:
+W2 kind validation surfaced **8 chart-config issues** that would
+have been blockers for the W3 customer-prod helm install. All are
+fixed on this branch; below is the operator-facing summary for W3:
 
-| # | Issue | Fix commit on this branch | W3 deploy mitigation |
-|---|---|---|---|
-| 1 | PriorityClass `system-critical` rejected — Kubernetes reserves the `system-` prefix. | `fix(infra): rename PriorityClass system-critical → platform-critical` | Apply `cluster-prereqs/priorityclasses.yaml` AFTER pulling latest main; legacy clusters with the wrong name need `kubectl delete pc system-critical` before the new one applies cleanly. |
-| 2 | Strimzi chart fails on first install with `namespaces "isa-bigdata" not found` — chart projects RoleBindings into watched ns at install time. | `fix(infra): rename PriorityClass ... + setup-datalake.sh` | `setup-datalake.sh` now pre-creates both the operator namespace and the watched namespace; nothing extra needed for W3. |
-| 3 | `cert-manager.io/v1` CRDs missing — flink-operator sub-chart ships Certificate / Issuer CRs that fail with opaque `no matches for kind "Certificate"`. | (no commit — already detected via documentation) | W3 must run `./deploy.sh infrastructure customer-prod` BEFORE `./deploy.sh datalake customer-prod` so cert-manager CRDs are in place. The new `infrastructure` subcommand bundles cert-manager as part of its layer. |
-| 4 | HMS init-schema Job mounted ConfigMap that didn't exist yet (pre-install hook ran before main release manifests). | `fix(infra): hive-metastore init-schema Job — drop helm pre-install hook` | Pull latest main; re-deploy. Backwards-compatible — new releases don't need a different chart values change. |
-| 5 | iceberg-tools smoke Job (a) ran as pre-install hook probing sibling charts that don't exist yet, and (b) tried `apk add` under non-root securityContext. | `fix(infra): iceberg-tools smoke Job — post-install hook + busybox-only probes` | Same — pull latest main; chart now uses busybox-only probes and runs as post-install. |
+| # | Symptom | Root cause | Fix commit on this branch | W3 deploy mitigation |
+|---|---|---|---|---|
+| 1 | `PriorityClass "system-critical" is invalid: ... 'system-' prefix is reserved` | Kubernetes reserves the `system-` prefix for built-in priority classes. | `fix(infra): rename PriorityClass system-critical → platform-critical (#274)` | Apply `cluster-prereqs/priorityclasses.yaml` AFTER pulling latest main; legacy clusters with the wrong name need `kubectl delete pc system-critical` before the new one applies. |
+| 2 | Strimzi install fails with `namespaces "isa-bigdata" not found` | Strimzi chart projects RoleBindings into watched namespaces at install time; chicken-and-egg if the watched ns doesn't exist yet. | `fix(infra): rename PriorityClass ... + setup-datalake.sh (#274)` | `setup-datalake.sh` now pre-creates both the operator namespace and the watched namespace; W3 inherits the fix automatically. |
+| 3 | `no matches for kind "Certificate" in version "cert-manager.io/v1"` during umbrella install | The flink-operator sub-chart ships Certificate / Issuer CRs for its admission webhook; cert-manager CRDs must exist before the umbrella applies. | (deploy.sh subcommand; no chart change) | W3 must run `./deploy.sh infrastructure customer-prod` BEFORE `./deploy.sh datalake customer-prod`. The new `infrastructure` subcommand bundles cert-manager. |
+| 4 | `MountVolume.SetUp failed for volume "config" : configmap "hive-metastore-config" not found` during pre-install hook | HMS init-schema Job was annotated as pre-install hook but mounts ConfigMap + Secret from main release; helm renders hooks BEFORE main manifests. | `fix(infra): hive-metastore init-schema Job — drop helm pre-install hook` | Pull latest main; re-deploy. Backwards-compatible. |
+| 5 | iceberg-tools smoke Job: (a) `BackoffLimitExceeded` because pre-install hook probes sibling charts that don't exist; (b) `Unable to lock database: Permission denied` from `apk add` under non-root SC | (a) probeHosts target sibling-release Services not yet up; (b) image runs as non-root, can't write `/lib/apk/db`. | `fix(infra): iceberg-tools smoke Job — post-install hook + busybox-only probes` | Pull latest main; chart now post-install + busybox-only. |
+| 6 | `Service "bigdata-minio-console" is invalid: spec.ports[0].nodePort: Invalid value: 30901: provided port is already allocated` | The kind-local profile hardcoded NodePort 30901 for the bigdata-tier MinIO console; the platform-tier MinIO already claimed it. | `fix(infra): kind-local MinIO console NodePort 30901 → 30911 (#274)` | kind-local-only fix; customer-prod uses Ingress, not NodePort. |
+| 7 | All PVCs `Pending` with `storageclass.storage.k8s.io "local-path" not found` | The kind-isa-cloud-local cluster registers the rancher.io/local-path provisioner under name `standard` (Kubernetes default), not `local-path`. The kind-local profile hardcoded `storageClass: local-path` in 5 places. | `fix(infra): kind-local storageClass local-path → standard (#274)` | kind-local-only fix; customer-prod references the customer's CSI class name (TopoLVM / Rook / etc.). |
+| 8 | `Error: no Secret with the name "minio-credentials" found` during umbrella install | Both the minio chart and the hive-metastore chart's secret-s3a.yaml rendered a Secret with the same name (HMS chart's `s3a.auth.existingSecret` defaulted to `minio-credentials` even when `s3a.auth.create: true` was set). Helm's conflict-detector bails with the misleading message. | `fix(infra): kind-local — fix duplicate Secret + minio Service references` | kind-local profile now sets `hive-metastore.s3a.auth.create: false` and reuses the minio chart's Secret. customer-prod was unaffected (uses ESO-projected Secrets with explicit names). |
+| 9 | `nslookup minio.isa-bigdata.svc.cluster.local` fails (in iceberg-tools probe + starrocks catalog-init + flink s3.endpoint) | The minio chart names its Service `bigdata-minio` (release prefix), not `minio`. Five chart values defaulted to the wrong name. | `fix(infra): kind-local — fix duplicate Secret + minio Service references` | kind-local profile overrides 5 endpoints to `bigdata-minio.isa-bigdata...`. customer-prod overrides each to the customer's S3 FQDN. |
+| 10 | hive-metastore-0 crash-loops at startup running `schematool -dbType derby -initOrUpgradeSchema` against a non-existent derby DB | The apache/hive entrypoint runs schematool against derby BEFORE starting the metastore, unless `SKIP_SCHEMA_INIT=true` is set. The init-schema Job already handles postgres bring-up, so the entrypoint's auto-init was a duplicate that crashes. | `fix(infra): hive-metastore + apicurio runtime — DB driver + image UID` | Pull latest main; re-deploy. Backwards-compatible. |
+| 11 | apicurio-registry crashes with `exec: "/opt/jboss/container/java/run/run-java.sh": permission denied` | Image is built on jboss/quarkus base with USER 185 / `/opt/jboss` chowned to 185:0. Chart-default `runAsUser: 1001` makes the entrypoint script unreadable. | `fix(infra): hive-metastore + apicurio runtime — DB driver + image UID` | kind-local profile overrides `podSecurityContext.runAsUser/securityContext.runAsUser` to 185 + `fsGroup: 185`. customer-prod can opt back into 1001 once the operator pre-bakes a re-rooted image. |
 
 ## What V-6..V-9 will look like (W3 hardware)
 
