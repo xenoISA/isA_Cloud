@@ -19,10 +19,29 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "hms.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": pre-install{{ if .Values.schemaInit.upgradeOnUpgrade }},pre-upgrade{{ end }}
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  {{- /*
+    Originally annotated as a Helm pre-install/pre-upgrade hook so
+    schematool ran before the StatefulSet started. That ordering was
+    broken: the Job mounts the hive-metastore-config ConfigMap and
+    the hive-metastore-db Secret, both of which are part of the main
+    release, NOT the hook phase. Helm renders hooks BEFORE the main
+    manifests, so the Job spun in ContainerCreating with
+      MountVolume.SetUp failed for volume "config" :
+        configmap "hive-metastore-config" not found
+    until helm timed out at --timeout 15m.
+
+    Fix: drop the hook annotations entirely. The Job is now a regular
+    release-managed resource that applies alongside the ConfigMap +
+    Secret + StatefulSet. The HMS StatefulSet crash-loops for ~30s
+    until schematool initializes the schema, then stabilizes — Helm
+    --wait observes both the StatefulSet reaching Ready and the Job
+    reaching Succeeded as part of normal release rollout.
+
+    schemaInit.upgradeOnUpgrade is now informational — the Job always
+    re-runs on upgrade because Helm re-applies it; schematool detects
+    an existing schema via -info and switches to -upgradeSchema,
+    which is a no-op when already at HEAD.
+  */}}
 spec:
   backoffLimit: {{ .Values.schemaInit.backoffLimit }}
   ttlSecondsAfterFinished: 600
