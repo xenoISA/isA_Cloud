@@ -6,13 +6,18 @@
 # Compatible with bash 3.2+ (macOS default)
 #
 # Usage:
-#   ./deploy.sh mcp                    # Deploy MCP service
-#   ./deploy.sh agent staging          # Deploy to staging namespace
-#   ./deploy.sh model production v1.2.3 # Deploy specific version to production
-#   ./deploy.sh user auth              # Deploy specific user microservice
-#   ./deploy.sh user all               # Deploy all user microservices
-#   ./deploy.sh all                    # Deploy all core services
-#   ./deploy.sh list                   # List deployed services
+#   ./deploy.sh mcp                       # Deploy MCP service
+#   ./deploy.sh agent staging             # Deploy to staging namespace
+#   ./deploy.sh model production v1.2.3   # Deploy specific version to production
+#   ./deploy.sh user auth                 # Deploy specific user microservice
+#   ./deploy.sh user all                  # Deploy all user microservices
+#   ./deploy.sh all                       # Deploy all core services
+#   ./deploy.sh list                      # List deployed services
+#
+# Platform layers (xenoISA/sn-commercial-tower ADR-0002 §12.3):
+#   ./deploy.sh infrastructure kind-local # PriorityClass + cert-manager + prometheus-operator
+#   ./deploy.sh secrets kind-local        # ESO + ClusterSecretStore + Vault bootstrap
+#   ./deploy.sh datalake kind-local       # Big-data umbrella (Kafka/HMS/Iceberg/StarRocks/Flink)
 #
 # Prerequisites:
 #   - kubectl configured for target cluster
@@ -27,6 +32,14 @@ ISA_ROOT="${ISA_ROOT:-$HOME/Documents/Fun/isA}"
 CHARTS_DIR="${ISA_ROOT}/isA_Cloud/deployments/charts"
 DEFAULT_NAMESPACE="isa-cloud-staging"
 HARBOR_REGISTRY="harbor.local:30443"
+
+# Resolve the actual isA_Cloud repo root regardless of where ISA_ROOT points
+# (the user microservice paths use ISA_ROOT for sibling repos, but the
+# infra / secrets / datalake subcommands need to call into THIS repo's
+# scripts, which sits at <this script's parent>/.. )
+SCRIPT_DIR_DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOYMENTS_DIR="$(cd "${SCRIPT_DIR_DEPLOY}/.." && pwd)"
+CLOUD_REPO_ROOT="$(cd "${DEPLOYMENTS_DIR}/.." && pwd)"
 
 # Colors
 RED='\033[0;31m'
@@ -240,6 +253,102 @@ deploy_all() {
 }
 
 # =============================================================================
+# Infrastructure / Secrets / Datalake (xenoISA/sn-commercial-tower ADR-0002 §12.3)
+# =============================================================================
+# Three subcommands that wrap existing single-purpose scripts so callers
+# get a consistent CLI for the W3 / W4 deployment phases:
+#
+#   ./deploy.sh infrastructure [profile]   — PriorityClass + cluster prereqs
+#   ./deploy.sh secrets [profile]          — cert-manager + ESO + vault bootstrap
+#   ./deploy.sh datalake [profile] [--smoke]
+#                                          — full big-data umbrella + V-1..V-9
+# Each subcommand is idempotent (helm upgrade --install) and accepts a
+# profile name that maps to deployments/values/<profile>.yaml. Defaults
+# to kind-local for local development.
+
+deploy_infrastructure() {
+    local profile="${1:-kind-local}"
+    local prereqs_file="${DEPLOYMENTS_DIR}/cluster-prereqs/priorityclasses.yaml"
+
+    log_info "deploy.sh infrastructure — profile=${profile}"
+
+    if [[ ! -f "${prereqs_file}" ]]; then
+        log_error "Cluster prereqs manifest missing: ${prereqs_file}"
+        exit 1
+    fi
+
+    log_info "Applying cluster-wide PriorityClass tiers..."
+    kubectl apply -f "${prereqs_file}"
+
+    log_info "Installing cert-manager (chart: charts/cert-manager)..."
+    helm dependency update "${CHARTS_DIR}/cert-manager" >/dev/null 2>&1 || true
+    helm upgrade --install cert-manager "${CHARTS_DIR}/cert-manager" \
+        --namespace cert-manager \
+        --create-namespace \
+        --wait \
+        --timeout 5m
+
+    log_info "Installing prometheus-operator (chart: charts/prometheus-operator)..."
+    helm dependency update "${CHARTS_DIR}/prometheus-operator" >/dev/null 2>&1 || true
+    helm upgrade --install prometheus-operator "${CHARTS_DIR}/prometheus-operator" \
+        --namespace monitoring \
+        --create-namespace \
+        --wait \
+        --timeout 10m
+
+    log_info "Infrastructure layer ready (PriorityClass + cert-manager + prometheus-operator)"
+    log_info "Next: ./deploy.sh secrets ${profile}"
+}
+
+deploy_secrets() {
+    local profile="${1:-kind-local}"
+
+    log_info "deploy.sh secrets — profile=${profile}"
+
+    log_info "Installing external-secrets-operator (chart: charts/external-secrets-operator)..."
+    helm dependency update "${CHARTS_DIR}/external-secrets-operator" >/dev/null 2>&1 || true
+    helm upgrade --install external-secrets-operator "${CHARTS_DIR}/external-secrets-operator" \
+        --namespace external-secrets \
+        --create-namespace \
+        --wait \
+        --timeout 5m
+
+    local bootstrap_script="${SCRIPT_DIR_DEPLOY}/bootstrap-vault-secrets.sh"
+    if [[ -x "${bootstrap_script}" ]]; then
+        log_info "Bootstrapping Vault secret paths for big-data tier..."
+        bash "${bootstrap_script}" || log_warn "Vault bootstrap reported non-zero exit (Vault may not be running yet)"
+    else
+        log_warn "Vault bootstrap script not found / not executable: ${bootstrap_script}"
+        log_warn "Skipping vault bootstrap — secrets must be created manually"
+    fi
+
+    log_info "Secrets layer ready (ESO + ClusterSecretStore + ExternalSecret CRs)"
+    log_info "Next: ./deploy.sh datalake ${profile}"
+}
+
+deploy_datalake() {
+    local profile="${1:-kind-local}"
+    local smoke_flag=""
+
+    if [[ "${2:-}" == "--smoke" ]]; then
+        smoke_flag="--smoke"
+    fi
+
+    log_info "deploy.sh datalake — profile=${profile}"
+
+    local datalake_script="${SCRIPT_DIR_DEPLOY}/setup-datalake.sh"
+    if [[ ! -x "${datalake_script}" ]]; then
+        log_error "setup-datalake.sh not found / not executable: ${datalake_script}"
+        exit 1
+    fi
+
+    bash "${datalake_script}" -p "${profile}" ${smoke_flag}
+
+    log_info "Datalake layer ready (10-chart umbrella, release=bigdata in isa-bigdata)"
+    log_info "Verify: ./deployments/scripts/verify/verify-bigdata-kind.sh"
+}
+
+# =============================================================================
 # Utility Functions
 # =============================================================================
 list_services() {
@@ -329,6 +438,12 @@ usage() {
     echo "  all-core [ns] [ver]              Deploy all core services"
     echo "  all-os [ns] [ver]                Deploy all OS services"
     echo ""
+    echo "Platform Layers (xenoISA/sn-commercial-tower ADR-0002 §12.3):"
+    echo "  infrastructure [profile]         PriorityClass + cert-manager + prometheus-operator"
+    echo "  secrets [profile]                ESO + ClusterSecretStore + Vault bootstrap"
+    echo "  datalake [profile] [--smoke]     Big-data umbrella (Kafka + HMS + Iceberg + StarRocks + Flink)"
+    echo "                                   profile defaults to kind-local"
+    echo ""
     echo "Management:"
     echo "  list [namespace]                 List deployed services"
     echo "  rollback <service> [namespace]   Rollback a service"
@@ -399,6 +514,16 @@ main() {
                     deploy_user_service "$subcmd" "$@"
                     ;;
             esac
+            ;;
+        # Platform layers (ADR-0002 §12.3)
+        infrastructure|infra)
+            deploy_infrastructure "$@"
+            ;;
+        secrets)
+            deploy_secrets "$@"
+            ;;
+        datalake|bigdata)
+            deploy_datalake "$@"
             ;;
         # Batch commands
         all)

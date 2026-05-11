@@ -10,7 +10,7 @@
 #
 # Order (mirrors deployments/cluster-prereqs/README.md):
 #   1. Pre-flight: kubectl context, helm version, target namespace
-#   2. Cluster prereqs: PriorityClass system-critical / infra-critical /
+#   2. Cluster prereqs: PriorityClass platform-critical / infra-critical /
 #      application
 #   3. Strimzi Kafka Operator (cluster-scoped CRDs)
 #   4. helm dependency update for the umbrella + each chart with file://
@@ -110,6 +110,22 @@ fi
 ok "kubectl context: $(kubectl config current-context)"
 ok "helm version:    $(helm version --short)"
 
+# cert-manager CRDs are a hard prereq — the flink-operator sub-chart
+# bundled inside the umbrella ships Certificate / Issuer CRs for its
+# admission webhook. Without cert-manager installed the umbrella fails
+# with the opaque `no matches for kind "Certificate" in version
+# "cert-manager.io/v1"`. Use ./deploy.sh infrastructure to install
+# cert-manager before this script.
+if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+  warn "cert-manager CRDs not found. The flink-operator sub-chart needs them."
+  warn "Run \`./deploy.sh infrastructure ${PROFILE}\` first, or install cert-manager"
+  warn "manually with \`helm upgrade --install cert-manager"
+  warn "  deployments/charts/cert-manager --namespace cert-manager --create-namespace\`."
+  if [[ "${DRY_RUN}" != "true" ]]; then
+    die "Aborting — cert-manager prereq missing"
+  fi
+fi
+
 [[ -f "${VALUES_FILE}" ]]  || die "Profile values file not found: ${VALUES_FILE}"
 [[ -f "${PREREQS_FILE}" ]] || die "Prereqs manifest not found: ${PREREQS_FILE}"
 [[ -d "${UMBRELLA_DIR}" ]] || die "Umbrella chart dir not found: ${UMBRELLA_DIR}"
@@ -135,7 +151,7 @@ else
   else
     kubectl apply -f "${PREREQS_FILE}"
   fi
-  ok "PriorityClass tiers: system-critical / infra-critical / application"
+  ok "PriorityClass tiers: platform-critical / infra-critical / application"
 fi
 
 # -----------------------------------------------------------------------------
@@ -151,8 +167,14 @@ else
       --namespace "${STRIMZI_NAMESPACE}" >/dev/null
     ok "Strimzi helm template OK (dry-run)"
   else
+    # Pre-create both namespaces. The Strimzi chart projects RoleBindings
+    # into the watched namespaces (e.g. isa-bigdata) at install time —
+    # if the watched namespace doesn't exist yet helm fails immediately.
     if ! kubectl get namespace "${STRIMZI_NAMESPACE}" >/dev/null 2>&1; then
       kubectl create namespace "${STRIMZI_NAMESPACE}"
+    fi
+    if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+      kubectl create namespace "${NAMESPACE}"
     fi
 
     helm dependency update "${STRIMZI_CHART_DIR}" >/dev/null

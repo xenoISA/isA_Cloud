@@ -28,7 +28,7 @@ kafka:
   storage:
     type: persistent-claim
     size: 20Gi
-    class: local-path
+    class: standard
     deleteClaim: true
   listeners:
     plain:
@@ -68,6 +68,25 @@ apicurio-registry:
   registry:
     compatibilityLevel: BACKWARD
     authEnabled: false
+  # The apicurio-registry-sql:2.6.6.Final image is built on the
+  # jboss/quarkus base which sets USER 185 in its Dockerfile and
+  # owns /opt/jboss as 185:0. The chart-default runAsUser=1001 makes
+  # the entrypoint script unreadable, crashing with:
+  #   exec: "/opt/jboss/container/java/run/run-java.sh": permission denied
+  # Override to match the image's expected UID.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 185
+    runAsGroup: 0
+    fsGroup: 185
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 185
   db:
     # Targets the postgres-bigdata chart's primary Service. The bitnami
     # postgresql chart names its primary Service `<release>-postgresql`
@@ -109,7 +128,7 @@ postgres-bigdata:
     primary:
       persistence:
         enabled: true
-        storageClass: local-path
+        storageClass: standard
         size: 4Gi
       resources:
         requests:
@@ -160,12 +179,20 @@ hive-metastore:
     dir: "s3a://lake/warehouse/"
   s3a:
     enabled: true
-    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    # Service name is bigdata-minio (chart wraps minio with release-prefix
+    # — bigdata-minio.isa-bigdata.svc.cluster.local), NOT minio.
+    endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
     pathStyleAccess: true
     auth:
-      create: true
-      accessKey: minio-kind
-      secretKey: minio-kind-secret
+      # Reuse the `minio-credentials` Secret created by the minio
+      # chart — it already exposes access-key / secret-key with the
+      # right values. Setting create: true here would render a
+      # duplicate Secret with the same name and helm refuses the
+      # install with `no Secret with the name "minio-credentials" found`
+      # because the duplicate-name conflict-detector swallows one
+      # before validation.
+      create: false
+      existingSecret: minio-credentials
   resources:
     requests:
       cpu: 250m
@@ -196,7 +223,7 @@ minio:
     persistence:
       enabled: true
       size: 20Gi
-      storageClass: local-path
+      storageClass: standard
     resources:
       requests:
         cpu: 100m
@@ -208,10 +235,15 @@ minio:
       type: ClusterIP
       port: 9000
     consoleService:
-      # NodePort in kind so devs can poke the Console at http://<node>:30901
+      # NodePort in kind so devs can poke the Console at http://<node>:30911.
+      # 30911 (not 30901) — the platform-tier MinIO chart in
+      # isa-cloud-local already claims 30901 for its console; allocating
+      # it twice fails with `provided port is already allocated`. The
+      # bigdata-tier MinIO is a separate cluster (different bucket layout,
+      # different credentials) and gets its own NodePort.
       type: NodePort
       port: 9001
-      nodePort: 30901
+      nodePort: 30911
     buckets:
       - name: lake
         policy: none
@@ -231,8 +263,23 @@ minio:
         enabled: false
 
 iceberg-tools:
+  # Override S3A endpoint — minio chart renders its Service as
+  # `bigdata-minio` (release prefix), not `minio`.
+  s3a:
+    endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
   init:
     enabled: true
+    # Override the chart-default probe targets — same reason as above.
+    probeHosts:
+      - host: hive-metastore.isa-bigdata.svc.cluster.local
+        port: 9083
+        label: hive-metastore-thrift
+      - host: bigdata-minio.isa-bigdata.svc.cluster.local
+        port: 9000
+        label: minio-s3
+    bucketProbe:
+      endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
+      bucket: lake
 
 starrocks:
   rootPassword:
@@ -240,6 +287,14 @@ starrocks:
     password: starrocks-kind
   catalogInit:
     enabled: true
+    catalog:
+      # Override default — minio Service is bigdata-minio in the
+      # umbrella (release prefix), not minio.
+      name: iceberg_hms
+      hiveMetastoreUri: thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083
+      s3Endpoint: http://bigdata-minio.isa-bigdata.svc.cluster.local:9000
+      s3PathStyleAccess: true
+      s3SslEnabled: false
   kube-starrocks:
     operator:
       starrocksOperator:
@@ -263,7 +318,7 @@ starrocks:
             memory: 2Gi
         storageSpec:
           name: fe-meta
-          storageClassName: local-path
+          storageClassName: standard
           storageSize: 5Gi
       starrocksBeSpec:
         replicas: 1
@@ -276,7 +331,7 @@ starrocks:
             memory: 4Gi
         storageSpec:
           name: be-storage
-          storageClassName: local-path
+          storageClassName: standard
           storageSize: 20Gi
 
 flink:
@@ -297,6 +352,8 @@ flink:
     flinkConfiguration:
       jobmanager.memory.process.size: "2g"
       taskmanager.memory.process.size: "2g"
+      # Override default — minio Service is bigdata-minio (release prefix).
+      s3.endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
   networkPolicy:
     enabled: false
   podDisruptionBudget:

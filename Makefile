@@ -1,7 +1,8 @@
 # isA Cloud Makefile
 # Python infrastructure SDK (isa_common) + Docker Compose local dev
 
-.PHONY: help install test lint fmt clean dev dev-down dev-logs dev-status health ports
+.PHONY: help install test lint fmt clean dev dev-down dev-logs dev-status health ports \
+        verify-bigdata-kind setup-datalake-kind teardown-bigdata-kind
 
 # Variables
 COMPOSE_FILE := docker-compose.yml
@@ -137,3 +138,28 @@ health: ## Quick health check for all services
 	@echo -n "  Grafana:     " && (curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Consul:      " && (curl -sf http://localhost:8500/v1/status/leader > /dev/null 2>&1 && echo "OK" || echo "DOWN")
 	@echo -n "  Mosquitto:   " && (docker compose -f $(COMPOSE_FILE) exec -T mosquitto mosquitto_sub -t '$$SYS/#' -C 1 -W 2 > /dev/null 2>&1 && echo "OK" || echo "DOWN")
+
+# ==================== Big-Data Foundation (kind) ====================
+# Wraps the deployments/scripts/setup-datalake.sh + verify-bigdata-kind.sh
+# scripts so reviewers can reproduce the W2 acceptance run without
+# memorizing flags. Targets the locally-running kind cluster
+# `kind-isa-cloud-local`. See deployments/cluster-prereqs/README.md.
+
+setup-datalake-kind: ## Bring up isa-bigdata umbrella on kind (kind-local profile)
+	@echo "Deploying isa-bigdata umbrella to kind-isa-cloud-local..."
+	@bash deployments/scripts/setup-datalake.sh -p kind-local
+	@echo "Done — run 'make verify-bigdata-kind' to exercise V-1..V-5"
+
+verify-bigdata-kind: ## Run V-1..V-5 verification on kind cluster (xenoISA/isA_Cloud#274,#275)
+	@echo "Running verify-bigdata-kind.sh (Phase A + B + C, gates V-2,V-4,V-5)..."
+	@bash deployments/scripts/verify/verify-bigdata-kind.sh --phase all --gates V-2,V-4,V-5
+
+verify-bigdata-kind-readiness: ## Phase A only — wait for all bigdata workloads ready
+	@bash deployments/scripts/verify/verify-bigdata-kind.sh --phase A
+
+verify-bigdata-kind-smoke: ## Phase B only — port-forward + per-service health probes
+	@bash deployments/scripts/verify/verify-bigdata-kind.sh --phase B
+
+teardown-bigdata-kind: ## Uninstall isa-bigdata umbrella (keeps PVCs)
+	@helm uninstall bigdata -n isa-bigdata 2>/dev/null || true
+	@echo "Done — namespace + PVCs preserved. Run 'kubectl delete ns isa-bigdata' to fully clean."

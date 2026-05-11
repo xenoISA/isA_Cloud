@@ -20,8 +20,19 @@ metadata:
   labels:
     {{- include "iceberg-tools.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "10"
+    {{- /*
+      Originally pre-install,pre-upgrade — moved to post-install,post-upgrade
+      because in the isa-bigdata umbrella context the probeHosts target
+      sibling charts (hive-metastore, minio) that are part of the SAME
+      release and don't exist during the pre-install phase. Running as
+      post-install makes the smoke test verify the umbrella as a whole
+      after Helm finishes rolling out the base resources.
+
+      Weight 100 ensures this Job runs AFTER the starrocks catalog-init
+      Job (weight 20) so a unified post-install gate is preserved.
+    */}}
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "100"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: {{ .Values.init.backoffLimit }}
@@ -49,8 +60,12 @@ spec:
             - -c
             - |
               set -eu
-              echo "[iceberg-tools/smoke] installing curl + bind-tools..."
-              apk add --quiet --no-cache curl bind-tools >/dev/null
+              # Use only busybox tools that ship in the alpine base image
+              # (nslookup, nc, wget). The previous version `apk add curl
+              # bind-tools` failed under the chart's restricted PodSecurity
+              # context (non-root → "Unable to lock database: Permission
+              # denied" against /lib/apk/db). Busybox covers our needs and
+              # avoids the runtime install dependency.
               echo "[iceberg-tools/smoke] probing hosts..."
               {{- range .Values.init.probeHosts }}
               echo "  -> {{ .label }}: nslookup {{ .host }}"
@@ -59,16 +74,18 @@ spec:
               nc -zv -w 5 {{ .host }} {{ .port }}
               {{- end }}
               echo "[iceberg-tools/smoke] checking {{ .Values.init.bucketProbe.bucket }} bucket on {{ .Values.init.bucketProbe.endpoint }}..."
-              # 200 (public list) or 403 (auth required) both prove the
-              # bucket exists and the endpoint is reachable. 404 means
-              # the bucket is missing — a real failure.
-              status=$(curl -fsS -o /dev/null -w "%{http_code}" "{{ .Values.init.bucketProbe.endpoint }}/{{ .Values.init.bucketProbe.bucket }}/?list-type=2" \
-                || curl -sS -o /dev/null -w "%{http_code}" "{{ .Values.init.bucketProbe.endpoint }}/{{ .Values.init.bucketProbe.bucket }}/?list-type=2")
-              echo "  -> bucket probe HTTP ${status}"
-              case "${status}" in
+              # busybox wget --spider returns rc=0 on 200, rc=1 on 4xx/5xx;
+              # we capture the body status via -S parsing instead. 200
+              # (public list) or 403 (auth required) prove the bucket
+              # exists; 404 means the bucket is missing.
+              status=$(wget --server-response --spider \
+                  "{{ .Values.init.bucketProbe.endpoint }}/{{ .Values.init.bucketProbe.bucket }}/?list-type=2" 2>&1 \
+                | awk '/^  HTTP\// {print $2; exit}')
+              echo "  -> bucket probe HTTP ${status:-unreachable}"
+              case "${status:-}" in
                 200|403) echo "[iceberg-tools/smoke] PASS (bucket reachable)";;
                 404) echo "[iceberg-tools/smoke] FAIL: bucket missing"; exit 1;;
-                *) echo "[iceberg-tools/smoke] FAIL: unexpected ${status}"; exit 1;;
+                *) echo "[iceberg-tools/smoke] FAIL: unexpected ${status:-no-response}"; exit 1;;
               esac
           resources:
             {{- toYaml .Values.init.resources | nindent 12 }}
