@@ -110,6 +110,22 @@ fi
 ok "kubectl context: $(kubectl config current-context)"
 ok "helm version:    $(helm version --short)"
 
+# cert-manager CRDs are a hard prereq — the flink-operator sub-chart
+# bundled inside the umbrella ships Certificate / Issuer CRs for its
+# admission webhook. Without cert-manager installed the umbrella fails
+# with the opaque `no matches for kind "Certificate" in version
+# "cert-manager.io/v1"`. Use ./deploy.sh infrastructure to install
+# cert-manager before this script.
+if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+  warn "cert-manager CRDs not found. The flink-operator sub-chart needs them."
+  warn "Run \`./deploy.sh infrastructure ${PROFILE}\` first, or install cert-manager"
+  warn "manually with \`helm upgrade --install cert-manager"
+  warn "  deployments/charts/cert-manager --namespace cert-manager --create-namespace\`."
+  if [[ "${DRY_RUN}" != "true" ]]; then
+    die "Aborting — cert-manager prereq missing"
+  fi
+fi
+
 [[ -f "${VALUES_FILE}" ]]  || die "Profile values file not found: ${VALUES_FILE}"
 [[ -f "${PREREQS_FILE}" ]] || die "Prereqs manifest not found: ${PREREQS_FILE}"
 [[ -d "${UMBRELLA_DIR}" ]] || die "Umbrella chart dir not found: ${UMBRELLA_DIR}"
