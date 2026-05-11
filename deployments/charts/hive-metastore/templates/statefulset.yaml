@@ -47,6 +47,17 @@ spec:
             # `--service` flag is passed; we set both for safety.
             - name: SERVICE_NAME
               value: metastore
+            # The apache/hive entrypoint runs `schematool -dbType derby
+            # -initOrUpgradeSchema` BEFORE starting the metastore unless
+            # SKIP_SCHEMA_INIT=true. The init-schema Job already handles
+            # postgres schema bring-up, so we always skip the entrypoint's
+            # auto-init here — otherwise the Pod runs derby schemaTool
+            # against a non-existent derby database and crashes before
+            # the metastore process ever starts.
+            - name: SKIP_SCHEMA_INIT
+              value: "true"
+            - name: DB_DRIVER
+              value: postgres
             - name: HIVE_DB_USERNAME
               valueFrom:
                 secretKeyRef:

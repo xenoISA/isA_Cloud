@@ -68,6 +68,25 @@ apicurio-registry:
   registry:
     compatibilityLevel: BACKWARD
     authEnabled: false
+  # The apicurio-registry-sql:2.6.6.Final image is built on the
+  # jboss/quarkus base which sets USER 185 in its Dockerfile and
+  # owns /opt/jboss as 185:0. The chart-default runAsUser=1001 makes
+  # the entrypoint script unreadable, crashing with:
+  #   exec: "/opt/jboss/container/java/run/run-java.sh": permission denied
+  # Override to match the image's expected UID.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 185
+    runAsGroup: 0
+    fsGroup: 185
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 185
   db:
     # Targets the postgres-bigdata chart's primary Service. The bitnami
     # postgresql chart names its primary Service `<release>-postgresql`
