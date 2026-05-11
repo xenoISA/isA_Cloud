@@ -28,7 +28,7 @@ kafka:
   storage:
     type: persistent-claim
     size: 20Gi
-    class: local-path
+    class: standard
     deleteClaim: true
   listeners:
     plain:
@@ -109,7 +109,7 @@ postgres-bigdata:
     primary:
       persistence:
         enabled: true
-        storageClass: local-path
+        storageClass: standard
         size: 4Gi
       resources:
         requests:
@@ -196,7 +196,7 @@ minio:
     persistence:
       enabled: true
       size: 20Gi
-      storageClass: local-path
+      storageClass: standard
     resources:
       requests:
         cpu: 100m
@@ -268,7 +268,7 @@ starrocks:
             memory: 2Gi
         storageSpec:
           name: fe-meta
-          storageClassName: local-path
+          storageClassName: standard
           storageSize: 5Gi
       starrocksBeSpec:
         replicas: 1
@@ -281,7 +281,7 @@ starrocks:
             memory: 4Gi
         storageSpec:
           name: be-storage
-          storageClassName: local-path
+          storageClassName: standard
           storageSize: 20Gi
 
 flink:
