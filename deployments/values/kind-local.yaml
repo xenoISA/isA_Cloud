@@ -208,10 +208,15 @@ minio:
       type: ClusterIP
       port: 9000
     consoleService:
-      # NodePort in kind so devs can poke the Console at http://<node>:30901
+      # NodePort in kind so devs can poke the Console at http://<node>:30911.
+      # 30911 (not 30901) — the platform-tier MinIO chart in
+      # isa-cloud-local already claims 30901 for its console; allocating
+      # it twice fails with `provided port is already allocated`. The
+      # bigdata-tier MinIO is a separate cluster (different bucket layout,
+      # different credentials) and gets its own NodePort.
       type: NodePort
       port: 9001
-      nodePort: 30901
+      nodePort: 30911
     buckets:
       - name: lake
         policy: none
