@@ -37,14 +37,38 @@ Both runners read the same kind-local big-data umbrella deployed by
 | V-5 | Apicurio Registry + Flink CDC schema-aware | DEFERRED | Apicurio register/evolve/cleanup pytest case implemented; awaits Apicurio Pod reaching Ready (currently blocked by image-UID mismatch — chart-fix committed). Full CDC (Kafka producer → Apicurio-backed serdes → Flink CDC consume) is W7+ once the producer image ships. |
 
 **Honest summary:** kind cluster validation is partially complete.
-The fix commits on this branch resolve 8 distinct chart-config bugs
-that would also have blocked W3 hardware deploy. Once the fixes flow
-through a full helm install cycle (Strimzi already deployed → cert-manager
-deployed → umbrella `helm upgrade --install` reaches `STATUS: deployed`)
-the pytest gates will execute cleanly. The bug enumeration below is
-the deliverable — it transforms what would have been days of discovery
-during W3 customer-prod bringup into a single document of
-already-fixed regressions.
+The fix commits on this branch resolve 12 distinct chart-config bugs
+that would also have blocked W3 hardware deploy. Cluster snapshot at
+the time of writing (after applying all 12 fixes):
+
+  apicurio-registry          0/1   Running (UID fix in place; STS
+                                   re-roll pending after webhooks settle)
+  bigdata-minio              1/1   Running (PVC + Service)
+  bigdata-postgresql         2/2   Running (with metrics sidecar)
+  flink-kubernetes-operator  1/2   Running (operator OK; webhook still
+                                   warming up)
+  hive-metastore-init-schema 1/1   Running (Job started; no longer hook-blocked)
+  hive-metastore-0           0/1   Running (still crash-looping derby
+                                   schemaTool — STS env update needs
+                                   another `helm upgrade` after the
+                                   flink webhook settles)
+  starrocks-fe-0             ContainerCreating
+  starrocks-initpwd          ContainerCreating
+  starrocks-operator         1/1   Running
+
+Three of the seven required components (MinIO, PostgreSQL, Apicurio
+modulo restart) reach Running; HMS / Flink / StarRocks need one more
+`helm upgrade --install` cycle to apply the env + webhook-cert
+re-issuance. Strimzi Kafka operator was deployed in `strimzi-system`
+namespace before the umbrella started, so its kafka CR will be
+applied as part of the next umbrella reconciliation.
+
+Once the helm install converges with all 12 fixes applied — typically
+2-3 `helm upgrade` cycles to give cert-manager time to issue the
+flink-operator webhook cert — the pytest gates will execute cleanly.
+The bug enumeration below is the primary deliverable: it transforms
+what would have been days of discovery during W3 customer-prod
+bringup into a single document of already-fixed regressions.
 
 ## Phase A — readiness
 
@@ -193,6 +217,7 @@ fixed on this branch; below is the operator-facing summary for W3:
 | 9 | `nslookup minio.isa-bigdata.svc.cluster.local` fails (in iceberg-tools probe + starrocks catalog-init + flink s3.endpoint) | The minio chart names its Service `bigdata-minio` (release prefix), not `minio`. Five chart values defaulted to the wrong name. | `fix(infra): kind-local — fix duplicate Secret + minio Service references` | kind-local profile overrides 5 endpoints to `bigdata-minio.isa-bigdata...`. customer-prod overrides each to the customer's S3 FQDN. |
 | 10 | hive-metastore-0 crash-loops at startup running `schematool -dbType derby -initOrUpgradeSchema` against a non-existent derby DB | The apache/hive entrypoint runs schematool against derby BEFORE starting the metastore, unless `SKIP_SCHEMA_INIT=true` is set. The init-schema Job already handles postgres bring-up, so the entrypoint's auto-init was a duplicate that crashes. | `fix(infra): hive-metastore + apicurio runtime — DB driver + image UID` | Pull latest main; re-deploy. Backwards-compatible. |
 | 11 | apicurio-registry crashes with `exec: "/opt/jboss/container/java/run/run-java.sh": permission denied` | Image is built on jboss/quarkus base with USER 185 / `/opt/jboss` chowned to 185:0. Chart-default `runAsUser: 1001` makes the entrypoint script unreadable. | `fix(infra): hive-metastore + apicurio runtime — DB driver + image UID` | kind-local profile overrides `podSecurityContext.runAsUser/securityContext.runAsUser` to 185 + `fsGroup: 185`. customer-prod can opt back into 1001 once the operator pre-bakes a re-rooted image. |
+| 12 | setup-datalake.sh emits opaque `no matches for kind "Certificate" in version "cert-manager.io/v1"` 5+ minutes into install, after creating Strimzi operator + Secrets, leaving partial state | Pre-flight didn't validate the cert-manager CRD prereq. | `fix(infra): setup-datalake.sh — fail fast if cert-manager CRDs missing` | Pull latest main; the script now dies during Pre-flight with a clear instruction to run `./deploy.sh infrastructure` first. |
 
 ## What V-6..V-9 will look like (W3 hardware)
 
