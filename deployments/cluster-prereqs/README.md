@@ -19,7 +19,7 @@ deployments/scripts/setup-datalake.sh -p customer-prod --dry-run
 ## Manual path (if scripting is unavailable)
 
 ```bash
-# 1. PriorityClass tiers (system-critical / infra-critical / application)
+# 1. PriorityClass tiers (platform-critical / infra-critical / application)
 kubectl apply -f deployments/cluster-prereqs/priorityclasses.yaml
 
 # 2. Strimzi Kafka Operator (cluster-scoped CRDs + operator)
@@ -87,7 +87,7 @@ helm install bigdata deployments/umbrella/isa-bigdata \
 
 | File / dir | What it creates |
 |---|---|
-| `priorityclasses.yaml` | 3 cluster-scoped `PriorityClass` objects: `system-critical` (1,000,000), `infra-critical` (100,000), `application` (1,000, globalDefault) — referenced by `customer-prod.yaml` profile values across kafka / postgres / hms / minio / starrocks / flink / iceberg-tools |
+| `priorityclasses.yaml` | 3 cluster-scoped `PriorityClass` objects: `platform-critical` (1,000,000), `infra-critical` (100,000), `application` (1,000, globalDefault) — referenced by `customer-prod.yaml` profile values across kafka / postgres / hms / minio / starrocks / flink / iceberg-tools. (`platform-critical` was renamed from `system-critical` because Kubernetes reserves the `system-` prefix.) |
 | `external-secrets/` | 1 `ClusterSecretStore` + 5 `ExternalSecret` CRs that project vault paths under `secret/data/isa-bigdata/*` into the 5 K8s Secrets the umbrella references via `existingSecret:`. Companion script: `deployments/scripts/bootstrap-vault-secrets.sh`. |
 
 ## Sibling cluster-wide prereqs (Helm charts in `deployments/charts/`)

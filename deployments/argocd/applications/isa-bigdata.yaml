@@ -6,7 +6,7 @@
 # #234 (the 11th — dataphin — is awaiting vendor delivery, see #263).
 #
 # Prerequisites this Application does NOT install:
-#   - PriorityClass system-critical / infra-critical / application
+#   - PriorityClass platform-critical / infra-critical / application
 #     (apply deployments/cluster-prereqs/priorityclasses.yaml first)
 #   - Strimzi Kafka Operator (helm install strimzi-operator separately)
 #   - cert-manager + ClusterIssuer (separate story, TBD)

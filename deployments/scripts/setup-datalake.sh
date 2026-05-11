@@ -10,7 +10,7 @@
 #
 # Order (mirrors deployments/cluster-prereqs/README.md):
 #   1. Pre-flight: kubectl context, helm version, target namespace
-#   2. Cluster prereqs: PriorityClass system-critical / infra-critical /
+#   2. Cluster prereqs: PriorityClass platform-critical / infra-critical /
 #      application
 #   3. Strimzi Kafka Operator (cluster-scoped CRDs)
 #   4. helm dependency update for the umbrella + each chart with file://
@@ -135,7 +135,7 @@ else
   else
     kubectl apply -f "${PREREQS_FILE}"
   fi
-  ok "PriorityClass tiers: system-critical / infra-critical / application"
+  ok "PriorityClass tiers: platform-critical / infra-critical / application"
 fi
 
 # -----------------------------------------------------------------------------
@@ -151,8 +151,14 @@ else
       --namespace "${STRIMZI_NAMESPACE}" >/dev/null
     ok "Strimzi helm template OK (dry-run)"
   else
+    # Pre-create both namespaces. The Strimzi chart projects RoleBindings
+    # into the watched namespaces (e.g. isa-bigdata) at install time —
+    # if the watched namespace doesn't exist yet helm fails immediately.
     if ! kubectl get namespace "${STRIMZI_NAMESPACE}" >/dev/null 2>&1; then
       kubectl create namespace "${STRIMZI_NAMESPACE}"
+    fi
+    if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+      kubectl create namespace "${NAMESPACE}"
     fi
 
     helm dependency update "${STRIMZI_CHART_DIR}" >/dev/null

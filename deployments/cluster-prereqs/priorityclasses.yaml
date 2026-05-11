@@ -5,7 +5,11 @@
 # (and 00-infra-architecture-overview.md §3 / §6.2 sizing tables), the
 # big-data foundation expects three priority tiers on the cluster:
 #
-#   system-critical  > infra-critical  > application
+#   platform-critical  > infra-critical  > application
+#
+# NOTE: the `system-` prefix is reserved by Kubernetes for built-in
+# system priority classes (system-cluster-critical / system-node-critical).
+# We use `platform-critical` for the highest user-defined tier.
 #
 # The customer-prod profile values reference `priorityClassName:
 # infra-critical` on broker / FE / BE / TM / HMS / postgres-primary
@@ -22,16 +26,18 @@
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: system-critical
+  name: platform-critical
   labels:
     app.kubernetes.io/part-of: isa-platform
 value: 1000000
 globalDefault: false
 description: |
-  Highest priority — vault, etcd, EonKube agent. Pods at this tier
-  preempt anything at infra-critical or application. Reserved for the
-  cluster control plane components that must run for the cluster
-  itself to remain healthy.
+  Highest user-defined priority — vault, etcd, EonKube agent. Pods at
+  this tier preempt anything at infra-critical or application.
+  Reserved for the platform control plane components that must run
+  for the cluster itself to remain healthy. Renamed from
+  `system-critical` because the `system-` prefix is reserved by
+  Kubernetes for built-in priority classes.
 preemptionPolicy: PreemptLowerPriority
 
 ---
@@ -48,7 +54,7 @@ description: |
   primary/replicas, StarRocks FE/BE, Hive Metastore, Flink JobManager
   + TaskManagers, Strimzi Operator. Stateful + storage-bound services
   whose loss would interrupt all downstream work. Preempts only
-  application tier; never preempts system-critical.
+  application tier; never preempts platform-critical.
 preemptionPolicy: PreemptLowerPriority
 
 ---
