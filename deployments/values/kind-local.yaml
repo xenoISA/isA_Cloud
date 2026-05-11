@@ -160,12 +160,20 @@ hive-metastore:
     dir: "s3a://lake/warehouse/"
   s3a:
     enabled: true
-    endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
+    # Service name is bigdata-minio (chart wraps minio with release-prefix
+    # — bigdata-minio.isa-bigdata.svc.cluster.local), NOT minio.
+    endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
     pathStyleAccess: true
     auth:
-      create: true
-      accessKey: minio-kind
-      secretKey: minio-kind-secret
+      # Reuse the `minio-credentials` Secret created by the minio
+      # chart — it already exposes access-key / secret-key with the
+      # right values. Setting create: true here would render a
+      # duplicate Secret with the same name and helm refuses the
+      # install with `no Secret with the name "minio-credentials" found`
+      # because the duplicate-name conflict-detector swallows one
+      # before validation.
+      create: false
+      existingSecret: minio-credentials
   resources:
     requests:
       cpu: 250m
@@ -236,8 +244,23 @@ minio:
         enabled: false
 
 iceberg-tools:
+  # Override S3A endpoint — minio chart renders its Service as
+  # `bigdata-minio` (release prefix), not `minio`.
+  s3a:
+    endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
   init:
     enabled: true
+    # Override the chart-default probe targets — same reason as above.
+    probeHosts:
+      - host: hive-metastore.isa-bigdata.svc.cluster.local
+        port: 9083
+        label: hive-metastore-thrift
+      - host: bigdata-minio.isa-bigdata.svc.cluster.local
+        port: 9000
+        label: minio-s3
+    bucketProbe:
+      endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
+      bucket: lake
 
 starrocks:
   rootPassword:
@@ -245,6 +268,14 @@ starrocks:
     password: starrocks-kind
   catalogInit:
     enabled: true
+    catalog:
+      # Override default — minio Service is bigdata-minio in the
+      # umbrella (release prefix), not minio.
+      name: iceberg_hms
+      hiveMetastoreUri: thrift://hive-metastore.isa-bigdata.svc.cluster.local:9083
+      s3Endpoint: http://bigdata-minio.isa-bigdata.svc.cluster.local:9000
+      s3PathStyleAccess: true
+      s3SslEnabled: false
   kube-starrocks:
     operator:
       starrocksOperator:
@@ -302,6 +333,8 @@ flink:
     flinkConfiguration:
       jobmanager.memory.process.size: "2g"
       taskmanager.memory.process.size: "2g"
+      # Override default — minio Service is bigdata-minio (release prefix).
+      s3.endpoint: "http://bigdata-minio.isa-bigdata.svc.cluster.local:9000"
   networkPolicy:
     enabled: false
   podDisruptionBudget:
