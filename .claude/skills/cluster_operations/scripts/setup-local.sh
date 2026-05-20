@@ -153,6 +153,22 @@ echo -e "${YELLOW}[2/5] Creating namespace...${NC}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 echo -e "  ${GREEN}✓ Namespace '$NAMESPACE' ready${NC}"
 
+# metrics-server (#211): kind ships without it, so `kubectl top` returns no
+# data and HPA/KEDA cannot read CPU/memory. Install + patch for kind — kind's
+# kubelet serving cert isn't signed by the cluster CA, hence --kubelet-insecure-tls.
+echo -e "  ${YELLOW}Installing metrics-server (kind-compatible)...${NC}"
+if ! kubectl get deployment metrics-server -n kube-system >/dev/null 2>&1; then
+    kubectl apply -f \
+      "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml" \
+      >/dev/null 2>&1 || echo -e "  ${YELLOW}⚠ metrics-server manifest apply failed (continuing)${NC}"
+    kubectl patch -n kube-system deployment metrics-server --type=json \
+      -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' \
+      >/dev/null 2>&1 || true
+    echo -e "  ${GREEN}✓ metrics-server installed${NC}"
+else
+    echo -e "  ${GREEN}✓ metrics-server already present${NC}"
+fi
+
 # =============================================================================
 # Step 3: Add Helm Repos
 # =============================================================================
