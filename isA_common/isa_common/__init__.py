@@ -31,7 +31,13 @@ from typing import Dict
 # Base Client & Configuration
 # =============================================================================
 from .async_base_client import AsyncBaseClient
-from .async_client_config import ClientConfig, PostgresConfig, RedisConfig, MinIOConfig, LokiConfig
+from .async_client_config import (
+    ClientConfig,
+    PostgresConfig,
+    RedisConfig,
+    MinIOConfig,
+    LokiConfig,
+)
 
 # =============================================================================
 # Native Async Clients (Direct Connections)
@@ -51,7 +57,13 @@ from .loki_handler import LokiHandler, setup_loki_logging
 # =============================================================================
 # Observability (Metrics, Tracing, Unified Setup)
 # =============================================================================
-from .metrics import setup_metrics, create_counter, create_histogram, create_gauge, metrics_text
+from .metrics import (
+    setup_metrics,
+    create_counter,
+    create_histogram,
+    create_gauge,
+    metrics_text,
+)
 from .tracing import setup_tracing, get_tracer
 from .observability import setup_observability
 
@@ -84,70 +96,91 @@ except ModuleNotFoundError:
 from .consul_client import ConsulRegistry, AsyncConsulRegistry, consul_lifespan
 
 # =============================================================================
+# Quota Enforcement (per-org/tenant resource limits — product_spec tiers)
+# =============================================================================
+from .quota_enforcer import (
+    QuotaEnforcer,
+    QuotaType,
+    TierQuota,
+    QuotaDecision,
+    PartialConsumption,
+    QuotaExceededError,
+    UNLIMITED,
+)
+
+# =============================================================================
 # Exports
 # =============================================================================
 __all__ = [
     # Base client & config
-    'AsyncBaseClient',
-    'ClientConfig',
-    'PostgresConfig',
-    'RedisConfig',
-    'MinIOConfig',
-    'LokiConfig',
+    "AsyncBaseClient",
+    "ClientConfig",
+    "PostgresConfig",
+    "RedisConfig",
+    "MinIOConfig",
+    "LokiConfig",
     # Native async clients
-    'AsyncRedisClient',
-    'AsyncPostgresClient',
-    'AsyncNATSClient',
-    'AsyncNeo4jClient',
-    'AsyncMinIOClient',
-    'AsyncDuckDBClient',
-    'AsyncMQTTClient',
-    'AsyncQdrantClient',
-    'AsyncFalkorClient',
-    'AsyncLokiClient',
-    'LokiHandler',
-    'setup_loki_logging',
+    "AsyncRedisClient",
+    "AsyncPostgresClient",
+    "AsyncNATSClient",
+    "AsyncNeo4jClient",
+    "AsyncMinIOClient",
+    "AsyncDuckDBClient",
+    "AsyncMQTTClient",
+    "AsyncQdrantClient",
+    "AsyncFalkorClient",
+    "AsyncLokiClient",
+    "LokiHandler",
+    "setup_loki_logging",
     # Observability
-    'setup_metrics',
-    'create_counter',
-    'create_histogram',
-    'create_gauge',
-    'metrics_text',
-    'setup_tracing',
-    'get_tracer',
-    'setup_observability',
+    "setup_metrics",
+    "create_counter",
+    "create_histogram",
+    "create_gauge",
+    "metrics_text",
+    "setup_tracing",
+    "get_tracer",
+    "setup_observability",
     # Local-mode alternative clients
-    'AsyncSQLiteClient',
-    'AsyncLocalStorageClient',
-    'AsyncChromaClient',
-    'AsyncMemoryClient',
+    "AsyncSQLiteClient",
+    "AsyncLocalStorageClient",
+    "AsyncChromaClient",
+    "AsyncMemoryClient",
     # Service discovery
-    'ConsulRegistry',
-    'AsyncConsulRegistry',
-    'consul_lifespan',
+    "ConsulRegistry",
+    "AsyncConsulRegistry",
+    "consul_lifespan",
+    # Quota enforcement
+    "QuotaEnforcer",
+    "QuotaType",
+    "TierQuota",
+    "QuotaDecision",
+    "PartialConsumption",
+    "QuotaExceededError",
+    "UNLIMITED",
     # Port configuration
-    'NATIVE_PORTS',
+    "NATIVE_PORTS",
 ]
 
 # =============================================================================
 # Native port configuration
 # =============================================================================
 NATIVE_PORTS: Dict[str, int] = {
-    'postgres': 5432,
-    'redis': 6379,
-    'neo4j': 7687,
-    'nats': 4222,
-    'qdrant': 6333,
-    'falkordb': 6379,  # Redis-module graph DB; deployed on its own service in production
-    'mqtt': 1883,
-    'minio': 9000,
-    'consul': 8500,
-    'loki': 3100,
-    'tempo_otlp_grpc': 4317,
-    'tempo_otlp_http': 4318,
-    'prometheus': 9090,
-    'grafana': 3000,
-    'duckdb': 0,  # Embedded, no port
+    "postgres": 5432,
+    "redis": 6379,
+    "neo4j": 7687,
+    "nats": 4222,
+    "qdrant": 6333,
+    "falkordb": 6379,  # Redis-module graph DB; deployed on its own service in production
+    "mqtt": 1883,
+    "minio": 9000,
+    "consul": 8500,
+    "loki": 3100,
+    "tempo_otlp_grpc": 4317,
+    "tempo_otlp_http": 4318,
+    "prometheus": 9090,
+    "grafana": 3000,
+    "duckdb": 0,  # Embedded, no port
 }
 
-__version__ = '0.4.0'
+__version__ = "0.4.0"
