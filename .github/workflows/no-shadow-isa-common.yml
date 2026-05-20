@@ -1,0 +1,90 @@
+# Reusable workflow: block shadow-vendoring of `isa_common` (#216)
+#
+# Consumer repos add this workflow to their PR-validation pipeline so any PR
+# that introduces a directory matching `**/isa_common*/__init__.py` is
+# rejected. The canonical install path is the editable wheel from this repo
+# (`isA_Cloud/isA_common`), never a copy pasted into the consumer tree.
+#
+# Why this guardrail exists: see xenoISA/isA_Cloud#216 — silent shadow copies
+# pass tests against the stale local source but the runtime ignores them.
+#
+# Usage in a consumer repo (e.g., isA_Data/.github/workflows/ci.yml):
+#
+#   jobs:
+#     no-shadow:
+#       uses: xenoISA/isA_Cloud/.github/workflows/no-shadow-isa-common.yml@main
+
+name: no-shadow-isa-common
+
+on:
+  workflow_call:
+    inputs:
+      allowed_paths:
+        description: |
+          Comma-separated list of paths that ARE allowed to contain
+          `isa_common*/__init__.py`. Defaults to none — only the
+          canonical `isA_Cloud/isA_common/isa_common/` is allowed,
+          and that lives in isA_Cloud itself.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  block-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan for shadow-vendored isa_common
+        shell: bash
+        run: |
+          set -e
+
+          # Build the allow-list pattern from inputs (comma-separated paths).
+          ALLOWED="${{ inputs.allowed_paths }}"
+          ALLOW_FILTER=""
+          if [ -n "$ALLOWED" ]; then
+            for path in $(echo "$ALLOWED" | tr ',' '\n'); do
+              trimmed=$(echo "$path" | xargs)
+              [ -n "$trimmed" ] && ALLOW_FILTER="$ALLOW_FILTER -not -path \"./$trimmed/*\""
+            done
+          fi
+
+          # Find any directory matching **/isa_common*/__init__.py
+          # (excludes the optional allow-list).
+          eval "find . -path '*/.git' -prune -o \
+                       -path '*/node_modules' -prune -o \
+                       -path '*/.venv' -prune -o \
+                       -path '*/__pycache__' -prune -o \
+                       -name '__init__.py' -path '*/isa_common*/__init__.py' \
+                       $ALLOW_FILTER -print" > /tmp/shadow.txt
+
+          if [ -s /tmp/shadow.txt ]; then
+            echo ""
+            echo "::error::Shadow-vendored isa_common detected:"
+            while read -r f; do
+              echo "::error file=$f::Shadow copy of isa_common — use the editable install from isA_Cloud instead"
+              echo "  - $f"
+            done < /tmp/shadow.txt
+            echo ""
+            echo "=========================================================="
+            echo "Why this fails"
+            echo "----------------------------------------------------------"
+            echo "Local copies of isa_common silently override the installed"
+            echo "package at runtime, causing edits to compile + tests to"
+            echo "pass against the stale local source while runtime ignores"
+            echo "everything. See xenoISA/isA_Cloud#216."
+            echo ""
+            echo "Fix"
+            echo "----------------------------------------------------------"
+            echo "1. Delete the shadow directory listed above."
+            echo "2. Install the canonical isa_common via editable wheel:"
+            echo "     pip install -e /path/to/isA_Cloud/isA_common"
+            echo "3. Or pin the published wheel in your requirements:"
+            echo "     isa-common>=0.3.1"
+            echo "=========================================================="
+            exit 1
+          fi
+
+          echo "OK — no shadow-vendored isa_common found."
