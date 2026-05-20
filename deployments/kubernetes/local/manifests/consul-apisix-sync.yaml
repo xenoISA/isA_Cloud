@@ -284,6 +284,73 @@ data:
         fi
     }
 
+    # isA_Model exposes model-product serving under /api/v1/mlflow/*, outside
+    # the generic /api/v1/models/* service prefix. Keep that path behind the
+    # gateway so isA_Data can use ISA_MODEL_URL=http://localhost:9080.
+    create_or_update_model_mlflow_route() {
+        local route_name="model_service_mlflow_route"
+        local cors_origins="${CORS_ALLOWED_ORIGINS:-http://localhost:4100,http://localhost:4200,http://localhost:4300,http://localhost:3000,http://localhost:5184}"
+
+        print_info "Syncing isA_Model MLflow route: $route_name (/api/v1/mlflow/* -> model_service)"
+
+        local plugins=$(jq -n --arg cors_origins "$cors_origins" '{
+            "cors": {
+                "allow_origins": $cors_origins,
+                "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+                "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                "expose_headers": "X-Request-ID",
+                "max_age": 86400,
+                "allow_credential": true
+            },
+            "request-id": {
+                "algorithm": "uuid",
+                "include_in_response": true
+            },
+            "prometheus": {}
+        }')
+
+        local response=$(curl -s -w "\n%{http_code}" -X PUT \
+            "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+            -H "X-API-KEY: ${ADMIN_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\
+                \"name\": \"${route_name}\",\
+                \"uris\": [\"/api/v1/mlflow\", \"/api/v1/mlflow/*\"],\
+                \"priority\": 30,\
+                \"status\": 1,\
+                \"plugins\": ${plugins},\
+                \"upstream\": {\
+                    \"type\": \"roundrobin\",\
+                    \"service_name\": \"model_service\",\
+                    \"discovery_type\": \"consul\",\
+                    \"scheme\": \"http\",\
+                    \"pass_host\": \"pass\",\
+                    \"retries\": 2,\
+                    \"retry_timeout\": 6,\
+                    \"timeout\": {\
+                        \"connect\": 6,\
+                        \"send\": 10,\
+                        \"read\": 60\
+                    },\
+                    \"keepalive_pool\": {\
+                        \"size\": 320,\
+                        \"idle_timeout\": 60,\
+                        \"requests\": 1000\
+                    }\
+                }\
+            }")
+
+        local http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            print_success "isA_Model MLflow route synced: $route_name"
+            return 0
+        else
+            print_error "Failed to sync isA_Model MLflow route: $route_name (HTTP $http_code)"
+            echo "$response" | head -n -1
+            return 1
+        fi
+    }
+
     # Delete route from APISIX
     delete_route() {
         local route_name=$1
@@ -751,6 +818,9 @@ data:
             # Create/Update route
             if create_or_update_route "$service_name" "$api_path" "$auth_required" "$rate_limit"; then
                 processed_services+=("${service_name}_route")
+            fi
+            if [ "$service_name" = "model_service" ] && create_or_update_model_mlflow_route; then
+                processed_services+=("model_service_mlflow_route")
             fi
             if create_or_update_health_route "$service_name" "$api_path"; then
                 processed_services+=("${service_name}_health_route")
