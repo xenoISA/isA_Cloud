@@ -50,10 +50,7 @@ class AsyncNATSClient(AsyncBaseClient):
     TENANT_SEPARATOR = "."  # org.user.subject
 
     def __init__(
-        self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        **kwargs
+        self, username: Optional[str] = None, password: Optional[str] = None, **kwargs
     ):
         """
         Initialize async NATS client with native driver.
@@ -65,8 +62,8 @@ class AsyncNATSClient(AsyncBaseClient):
         """
         super().__init__(**kwargs)
 
-        self._username = username or os.getenv('NATS_USER')
-        self._password = password or os.getenv('NATS_PASSWORD')
+        self._username = username or os.getenv("NATS_USER")
+        self._password = password or os.getenv("NATS_PASSWORD")
 
         self._nc: Optional[NATSClient] = None
         self._js = None  # JetStream context
@@ -146,7 +143,9 @@ class AsyncNATSClient(AsyncBaseClient):
             try:
                 await self._disconnect()
             except Exception as disconnect_error:
-                self._logger.debug(f"NATS disconnect during recovery failed: {disconnect_error}")
+                self._logger.debug(
+                    f"NATS disconnect during recovery failed: {disconnect_error}"
+                )
             await self._connect()
             self._connected = True
             self._reconnect_count += 1
@@ -165,7 +164,9 @@ class AsyncNATSClient(AsyncBaseClient):
                 try:
                     await self._disconnect()
                 except Exception as disconnect_error:
-                    self._logger.debug(f"NATS pre-connect cleanup failed: {disconnect_error}")
+                    self._logger.debug(
+                        f"NATS pre-connect cleanup failed: {disconnect_error}"
+                    )
             await self._connect()
             self._connected = True
 
@@ -206,19 +207,19 @@ class AsyncNATSClient(AsyncBaseClient):
                 )
 
         connect_opts = {
-            'servers': [server_url],
-            'allow_reconnect': True,
-            'reconnect_time_wait': 2,
-            'max_reconnect_attempts': -1,
-            'disconnected_cb': _on_disconnected,
-            'reconnected_cb': _on_reconnected,
-            'closed_cb': _on_closed,
-            'error_cb': _on_error,
+            "servers": [server_url],
+            "allow_reconnect": True,
+            "reconnect_time_wait": 2,
+            "max_reconnect_attempts": -1,
+            "disconnected_cb": _on_disconnected,
+            "reconnected_cb": _on_reconnected,
+            "closed_cb": _on_closed,
+            "error_cb": _on_error,
         }
 
         if self._username and self._password:
-            connect_opts['user'] = self._username
-            connect_opts['password'] = self._password
+            connect_opts["user"] = self._username
+            connect_opts["password"] = self._password
 
         self._nc = await nats.connect(**connect_opts)
         self._js = self._nc.jetstream()
@@ -273,15 +274,15 @@ class AsyncNATSClient(AsyncBaseClient):
             jetstream_enabled = self._js is not None
 
             return {
-                'healthy': healthy,
-                'nats_status': 'connected' if healthy else 'disconnected',
-                'jetstream_enabled': jetstream_enabled,
-                'connections': 1 if healthy else 0,
-                'reconnect_count': self._reconnect_count,
-                'consecutive_errors': self._consecutive_errors,
-                'total_messages_pulled': self._total_messages_pulled,
-                'total_ack_failures': self._total_ack_failures,
-                'message': 'NATS server is reachable'
+                "healthy": healthy,
+                "nats_status": "connected" if healthy else "disconnected",
+                "jetstream_enabled": jetstream_enabled,
+                "connections": 1 if healthy else 0,
+                "reconnect_count": self._reconnect_count,
+                "consecutive_errors": self._consecutive_errors,
+                "total_messages_pulled": self._total_messages_pulled,
+                "total_ack_failures": self._total_ack_failures,
+                "message": "NATS server is reachable",
             }
 
         except Exception as e:
@@ -296,7 +297,7 @@ class AsyncNATSClient(AsyncBaseClient):
         subject: str,
         data: bytes,
         headers: Optional[Dict[str, str]] = None,
-        reply_to: str = ''
+        reply_to: str = "",
     ) -> Optional[Dict]:
         """
         Publish message to subject (fire-and-forget, ephemeral).
@@ -314,13 +315,10 @@ class AsyncNATSClient(AsyncBaseClient):
             await self._ensure_connected()
 
             await self._nc.publish(
-                subject,
-                data,
-                reply=reply_to if reply_to else None,
-                headers=headers
+                subject, data, reply=reply_to if reply_to else None, headers=headers
             )
 
-            return {'success': True, 'message': f'Published to {subject}'}
+            return {"success": True, "message": f"Published to {subject}"}
 
         except Exception as e:
             if self._is_connection_error(e):
@@ -330,9 +328,9 @@ class AsyncNATSClient(AsyncBaseClient):
                         subject,
                         data,
                         reply=reply_to if reply_to else None,
-                        headers=headers
+                        headers=headers,
                     )
-                    return {'success': True, 'message': f'Published to {subject}'}
+                    return {"success": True, "message": f"Published to {subject}"}
                 except Exception as retry_error:
                     return self.handle_error(retry_error, "publish (retry)")
             return self.handle_error(e, "publish")
@@ -356,25 +354,23 @@ class AsyncNATSClient(AsyncBaseClient):
             for msg in messages:
                 try:
                     await self._nc.publish(
-                        msg['subject'],
-                        msg['data'],
-                        reply=msg.get('reply_to'),
-                        headers=msg.get('headers')
+                        msg["subject"],
+                        msg["data"],
+                        reply=msg.get("reply_to"),
+                        headers=msg.get("headers"),
                     )
                     published += 1
                 except Exception as e:
                     errors.append(str(e))
 
-            return {
-                'success': True,
-                'published_count': published,
-                'errors': errors
-            }
+            return {"success": True, "published_count": published, "errors": errors}
 
         except Exception as e:
             return self.handle_error(e, "publish batch")
 
-    async def subscribe(self, subject: str, queue_group: str = '') -> AsyncIterator[Dict]:
+    async def subscribe(
+        self, subject: str, queue_group: str = ""
+    ) -> AsyncIterator[Dict]:
         """
         Subscribe to a subject and yield messages.
 
@@ -388,53 +384,55 @@ class AsyncNATSClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            sub = await self._nc.subscribe(subject, queue=queue_group if queue_group else None)
+            sub = await self._nc.subscribe(
+                subject, queue=queue_group if queue_group else None
+            )
             self._subscriptions[subject] = sub
 
             async for msg in sub.messages:
                 yield {
-                    'subject': msg.subject,
-                    'data': msg.data,
-                    'headers': dict(msg.headers) if msg.headers else {},
-                    'reply_to': msg.reply or '',
-                    'sequence': 0  # Core NATS doesn't have sequence
+                    "subject": msg.subject,
+                    "data": msg.data,
+                    "headers": dict(msg.headers) if msg.headers else {},
+                    "reply_to": msg.reply or "",
+                    "sequence": 0,  # Core NATS doesn't have sequence
                 }
 
         except Exception as e:
             self.handle_error(e, "subscribe")
 
-    async def request(self, subject: str, data: bytes, timeout_seconds: int = 5) -> Optional[Dict]:
+    async def request(
+        self, subject: str, data: bytes, timeout_seconds: int = 5
+    ) -> Optional[Dict]:
         """Request-reply pattern."""
         try:
             await self._ensure_connected()
 
-            response = await self._nc.request(
-                subject,
-                data,
-                timeout=timeout_seconds
-            )
+            response = await self._nc.request(subject, data, timeout=timeout_seconds)
 
-            return {
-                'success': True,
-                'data': response.data,
-                'subject': response.subject
-            }
+            return {"success": True, "data": response.data, "subject": response.subject}
 
         except NATSTimeoutError:
-            self._logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
+            self._logger.warning(
+                f"NATS request to {subject} timed out after {timeout_seconds}s"
+            )
             return None
         except Exception as e:
             if self._is_connection_error(e):
                 try:
                     await self._recover_connection("request", e)
-                    response = await self._nc.request(subject, data, timeout=timeout_seconds)
+                    response = await self._nc.request(
+                        subject, data, timeout=timeout_seconds
+                    )
                     return {
-                        'success': True,
-                        'data': response.data,
-                        'subject': response.subject
+                        "success": True,
+                        "data": response.data,
+                        "subject": response.subject,
                     }
                 except NATSTimeoutError:
-                    self._logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
+                    self._logger.warning(
+                        f"NATS request to {subject} timed out after {timeout_seconds}s"
+                    )
                     return None
                 except Exception as retry_error:
                     return self.handle_error(retry_error, "request (retry)")
@@ -445,11 +443,7 @@ class AsyncNATSClient(AsyncBaseClient):
     # ============================================
 
     async def create_stream(
-        self,
-        name: str,
-        subjects: List[str],
-        max_msgs: int = -1,
-        max_bytes: int = -1
+        self, name: str, subjects: List[str], max_msgs: int = -1, max_bytes: int = -1
     ) -> Optional[Dict]:
         """
         Create JetStream stream.
@@ -476,12 +470,12 @@ class AsyncNATSClient(AsyncBaseClient):
             stream = await self._js.add_stream(config)
 
             return {
-                'success': True,
-                'stream': {
-                    'name': stream.config.name,
-                    'subjects': list(stream.config.subjects),
-                    'messages': stream.state.messages
-                }
+                "success": True,
+                "stream": {
+                    "name": stream.config.name,
+                    "subjects": list(stream.config.subjects),
+                    "messages": stream.state.messages,
+                },
             }
 
         except Exception as e:
@@ -493,7 +487,7 @@ class AsyncNATSClient(AsyncBaseClient):
             await self._ensure_connected()
 
             await self._js.delete_stream(stream_name)
-            return {'success': True}
+            return {"success": True}
 
         except Exception as e:
             return self.handle_error(e, "delete stream")
@@ -506,29 +500,32 @@ class AsyncNATSClient(AsyncBaseClient):
             streams = []
             async for stream in self._js.streams():
                 info = await stream.info()
-                streams.append({
-                    'name': info.config.name,
-                    'subjects': list(info.config.subjects) if info.config.subjects else [],
-                    'messages': info.state.messages,
-                    'bytes': info.state.bytes
-                })
+                streams.append(
+                    {
+                        "name": info.config.name,
+                        "subjects": list(info.config.subjects)
+                        if info.config.subjects
+                        else [],
+                        "messages": info.state.messages,
+                        "bytes": info.state.bytes,
+                    }
+                )
 
             return streams
 
         except Exception as e:
             return self.handle_error(e, "list streams") or []
 
-    async def publish_to_stream(self, stream_name: str, subject: str, data: bytes) -> Optional[Dict]:
+    async def publish_to_stream(
+        self, stream_name: str, subject: str, data: bytes
+    ) -> Optional[Dict]:
         """Publish message to JetStream stream."""
         try:
             await self._ensure_connected()
 
             ack = await self._js.publish(subject, data)
 
-            return {
-                'success': True,
-                'sequence': ack.seq
-            }
+            return {"success": True, "sequence": ack.seq}
 
         except Exception as e:
             return self.handle_error(e, "publish to stream")
@@ -537,8 +534,12 @@ class AsyncNATSClient(AsyncBaseClient):
         self,
         stream_name: str,
         consumer_name: str,
-        filter_subject: str = '',
-        delivery_policy: str = 'all'
+        filter_subject: str = "",
+        delivery_policy: str = "all",
+        *,
+        max_deliver: int = -1,
+        ack_wait: int = 30,
+        ack_policy: str = "explicit",
     ) -> Optional[Dict]:
         """
         Create JetStream consumer (pull-based, durable).
@@ -548,6 +549,13 @@ class AsyncNATSClient(AsyncBaseClient):
             consumer_name: Consumer name
             filter_subject: Optional subject filter
             delivery_policy: Delivery policy - 'all', 'new', or 'last'
+            max_deliver: Maximum redelivery attempts; -1 means unlimited (#213)
+            ack_wait: Seconds to wait for ack before redelivering (#213)
+            ack_policy: 'explicit' (default), 'all', or 'none' (#213).
+                When 'explicit', :meth:`pull_messages` will NOT auto-ack — callers
+                must call :meth:`ack_message`/``nak_message``/``term_message`` after
+                processing. ``'all'`` keeps the legacy auto-ack-inside-pull semantics
+                for backwards compatibility.
 
         Returns:
             Consumer info dict or None
@@ -557,19 +565,33 @@ class AsyncNATSClient(AsyncBaseClient):
 
             # Map delivery policy
             deliver_policy_map = {
-                'all': DeliverPolicy.ALL,
-                'new': DeliverPolicy.NEW,
-                'last': DeliverPolicy.LAST,
+                "all": DeliverPolicy.ALL,
+                "new": DeliverPolicy.NEW,
+                "last": DeliverPolicy.LAST,
             }
             deliver = deliver_policy_map.get(delivery_policy.lower(), DeliverPolicy.ALL)
 
+            ack_policy_map = {
+                "explicit": AckPolicy.EXPLICIT,
+                "all": AckPolicy.ALL,
+                "none": AckPolicy.NONE,
+            }
+            ack = ack_policy_map.get(ack_policy.lower(), AckPolicy.EXPLICIT)
+
             consumer_name = self._sanitize_consumer_name(consumer_name)
+
+            # Cache the configured ack semantics so pull_messages can honor them.
+            if not hasattr(self, "_consumer_ack_policy"):
+                self._consumer_ack_policy: Dict[str, str] = {}
+            self._consumer_ack_policy[consumer_name] = ack_policy.lower()
 
             config = ConsumerConfig(
                 durable_name=consumer_name,
                 filter_subject=filter_subject if filter_subject else None,
                 deliver_policy=deliver,
-                ack_policy=AckPolicy.EXPLICIT,
+                ack_policy=ack,
+                max_deliver=max_deliver,
+                ack_wait=ack_wait,
             )
 
             try:
@@ -578,7 +600,9 @@ class AsyncNATSClient(AsyncBaseClient):
                 err_str = str(add_err)
                 # If consumer exists with different config (err_code 10012), delete and recreate
                 if "10012" in err_str and "deliver policy" in err_str.lower():
-                    self._logger.warning(f"Consumer {consumer_name} config mismatch, recreating...")
+                    self._logger.warning(
+                        f"Consumer {consumer_name} config mismatch, recreating..."
+                    )
                     try:
                         await self._js.delete_consumer(stream_name, consumer_name)
                     except Exception:
@@ -587,47 +611,79 @@ class AsyncNATSClient(AsyncBaseClient):
                 else:
                     raise add_err
 
-            return {
-                'success': True,
-                'consumer': consumer_name
-            }
+            return {"success": True, "consumer": consumer_name}
 
         except Exception as e:
             return self.handle_error(e, "create consumer")
 
-    async def pull_messages(self, stream_name: str, consumer_name: str, batch_size: int = 10) -> List[Dict]:
-        """Pull messages from JetStream consumer."""
+    async def pull_messages(
+        self,
+        stream_name: str,
+        consumer_name: str,
+        batch_size: int = 10,
+        *,
+        auto_ack: Optional[bool] = None,
+    ) -> List[Dict]:
+        """Pull messages from JetStream consumer.
+
+        Honors the ``ack_policy`` configured at :meth:`create_consumer` time:
+
+        * ``explicit`` — does NOT auto-ack; envelope carries ``_msg`` callback
+          handles so callers can call :meth:`ack_message_handle`,
+          :meth:`nak_message_handle`, or :meth:`term_message_handle` after
+          processing.
+        * ``all`` / ``none`` — auto-acks inside the wrapper (legacy behavior).
+
+        Args:
+            auto_ack: Override the configured policy. ``None`` (default) follows
+                the consumer's policy; ``True`` forces auto-ack, ``False`` forces
+                no-auto-ack regardless of configuration.
+        """
         try:
             await self._ensure_connected()
+
+            # Resolve effective auto-ack: explicit override > configured policy.
+            if auto_ack is None:
+                policy = getattr(self, "_consumer_ack_policy", {}).get(
+                    self._sanitize_consumer_name(consumer_name), "explicit"
+                )
+                # 'explicit' → caller acks. 'all'/'none' → auto-ack (legacy).
+                auto_ack_effective = policy != "explicit"
+            else:
+                auto_ack_effective = auto_ack
 
             # Get the pull subscription
             psub = await self._js.pull_subscribe(
                 "",  # No filter, consumer has it
                 durable=consumer_name,
-                stream=stream_name
+                stream=stream_name,
             )
 
             messages = []
             try:
                 msgs = await psub.fetch(batch_size, timeout=5)
                 for msg in msgs:
-                    messages.append({
-                        'subject': msg.subject,
-                        'data': msg.data,
-                        'sequence': msg.metadata.sequence.stream,
-                        'num_delivered': msg.metadata.num_delivered
-                    })
+                    envelope: Dict[str, Any] = {
+                        "subject": msg.subject,
+                        "data": msg.data,
+                        "sequence": msg.metadata.sequence.stream,
+                        "num_delivered": msg.metadata.num_delivered,
+                    }
+                    if not auto_ack_effective:
+                        # Expose the raw nats-py message so callers can
+                        # ack/nak/term via the helper methods below.
+                        envelope["_msg"] = msg
+                    messages.append(envelope)
                     self._total_messages_pulled += 1
-                    # Auto-ack after fetch so durable consumers can advance.
-                    # Event handlers are idempotent and should tolerate at-least-once delivery.
-                    try:
-                        await msg.ack()
-                    except Exception as ack_error:
-                        self._total_ack_failures += 1
-                        self._logger.warning(
-                            f"Failed to ack message {msg.subject}: {ack_error} "
-                            f"(total_ack_failures={self._total_ack_failures})"
-                        )
+                    if auto_ack_effective:
+                        try:
+                            await msg.ack()
+                        except Exception as ack_error:
+                            self._total_ack_failures += 1
+                            self._logger.warning(
+                                f"Failed to ack message {msg.subject}: {ack_error} "
+                                f"(total_ack_failures={self._total_ack_failures})"
+                            )
             except NATSTimeoutError:
                 pass  # No messages available
             except Exception as fetch_error:
@@ -644,15 +700,57 @@ class AsyncNATSClient(AsyncBaseClient):
                 return []
             return self.handle_error(e, "pull messages") or []
 
-    async def ack_message(self, stream_name: str, consumer_name: str, sequence: int) -> Optional[Dict]:
-        """Acknowledge message."""
+    async def ack_message(
+        self, stream_name: str, consumer_name: str, sequence: int
+    ) -> Optional[Dict]:
+        """Acknowledge message.
+
+        Note: nats-py acks on the message handle, not by sequence. Use
+        :meth:`ack_message_handle` / :meth:`nak_message_handle` /
+        :meth:`term_message_handle` with the ``_msg`` from a
+        ``pull_messages`` envelope when ``ack_policy='explicit'``.
+        """
         try:
-            # In nats-py, ack is typically done on the message object itself
-            # This is a placeholder - actual implementation depends on message context
-            return {'success': True}
+            return {"success": True}
 
         except Exception as e:
             return self.handle_error(e, "ack message")
+
+    async def ack_message_handle(self, msg: Any) -> bool:
+        """Ack a message pulled via ``pull_messages`` envelope ``_msg``. #213"""
+        try:
+            await msg.ack()
+            return True
+        except Exception as exc:
+            self._total_ack_failures += 1
+            self._logger.warning(f"Failed to ack message: {exc}")
+            return False
+
+    async def nak_message_handle(self, msg: Any, delay: Optional[float] = None) -> bool:
+        """Negative-ack a message — JetStream redelivers per ``max_deliver``. #213
+
+        Args:
+            msg: The raw nats-py message handle (envelope ``_msg``).
+            delay: Optional backoff before redelivery, in seconds.
+        """
+        try:
+            if delay is not None:
+                await msg.nak(delay=delay)
+            else:
+                await msg.nak()
+            return True
+        except Exception as exc:
+            self._logger.warning(f"Failed to nak message: {exc}")
+            return False
+
+    async def term_message_handle(self, msg: Any) -> bool:
+        """Terminate a message — never redeliver, drop from stream. #213"""
+        try:
+            await msg.term()
+            return True
+        except Exception as exc:
+            self._logger.warning(f"Failed to term message: {exc}")
+            return False
 
     # ============================================
     # KV Store Operations
@@ -670,10 +768,7 @@ class AsyncNATSClient(AsyncBaseClient):
 
             revision = await kv.put(key, value)
 
-            return {
-                'success': True,
-                'revision': revision
-            }
+            return {"success": True, "revision": revision}
 
         except Exception as e:
             return self.handle_error(e, "kv put")
@@ -687,11 +782,7 @@ class AsyncNATSClient(AsyncBaseClient):
             entry = await kv.get(key)
 
             if entry and entry.value:
-                return {
-                    'found': True,
-                    'value': entry.value,
-                    'revision': entry.revision
-                }
+                return {"found": True, "value": entry.value, "revision": entry.revision}
             return None
 
         except NotFoundError:
@@ -707,7 +798,7 @@ class AsyncNATSClient(AsyncBaseClient):
             kv = await self._js.key_value(bucket)
             await kv.delete(key)
 
-            return {'success': True}
+            return {"success": True}
 
         except Exception as e:
             return self.handle_error(e, "kv delete")
@@ -734,7 +825,9 @@ class AsyncNATSClient(AsyncBaseClient):
     # Object Store Operations
     # ============================================
 
-    async def object_put(self, bucket: str, object_name: str, data: bytes) -> Optional[Dict]:
+    async def object_put(
+        self, bucket: str, object_name: str, data: bytes
+    ) -> Optional[Dict]:
         """Put object in object store."""
         try:
             await self._ensure_connected()
@@ -746,10 +839,7 @@ class AsyncNATSClient(AsyncBaseClient):
 
             info = await obs.put(object_name, data)
 
-            return {
-                'success': True,
-                'object_id': info.nuid
-            }
+            return {"success": True, "object_id": info.nuid}
 
         except Exception as e:
             return self.handle_error(e, "object put")
@@ -764,9 +854,9 @@ class AsyncNATSClient(AsyncBaseClient):
 
             if result:
                 return {
-                    'found': True,
-                    'data': result.data,
-                    'metadata': {}  # nats-py doesn't expose metadata the same way
+                    "found": True,
+                    "data": result.data,
+                    "metadata": {},  # nats-py doesn't expose metadata the same way
                 }
             return None
 
@@ -783,7 +873,7 @@ class AsyncNATSClient(AsyncBaseClient):
             obs = await self._js.object_store(bucket)
             await obs.delete(object_name)
 
-            return {'success': True}
+            return {"success": True}
 
         except Exception as e:
             return self.handle_error(e, "object delete")
@@ -797,11 +887,7 @@ class AsyncNATSClient(AsyncBaseClient):
             objects = []
 
             async for info in obs.list():
-                objects.append({
-                    'name': info.name,
-                    'size': info.size,
-                    'metadata': {}
-                })
+                objects.append({"name": info.name, "size": info.size, "metadata": {}})
 
             return objects
 
@@ -823,13 +909,21 @@ class AsyncNATSClient(AsyncBaseClient):
             account_info = await self._js.account_info()
 
             return {
-                'total_streams': account_info.streams,
-                'total_consumers': account_info.consumers,
-                'total_messages': account_info.store_info.messages if hasattr(account_info, 'store_info') else 0,
-                'total_bytes': account_info.store_info.bytes if hasattr(account_info, 'store_info') else 0,
-                'connections': 1 if self._nc.is_connected else 0,
-                'in_msgs': self._nc.stats.get('in_msgs', 0) if hasattr(self._nc, 'stats') else 0,
-                'out_msgs': self._nc.stats.get('out_msgs', 0) if hasattr(self._nc, 'stats') else 0
+                "total_streams": account_info.streams,
+                "total_consumers": account_info.consumers,
+                "total_messages": account_info.store_info.messages
+                if hasattr(account_info, "store_info")
+                else 0,
+                "total_bytes": account_info.store_info.bytes
+                if hasattr(account_info, "store_info")
+                else 0,
+                "connections": 1 if self._nc.is_connected else 0,
+                "in_msgs": self._nc.stats.get("in_msgs", 0)
+                if hasattr(self._nc, "stats")
+                else 0,
+                "out_msgs": self._nc.stats.get("out_msgs", 0)
+                if hasattr(self._nc, "stats")
+                else 0,
             }
 
         except Exception as e:
@@ -839,7 +933,9 @@ class AsyncNATSClient(AsyncBaseClient):
     # Concurrent Operations
     # ============================================
 
-    async def publish_many_concurrent(self, messages: List[Dict]) -> List[Optional[Dict]]:
+    async def publish_many_concurrent(
+        self, messages: List[Dict]
+    ) -> List[Optional[Dict]]:
         """
         Publish multiple messages concurrently.
 
@@ -849,43 +945,43 @@ class AsyncNATSClient(AsyncBaseClient):
         Returns:
             List of publish results
         """
+
         async def pub_single(msg: Dict) -> Optional[Dict]:
             return await self.publish(
-                subject=msg['subject'],
-                data=msg['data'],
-                headers=msg.get('headers')
+                subject=msg["subject"], data=msg["data"], headers=msg.get("headers")
             )
 
         return await asyncio.gather(*[pub_single(m) for m in messages])
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
         async with AsyncNATSClient(
-            host='localhost',
-            port=4222,
-            user_id='test_user'
+            host="localhost", port=4222, user_id="test_user"
         ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Publish
-            result = await client.publish('test.subject', b'Hello async NATS!')
+            result = await client.publish("test.subject", b"Hello async NATS!")
             print(f"Publish: {result}")
 
             # Batch publish
-            batch_result = await client.publish_batch([
-                {'subject': 'test.1', 'data': b'msg1'},
-                {'subject': 'test.2', 'data': b'msg2'},
-                {'subject': 'test.3', 'data': b'msg3'}
-            ])
+            batch_result = await client.publish_batch(
+                [
+                    {"subject": "test.1", "data": b"msg1"},
+                    {"subject": "test.2", "data": b"msg2"},
+                    {"subject": "test.3", "data": b"msg3"},
+                ]
+            )
             print(f"Batch publish: {batch_result}")
 
             # KV operations
-            await client.kv_put('test-bucket', 'key1', b'value1')
-            kv_result = await client.kv_get('test-bucket', 'key1')
+            await client.kv_put("test-bucket", "key1", b"value1")
+            kv_result = await client.kv_get("test-bucket", "key1")
             print(f"KV get: {kv_result}")
 
             # Stats
