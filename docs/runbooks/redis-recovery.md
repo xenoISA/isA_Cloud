@@ -126,6 +126,43 @@ kubectl exec -n isa-cloud-local deploy/redis-master -- redis-cli --latency-histo
 2. Break up large sets/lists causing O(N) operations
 3. If `KEYS` is needed for debugging, use `SCAN` with a cursor
 
+### 5. Stuck Helm release — StatefulSet immutable-field error (#211)
+
+**Symptoms**: `helm upgrade redis` fails; `helm history redis` shows the live
+release pinned to an old revision while later revisions are `failed`:
+
+```
+Upgrade "redis" failed: cannot patch "redis-master" with kind StatefulSet:
+StatefulSet.apps "redis-master" is invalid: spec: Forbidden: updates to
+statefulset spec for fields other than 'replicas', 'ordinals', 'template',
+'updateStrategy', 'revisionHistoryLimit', ... are forbidden
+```
+
+This happens when `values/redis.yaml` changes an immutable StatefulSet field
+(e.g. `architecture: replication` → `standalone`, `volumeClaimTemplates`,
+`serviceName`, `selector`). Helm cannot patch those in place.
+
+**Diagnosis**:
+```bash
+helm history redis -n isa-cloud-local
+helm get values redis -n isa-cloud-local   # confirms which values are LIVE
+```
+
+**Resolution** (destructive — local/dev only):
+```bash
+# Run the recovery script (uninstall + PVC cleanup + fresh install):
+bash deployments/kubernetes/local/scripts/redis-helm-recover.sh
+
+# — or manually —
+helm uninstall redis -n isa-cloud-local
+kubectl delete pvc -n isa-cloud-local -l app.kubernetes.io/instance=redis
+helm install redis bitnami/redis -n isa-cloud-local \
+  -f deployments/kubernetes/local/values/redis.yaml
+```
+
+For staging/production a StatefulSet immutable-field change requires a
+planned migration (new release name + data copy) — never delete prod PVCs.
+
 ## Backup & Restore
 
 ```bash

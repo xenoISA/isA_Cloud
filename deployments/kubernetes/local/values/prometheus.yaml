@@ -26,13 +26,26 @@ server:
     enabled: true
     size: 5Gi
 
+  # Resources bumped (#211): the prior 500m/512Mi made Prometheus pick
+  # GOMAXPROCS=1 + GOMEMLIMIT~483MB — WAL replay was CPU-starved (measured
+  # 2m5s) and steady state was GC-heavy. 1 CPU / 1Gi gives replay headroom.
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
+      cpu: 250m
       memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Startup probe (#211): WAL replay (2m5s) outran the liveness kill window
+  # (~75s), so the container was killed mid-replay in a slow crashloop.
+  # The startupProbe holds liveness/readiness off until /-/healthy responds —
+  # failureThreshold 30 x 10s = 5 min replay budget.
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 5
 
   podLabels:
     tier: infrastructure
