@@ -35,6 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'staging' }}
 
+    # Lift the (optional) Slack webhook secret into the job env so that step
+    # `if:` conditions can test whether it is configured. The `secrets` context
+    # is NOT available in `if:` expressions, but `env` is.
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
     steps:
     - name: Checkout isA_Cloud
       uses: actions/checkout@v4
@@ -52,32 +58,39 @@ jobs:
     - name: Deploy Services
       env:
         GITHUB_SHA: ${{ github.sha }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       run: |
-        chmod +x deployments/scripts/deploy-service.sh
+        # deploy-service.sh was removed when the deployment tooling moved to
+        # Helm-based deploys; deploy.sh is its replacement.
+        # New CLI: deploy.sh <command> [namespace] [version]  (no trailing action arg)
+        chmod +x deployments/scripts/deploy.sh
         SERVICE="${{ github.event.inputs.service || 'all' }}"
         ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
-        ./deployments/scripts/deploy-service.sh $SERVICE $ENVIRONMENT deploy
+        NAMESPACE="isa-cloud-${ENVIRONMENT}"
+        ./deployments/scripts/deploy.sh "$SERVICE" "$NAMESPACE"
 
+    # Slack notifications are OPTIONAL and skipped unless the repo has the
+    # SLACK_WEBHOOK_URL secret configured. To enable: a maintainer must add
+    # the SLACK_WEBHOOK_URL repository/environment secret. Without it these
+    # steps are skipped — the deploy job itself never fails on a missing secret.
+    # NOTE: 8398a7/action-slack@v3 reads the webhook from the SLACK_WEBHOOK_URL
+    # env var; `webhook_url`/`message` are not valid inputs for this action.
     - name: Notify Slack on Success
-      if: success()
+      if: success() && env.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: success
-        webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-        message: |
+        text: |
           ✅ Deployment successful!
           Service: ${{ github.event.inputs.service || 'all' }}
           Environment: ${{ github.event.inputs.environment || 'staging' }}
           Commit: ${{ github.sha }}
 
     - name: Notify Slack on Failure
-      if: failure()
+      if: failure() && env.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure
-        webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-        message: |
+        text: |
           ❌ Deployment failed!
           Service: ${{ github.event.inputs.service || 'all' }}
           Environment: ${{ github.event.inputs.environment || 'staging' }}
