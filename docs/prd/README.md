@@ -913,6 +913,159 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
+## Epic 14: Platform CI Independence (Self-Hosted Runners + Pre-Commit)
+
+> Decouple platform CI from GitHub-hosted Actions billing. Billing failures
+> (failed payments / spending limit) have blocked CI across isA repos, forcing
+> local-test + admin-override merges. Move CI compute onto the kind cluster via
+> self-hosted runners, standardize pre-commit as a zero-cost local gate, and
+> keep a path to full GitHub-independence (Woodpecker/Forgejo) as DR.
+> Source: discovery (investigate → design → spec). Recommended approach:
+> self-hosted Actions runners on kind, layered on standardized pre-commit.
+
+### E14-US1: Standardized pre-commit config
+
+**As a** developer on any isA repo
+**I want** a shared pre-commit baseline config
+**So that** style and format errors are caught locally before reaching CI
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-1.1 | Shared `.pre-commit-config.yaml` baseline applied to all 19 repos | Planned |
+| AC-1.2 | black + isort + ruff pinned to fixed versions (deterministic lint) | Planned |
+| AC-1.3 | `pre-commit install` documented per repo | Planned |
+
+### E14-US2: Secret + lint scanning in pre-commit
+
+**As a** platform lead
+**I want** gitleaks and linting enforced in pre-commit
+**So that** hardcoded secrets and lint violations never reach a remote branch
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-2.1 | gitleaks hook blocks commits containing secrets | Planned |
+| AC-2.2 | black/isort/ruff hooks run on changed files | Planned |
+| AC-2.3 | Pinned tool versions match the CI lint versions | Planned |
+
+### E14-US3: Pre-push hook running local unit tests
+
+**As a** developer
+**I want** a pre-push hook that runs unit tests locally
+**So that** I know tests pass before pushing, independent of GitHub CI
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-3.1 | `scripts/ci.sh` runs lint + unit tests for the repo | Planned |
+| AC-3.2 | git `pre-push` hook invokes `scripts/ci.sh`; blocks push on failure | Planned |
+| AC-3.3 | Hook is bypassable (`--no-verify`) but CI re-checks server-side | Planned |
+
+### E14-US4: Self-hosted GitHub Actions runners on the kind cluster
+
+**As a** platform lead
+**I want** GitHub Actions runners deployed on the kind cluster
+**So that** CI compute no longer depends on GitHub-hosted billing
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-4.1 | Runner deployment (ARC or runner pods) on kind, registered to the org | Planned |
+| AC-4.2 | Org runner group scoped to the isA repos | Planned |
+| AC-4.3 | Runners survive restarts; persistent state + Docker cleanup handled | Planned |
+| AC-4.4 | Self-hosted runner usage incurs zero GitHub-hosted minutes | Planned |
+
+### E14-US5: Migrate test/lint/docker workflows to self-hosted runners
+
+**As a** developer
+**I want** CI workflows to run on self-hosted runners
+**So that** test/lint/build jobs run on platform infra, not GitHub-hosted
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-5.1 | `ci.yml`/`test.yml`/`docker.yml` use `runs-on: [self-hosted, isa-cloud]` | Planned |
+| AC-5.2 | Caching, artifacts, and timeouts validated on self-hosted runners | Planned |
+| AC-5.3 | GitHub status checks still appear on PRs | Planned |
+
+### E14-US6: Pilot CI on three repos
+
+**As a** platform lead
+**I want** the self-hosted CI validated on 3 pilot repos
+**So that** issues are found before rolling out to all 19
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-6.1 | isA_Mate, isA_Agent_SDK, isA_Cloud run full CI on self-hosted runners | Planned |
+| AC-6.2 | Multi-repo checkout (PAT) works on self-hosted runners | Planned |
+| AC-6.3 | Pilot results documented; rollout blockers identified | Planned |
+
+### E14-US7: Roll out self-hosted runners to all isA repos
+
+**As a** platform lead
+**I want** all 19 repos on self-hosted runners
+**So that** the whole platform is decoupled from GitHub-hosted billing
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-7.1 | All 19 isA repos' CI workflows run on self-hosted runners | Planned |
+| AC-7.2 | `ubuntu-latest` GitHub-hosted jobs retired | Planned |
+| AC-7.3 | Workflow templates (isA_Vibe) updated so new repos inherit the pattern | Planned |
+
+### E14-US8: Runner health and queue-depth dashboard
+
+**As an** SRE
+**I want** runner health and CI queue depth in Grafana
+**So that** I can add capacity or diagnose failures before developers stall
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-8.1 | Runner metrics (online count, busy/idle, queue depth) scraped | Planned |
+| AC-8.2 | Grafana dashboard for runner health and job latency | Planned |
+| AC-8.3 | Alert on all-runners-offline or queue depth above threshold | Planned |
+
+### E14-US9: Repo-mirroring DR for the SN white-label fork
+
+**As a** platform owner
+**I want** isA repos mirrored to an independent host
+**So that** CI and the SN white-label sync survive a GitHub account suspension
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-9.1 | All 19 isA repos mirror to an independent Git host (Forgejo/GitLab) | Planned |
+| AC-9.2 | Mirror sync runs automatically; lag is monitored | Planned |
+| AC-9.3 | Documented failover: CI + SN sync can run off the mirror | Planned |
+
+### E14-US10: CI/runner setup documentation
+
+**As a** new contributor
+**I want** pre-commit, pre-push, and runner setup documented
+**So that** I can get a working local + remote CI environment quickly
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-10.1 | CONTRIBUTING covers `pre-commit install` and the pre-push hook | Planned |
+| AC-10.2 | Runbook for self-hosted runner deployment and recovery | Planned |
+| AC-10.3 | DR runbook for the mirror failover path | Planned |
+
+---
+
 ## Priority Matrix
 
 | Epic | Priority | Status | Notes |
@@ -930,6 +1083,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E11: Big Data Platform | P1 | Planned | Ray distributed compute, DAG orchestrator, streaming ETL |
 | E12: Agent Runtime Platform | P0 | Planned | Firecracker/KVM, container-service, VM pool management |
 | E13: Production Readiness | P0 | Planned | SLO, alerting, rate limiting, tracing, backup verification |
+| E14: Platform CI Independence | P0 | Planned | Self-hosted runners on kind, pre-commit, GitHub-billing decoupling |
 
 ---
 
@@ -941,5 +1095,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.4.0
-**Last Updated**: 2026-04-10
+**Version**: 2.5.0
+**Last Updated**: 2026-05-21
