@@ -11,15 +11,18 @@ providing full support for all Neo4j features including:
 - Connection pooling
 """
 
+import logging
 import os
-from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
 
 # Neo4j native async driver
 from neo4j import AsyncGraphDatabase
-from neo4j.exceptions import ServiceUnavailable, AuthError
+from neo4j.exceptions import AuthError, ServiceUnavailable
 
 from .async_base_client import AsyncBaseClient
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncNeo4jClient(AsyncBaseClient):
@@ -42,8 +45,8 @@ class AsyncNeo4jClient(AsyncBaseClient):
         uri: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        database: str = 'neo4j',
-        **kwargs
+        database: str = "neo4j",
+        **kwargs,
     ):
         """
         Initialize async Neo4j client with native driver.
@@ -64,8 +67,8 @@ class AsyncNeo4jClient(AsyncBaseClient):
             self._uri = f"bolt://{self._host}:{self._port}"
 
         # Get credentials from env or parameters
-        self._username = username or os.getenv('NEO4J_USER', 'neo4j')
-        self._password = password or os.getenv('NEO4J_PASSWORD', 'neo4j')
+        self._username = username or os.getenv("NEO4J_USER", "neo4j")
+        self._password = password or os.getenv("NEO4J_PASSWORD", "neo4j")
         self._database = database
 
         # Driver state
@@ -78,7 +81,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 self._uri,
                 auth=(self._username, self._password),
                 max_connection_pool_size=50,
-                connection_acquisition_timeout=30.0
+                connection_acquisition_timeout=30.0,
             )
             # Verify connectivity
             await self._driver.verify_connectivity()
@@ -127,12 +130,12 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
                 if record:
                     return {
-                        'healthy': True,
-                        'version': record['versions'][0] if record['versions'] else 'unknown',
-                        'edition': record['edition'],
-                        'name': record['name']
+                        "healthy": True,
+                        "version": record["versions"][0] if record["versions"] else "unknown",
+                        "edition": record["edition"],
+                        "name": record["name"],
                     }
-            return {'healthy': False}
+            return {"healthy": False}
 
         except Exception as e:
             return self.handle_error(e, "Health check")
@@ -142,10 +145,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
     # ============================================
 
     async def run_cypher(
-        self,
-        cypher: str,
-        params: Optional[Dict[str, Any]] = None,
-        database: str = None
+        self, cypher: str, params: Optional[Dict[str, Any]] = None, database: str = None
     ) -> Optional[List[Dict]]:
         """Execute Cypher query.
 
@@ -175,10 +175,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
     # ============================================
 
     async def create_node(
-        self,
-        labels: List[str],
-        properties: Optional[Dict[str, Any]] = None,
-        database: str = None
+        self, labels: List[str], properties: Optional[Dict[str, Any]] = None, database: str = None
     ) -> Optional[int]:
         """Create graph node.
 
@@ -193,14 +190,14 @@ class AsyncNeo4jClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            labels_str = ':'.join(labels) if labels else ''
+            labels_str = ":".join(labels) if labels else ""
             cypher = f"CREATE (n:{labels_str} $props) RETURN elementId(n) as id, id(n) as node_id"
 
             async with self.session(database) as session:
                 result = await session.run(cypher, props=properties or {})
                 record = await result.single()
                 if record:
-                    return record['node_id']
+                    return record["node_id"]
             return None
 
         except Exception as e:
@@ -226,11 +223,11 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 record = await result.single()
 
                 if record:
-                    node = record['n']
+                    node = record["n"]
                     return {
-                        'id': record['id'],
-                        'labels': record['labels'],
-                        'properties': dict(node)
+                        "id": record["id"],
+                        "labels": record["labels"],
+                        "properties": dict(node),
                     }
             return None
 
@@ -238,10 +235,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
             return self.handle_error(e, "Get node")
 
     async def update_node(
-        self,
-        node_id: int,
-        properties: Dict[str, Any],
-        database: str = None
+        self, node_id: int, properties: Dict[str, Any], database: str = None
     ) -> Optional[bool]:
         """Update node properties.
 
@@ -267,10 +261,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
             return self.handle_error(e, "Update node")
 
     async def delete_node(
-        self,
-        node_id: int,
-        detach: bool = False,
-        database: str = None
+        self, node_id: int, detach: bool = False, database: str = None
     ) -> Optional[bool]:
         """Delete node.
 
@@ -302,7 +293,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         labels: Optional[List[str]] = None,
         properties: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        database: str = None
+        database: str = None,
     ) -> Optional[List[Dict]]:
         """Find nodes by labels and properties.
 
@@ -319,12 +310,12 @@ class AsyncNeo4jClient(AsyncBaseClient):
             await self._ensure_connected()
 
             # Build label match
-            label_str = ':'.join(labels) if labels else ''
-            label_match = f":{label_str}" if label_str else ''
+            label_str = ":".join(labels) if labels else ""
+            label_match = f":{label_str}" if label_str else ""
 
             # Build property conditions
             prop_conditions = []
-            params = {'limit': limit}
+            params = {"limit": limit}
 
             if properties:
                 for i, (key, value) in enumerate(properties.items()):
@@ -345,12 +336,10 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 result = await session.run(cypher, **params)
                 nodes = []
                 async for record in result:
-                    node = record['n']
-                    nodes.append({
-                        'id': record['id'],
-                        'labels': record['labels'],
-                        'properties': dict(node)
-                    })
+                    node = record["n"]
+                    nodes.append(
+                        {"id": record["id"], "labels": record["labels"], "properties": dict(node)}
+                    )
                 return nodes
 
         except Exception as e:
@@ -361,7 +350,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         labels: List[str],
         match_properties: Dict[str, Any],
         set_properties: Optional[Dict[str, Any]] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict]:
         """Merge (create or match) a node.
 
@@ -377,10 +366,10 @@ class AsyncNeo4jClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            labels_str = ':'.join(labels) if labels else ''
+            labels_str = ":".join(labels) if labels else ""
 
             # Build merge properties
-            merge_props = ', '.join([f"{k}: ${k}" for k in match_properties.keys()])
+            merge_props = ", ".join([f"{k}: ${k}" for k in match_properties.keys()])
 
             cypher = f"""
                 MERGE (n:{labels_str} {{{merge_props}}})
@@ -389,21 +378,21 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 RETURN n, id(n) as id, labels(n) as labels, n._created as created
             """
 
-            params = {**match_properties, 'set_props': set_properties or {}}
+            params = {**match_properties, "set_props": set_properties or {}}
 
             async with self.session(database) as session:
                 result = await session.run(cypher, **params)
                 record = await result.single()
 
                 if record:
-                    node = record['n']
+                    node = record["n"]
                     node_dict = dict(node)
-                    created = node_dict.pop('_created', False)
+                    created = node_dict.pop("_created", False)
                     return {
-                        'id': record['id'],
-                        'labels': record['labels'],
-                        'properties': node_dict,
-                        'created': created
+                        "id": record["id"],
+                        "labels": record["labels"],
+                        "properties": node_dict,
+                        "created": created,
                     }
             return None
 
@@ -420,7 +409,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         end_node_id: int,
         rel_type: str,
         properties: Optional[Dict[str, Any]] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[int]:
         """Create relationship between nodes.
 
@@ -446,14 +435,11 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
             async with self.session(database) as session:
                 result = await session.run(
-                    cypher,
-                    start_id=start_node_id,
-                    end_id=end_node_id,
-                    props=properties or {}
+                    cypher, start_id=start_node_id, end_id=end_node_id, props=properties or {}
                 )
                 record = await result.single()
                 if record:
-                    return record['rel_id']
+                    return record["rel_id"]
             return None
 
         except Exception as e:
@@ -486,11 +472,11 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
                 if record:
                     return {
-                        'id': record['id'],
-                        'start_node_id': record['start_node_id'],
-                        'end_node_id': record['end_node_id'],
-                        'type': record['type'],
-                        'properties': dict(record['r'])
+                        "id": record["id"],
+                        "start_node_id": record["start_node_id"],
+                        "end_node_id": record["end_node_id"],
+                        "type": record["type"],
+                        "properties": dict(record["r"]),
                     }
             return None
 
@@ -526,7 +512,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         rel_type: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        database: str = None
+        database: str = None,
     ) -> Optional[List[Dict]]:
         """Find relationships by criteria.
 
@@ -549,14 +535,14 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
             # Build conditions
             conditions = []
-            params = {'limit': limit}
+            params = {"limit": limit}
 
             if start_node_id is not None:
                 conditions.append("id(a) = $start_id")
-                params['start_id'] = start_node_id
+                params["start_id"] = start_node_id
             if end_node_id is not None:
                 conditions.append("id(b) = $end_id")
-                params['end_id'] = end_node_id
+                params["end_id"] = end_node_id
             if properties:
                 for i, (key, value) in enumerate(properties.items()):
                     param_name = f"prop_{i}"
@@ -577,13 +563,15 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 result = await session.run(cypher, **params)
                 relationships = []
                 async for record in result:
-                    relationships.append({
-                        'id': record['id'],
-                        'start_node_id': record['start_node_id'],
-                        'end_node_id': record['end_node_id'],
-                        'type': record['type'],
-                        'properties': dict(record['r'])
-                    })
+                    relationships.append(
+                        {
+                            "id": record["id"],
+                            "start_node_id": record["start_node_id"],
+                            "end_node_id": record["end_node_id"],
+                            "type": record["type"],
+                            "properties": dict(record["r"]),
+                        }
+                    )
                 return relationships
 
         except Exception as e:
@@ -599,7 +587,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         embedding: List[float],
         top_k: int = 10,
         similarity_threshold: float = 0.0,
-        database: str = None
+        database: str = None,
     ) -> Optional[List[Dict]]:
         """Perform vector similarity search using Neo4j vector index.
 
@@ -630,17 +618,19 @@ class AsyncNeo4jClient(AsyncBaseClient):
                     index_name=index_name,
                     top_k=top_k,
                     embedding=embedding,
-                    threshold=similarity_threshold
+                    threshold=similarity_threshold,
                 )
                 results = []
                 async for record in result:
-                    node = record['node']
-                    results.append({
-                        'id': record['id'],
-                        'labels': record['labels'],
-                        'score': record['score'],
-                        'properties': dict(node)
-                    })
+                    node = record["node"]
+                    results.append(
+                        {
+                            "id": record["id"],
+                            "labels": record["labels"],
+                            "score": record["score"],
+                            "properties": dict(node),
+                        }
+                    )
                 return results
 
         except Exception as e:
@@ -652,8 +642,8 @@ class AsyncNeo4jClient(AsyncBaseClient):
         label: str,
         property_name: str,
         dimensions: int = 1536,
-        similarity_function: str = 'cosine',
-        database: str = None
+        similarity_function: str = "cosine",
+        database: str = None,
     ) -> Optional[bool]:
         """Create a vector index for similarity search.
 
@@ -682,9 +672,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
             async with self.session(database) as session:
                 await session.run(
-                    cypher,
-                    dimensions=dimensions,
-                    similarity_function=similarity_function
+                    cypher, dimensions=dimensions, similarity_function=similarity_function
                 )
                 return True
 
@@ -709,13 +697,15 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 result = await session.run(cypher)
                 indexes = []
                 async for record in result:
-                    indexes.append({
-                        'name': record.get('name'),
-                        'state': record.get('state'),
-                        'labels': record.get('labelsOrTypes'),
-                        'properties': record.get('properties'),
-                        'population_percent': record.get('populationPercent')
-                    })
+                    indexes.append(
+                        {
+                            "name": record.get("name"),
+                            "state": record.get("state"),
+                            "labels": record.get("labelsOrTypes"),
+                            "properties": record.get("properties"),
+                            "population_percent": record.get("populationPercent"),
+                        }
+                    )
                 return indexes
 
         except Exception as e:
@@ -726,11 +716,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
     # ============================================
 
     async def get_path(
-        self,
-        start_node_id: int,
-        end_node_id: int,
-        max_depth: int = 5,
-        database: str = None
+        self, start_node_id: int, end_node_id: int, max_depth: int = 5, database: str = None
     ) -> Optional[Dict]:
         """Get path between two nodes.
 
@@ -754,33 +740,21 @@ class AsyncNeo4jClient(AsyncBaseClient):
             """
 
             async with self.session(database) as session:
-                result = await session.run(
-                    cypher,
-                    start_id=start_node_id,
-                    end_id=end_node_id
-                )
+                result = await session.run(cypher, start_id=start_node_id, end_id=end_node_id)
                 record = await result.single()
 
                 if record:
-                    path = record['path']
+                    path = record["path"]
                     return {
-                        'length': record['length'],
-                        'nodes': [
-                            {
-                                'id': node.id,
-                                'labels': list(node.labels),
-                                'properties': dict(node)
-                            }
+                        "length": record["length"],
+                        "nodes": [
+                            {"id": node.id, "labels": list(node.labels), "properties": dict(node)}
                             for node in path.nodes
                         ],
-                        'relationships': [
-                            {
-                                'id': rel.id,
-                                'type': rel.type,
-                                'properties': dict(rel)
-                            }
+                        "relationships": [
+                            {"id": rel.id, "type": rel.type, "properties": dict(rel)}
                             for rel in path.relationships
-                        ]
+                        ],
                     }
             return None
 
@@ -788,11 +762,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
             return self.handle_error(e, "Get path")
 
     async def shortest_path(
-        self,
-        start_node_id: int,
-        end_node_id: int,
-        max_depth: int = 5,
-        database: str = None
+        self, start_node_id: int, end_node_id: int, max_depth: int = 5, database: str = None
     ) -> Optional[Dict]:
         """Get shortest path between two nodes.
 
@@ -815,33 +785,21 @@ class AsyncNeo4jClient(AsyncBaseClient):
             """
 
             async with self.session(database) as session:
-                result = await session.run(
-                    cypher,
-                    start_id=start_node_id,
-                    end_id=end_node_id
-                )
+                result = await session.run(cypher, start_id=start_node_id, end_id=end_node_id)
                 record = await result.single()
 
                 if record:
-                    path = record['path']
+                    path = record["path"]
                     return {
-                        'length': record['length'],
-                        'nodes': [
-                            {
-                                'id': node.id,
-                                'labels': list(node.labels),
-                                'properties': dict(node)
-                            }
+                        "length": record["length"],
+                        "nodes": [
+                            {"id": node.id, "labels": list(node.labels), "properties": dict(node)}
                             for node in path.nodes
                         ],
-                        'relationships': [
-                            {
-                                'id': rel.id,
-                                'type': rel.type,
-                                'properties': dict(rel)
-                            }
+                        "relationships": [
+                            {"id": rel.id, "type": rel.type, "properties": dict(rel)}
                             for rel in path.relationships
-                        ]
+                        ],
                     }
             return None
 
@@ -858,7 +816,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         relationship_type: Optional[str] = None,
         max_iterations: int = 20,
         damping_factor: float = 0.85,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[int, float]]:
         """Run PageRank algorithm on the graph.
 
@@ -893,14 +851,10 @@ class AsyncNeo4jClient(AsyncBaseClient):
             """
 
             async with self.session(database) as session:
-                result = await session.run(
-                    cypher,
-                    max_iter=max_iterations,
-                    damping=damping_factor
-                )
+                result = await session.run(cypher, max_iter=max_iterations, damping=damping_factor)
                 scores = {}
                 async for record in result:
-                    scores[record['nodeId']] = record['score']
+                    scores[record["nodeId"]] = record["score"]
                 return scores
 
         except Exception as e:
@@ -910,7 +864,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         self,
         label: Optional[str] = None,
         relationship_type: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[int, float]]:
         """Run Betweenness Centrality algorithm.
 
@@ -943,7 +897,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 result = await session.run(cypher)
                 scores = {}
                 async for record in result:
-                    scores[record['nodeId']] = record['score']
+                    scores[record["nodeId"]] = record["score"]
                 return scores
 
         except Exception as e:
@@ -969,28 +923,32 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 # Count nodes
                 result = await session.run("MATCH (n) RETURN count(n) as count")
                 record = await result.single()
-                node_count = record['count'] if record else 0
+                node_count = record["count"] if record else 0
 
                 # Count relationships
                 result = await session.run("MATCH ()-[r]->() RETURN count(r) as count")
                 record = await result.single()
-                rel_count = record['count'] if record else 0
+                rel_count = record["count"] if record else 0
 
                 # Count labels
-                result = await session.run("CALL db.labels() YIELD label RETURN count(label) as count")
+                result = await session.run(
+                    "CALL db.labels() YIELD label RETURN count(label) as count"
+                )
                 record = await result.single()
-                label_count = record['count'] if record else 0
+                label_count = record["count"] if record else 0
 
                 # Count relationship types
-                result = await session.run("CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) as count")
+                result = await session.run(
+                    "CALL db.relationshipTypes() YIELD relationshipType RETURN count(relationshipType) as count"
+                )
                 record = await result.single()
-                rel_type_count = record['count'] if record else 0
+                rel_type_count = record["count"] if record else 0
 
                 return {
-                    'node_count': node_count,
-                    'relationship_count': rel_count,
-                    'label_count': label_count,
-                    'relationship_type_count': rel_type_count
+                    "node_count": node_count,
+                    "relationship_count": rel_count,
+                    "label_count": label_count,
+                    "relationship_type_count": rel_type_count,
                 }
 
         except Exception as e:
@@ -1001,8 +959,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
     # ============================================
 
     async def run_cypher_many_concurrent(
-        self,
-        queries: List[Dict[str, Any]]
+        self, queries: List[Dict[str, Any]]
     ) -> List[Optional[List[Dict]]]:
         """
         Execute multiple Cypher queries concurrently.
@@ -1017,17 +974,12 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
         async def execute_query(q: Dict) -> Optional[List[Dict]]:
             return await self.run_cypher(
-                cypher=q.get('cypher', ''),
-                params=q.get('params'),
-                database=q.get('database')
+                cypher=q.get("cypher", ""), params=q.get("params"), database=q.get("database")
             )
 
         return await asyncio.gather(*[execute_query(q) for q in queries])
 
-    async def create_nodes_concurrent(
-        self,
-        nodes: List[Dict[str, Any]]
-    ) -> List[Optional[int]]:
+    async def create_nodes_concurrent(self, nodes: List[Dict[str, Any]]) -> List[Optional[int]]:
         """
         Create multiple nodes concurrently.
 
@@ -1041,8 +993,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
         async def create_single(n: Dict) -> Optional[int]:
             return await self.create_node(
-                labels=n.get('labels', []),
-                properties=n.get('properties')
+                labels=n.get("labels", []), properties=n.get("properties")
             )
 
         return await asyncio.gather(*[create_single(n) for n in nodes])
@@ -1051,11 +1002,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
     # Graph RAG Convenience Methods
     # ============================================
 
-    async def ensure_graph_rag_indexes(
-        self,
-        dimensions: int = 1536,
-        database: str = None
-    ) -> bool:
+    async def ensure_graph_rag_indexes(self, dimensions: int = 1536, database: str = None) -> bool:
         """Ensure Graph RAG vector indexes exist.
 
         Creates vector indexes for Entity, DocumentChunk, and Relationship
@@ -1071,29 +1018,29 @@ class AsyncNeo4jClient(AsyncBaseClient):
         try:
             # Entity embeddings index
             await self.create_vector_index(
-                index_name='entity_embeddings',
-                label='Entity',
-                property_name='embedding',
+                index_name="entity_embeddings",
+                label="Entity",
+                property_name="embedding",
                 dimensions=dimensions,
-                database=database
+                database=database,
             )
 
             # Document chunk embeddings index
             await self.create_vector_index(
-                index_name='document_embeddings',
-                label='DocumentChunk',
-                property_name='embedding',
+                index_name="document_embeddings",
+                label="DocumentChunk",
+                property_name="embedding",
                 dimensions=dimensions,
-                database=database
+                database=database,
             )
 
             # Attribute embeddings index
             await self.create_vector_index(
-                index_name='attribute_embeddings',
-                label='Attribute',
-                property_name='embedding',
+                index_name="attribute_embeddings",
+                label="Attribute",
+                property_name="embedding",
                 dimensions=dimensions,
-                database=database
+                database=database,
             )
 
             logger.info("Graph RAG indexes ensured")
@@ -1110,7 +1057,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         properties: Optional[Dict[str, Any]] = None,
         embedding: Optional[List[float]] = None,
         user_id: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Store an entity node for Graph RAG.
 
@@ -1129,37 +1076,37 @@ class AsyncNeo4jClient(AsyncBaseClient):
             from datetime import datetime
 
             entity_props = {
-                'name': name,
-                'entity_type': entity_type,
-                'created_at': datetime.now().isoformat(),
-                **(properties or {})
+                "name": name,
+                "entity_type": entity_type,
+                "created_at": datetime.now().isoformat(),
+                **(properties or {}),
             }
 
             if user_id:
-                entity_props['user_id'] = user_id
+                entity_props["user_id"] = user_id
             if embedding:
-                entity_props['embedding'] = embedding
+                entity_props["embedding"] = embedding
 
             # Use merge to upsert by name
             result = await self.merge_node(
-                labels=['Entity'],
-                match_properties={'name': name},
+                labels=["Entity"],
+                match_properties={"name": name},
                 set_properties=entity_props,
-                database=database
+                database=database,
             )
 
             if result:
                 return {
-                    'success': True,
-                    'node_id': result['id'],
-                    'created': result.get('created', False),
-                    'entity': entity_props
+                    "success": True,
+                    "node_id": result["id"],
+                    "created": result.get("created", False),
+                    "entity": entity_props,
                 }
-            return {'success': False, 'error': 'Failed to store entity'}
+            return {"success": False, "error": "Failed to store entity"}
 
         except Exception as e:
             logger.error(f"Failed to store entity {name}: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     async def store_relationship(
         self,
@@ -1169,7 +1116,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         properties: Optional[Dict[str, Any]] = None,
         embedding: Optional[List[float]] = None,
         user_id: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Store a relationship between entities for Graph RAG.
 
@@ -1190,52 +1137,44 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
             # Find source and target entities
             source_nodes = await self.find_nodes(
-                labels=['Entity'],
-                properties={'name': source_entity},
-                database=database
+                labels=["Entity"], properties={"name": source_entity}, database=database
             )
             if not source_nodes:
-                return {'success': False, 'error': f'Source entity not found: {source_entity}'}
+                return {"success": False, "error": f"Source entity not found: {source_entity}"}
 
             target_nodes = await self.find_nodes(
-                labels=['Entity'],
-                properties={'name': target_entity},
-                database=database
+                labels=["Entity"], properties={"name": target_entity}, database=database
             )
             if not target_nodes:
-                return {'success': False, 'error': f'Target entity not found: {target_entity}'}
+                return {"success": False, "error": f"Target entity not found: {target_entity}"}
 
             rel_props = {
-                'relationship_type': relationship_type,
-                'created_at': datetime.now().isoformat(),
-                **(properties or {})
+                "relationship_type": relationship_type,
+                "created_at": datetime.now().isoformat(),
+                **(properties or {}),
             }
 
             if user_id:
-                rel_props['user_id'] = user_id
+                rel_props["user_id"] = user_id
             if embedding:
-                rel_props['embedding'] = embedding
+                rel_props["embedding"] = embedding
 
             # Create relationship
             rel_id = await self.create_relationship(
-                start_node_id=source_nodes[0]['id'],
-                end_node_id=target_nodes[0]['id'],
-                rel_type='RELATES_TO',
+                start_node_id=source_nodes[0]["id"],
+                end_node_id=target_nodes[0]["id"],
+                rel_type="RELATES_TO",
                 properties=rel_props,
-                database=database
+                database=database,
             )
 
             if rel_id is not None:
-                return {
-                    'success': True,
-                    'relationship_id': rel_id,
-                    'relationship': rel_props
-                }
-            return {'success': False, 'error': 'Failed to create relationship'}
+                return {"success": True, "relationship_id": rel_id, "relationship": rel_props}
+            return {"success": False, "error": "Failed to create relationship"}
 
         except Exception as e:
             logger.error(f"Failed to store relationship {source_entity} -> {target_entity}: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     async def store_document_chunk(
         self,
@@ -1244,7 +1183,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         properties: Optional[Dict[str, Any]] = None,
         embedding: Optional[List[float]] = None,
         user_id: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Store a document chunk node for Graph RAG.
 
@@ -1263,46 +1202,42 @@ class AsyncNeo4jClient(AsyncBaseClient):
             from datetime import datetime
 
             chunk_props = {
-                'chunk_id': chunk_id,
-                'text': text,
-                'created_at': datetime.now().isoformat(),
-                **(properties or {})
+                "chunk_id": chunk_id,
+                "text": text,
+                "created_at": datetime.now().isoformat(),
+                **(properties or {}),
             }
 
             if user_id:
-                chunk_props['user_id'] = user_id
+                chunk_props["user_id"] = user_id
             if embedding:
-                chunk_props['embedding'] = embedding
+                chunk_props["embedding"] = embedding
 
             # Use merge to upsert by chunk_id
             result = await self.merge_node(
-                labels=['DocumentChunk'],
-                match_properties={'chunk_id': chunk_id},
+                labels=["DocumentChunk"],
+                match_properties={"chunk_id": chunk_id},
                 set_properties=chunk_props,
-                database=database
+                database=database,
             )
 
             if result:
-                return {
-                    'success': True,
-                    'node_id': result['id'],
-                    'chunk': chunk_props
-                }
-            return {'success': False, 'error': 'Failed to store document chunk'}
+                return {"success": True, "node_id": result["id"], "chunk": chunk_props}
+            return {"success": False, "error": "Failed to store document chunk"}
 
         except Exception as e:
             logger.error(f"Failed to store document chunk {chunk_id}: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     async def store_attribute(
         self,
         entity_name: str,
         attribute_name: str,
         attribute_value: Any,
-        attribute_type: str = 'TEXT',
+        attribute_type: str = "TEXT",
         properties: Optional[Dict[str, Any]] = None,
         embedding: Optional[List[float]] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Store an attribute node linked to an entity.
 
@@ -1323,59 +1258,53 @@ class AsyncNeo4jClient(AsyncBaseClient):
 
             # Find parent entity
             entity_nodes = await self.find_nodes(
-                labels=['Entity'],
-                properties={'name': entity_name},
-                database=database
+                labels=["Entity"], properties={"name": entity_name}, database=database
             )
             if not entity_nodes:
-                return {'success': False, 'error': f'Entity not found: {entity_name}'}
+                return {"success": False, "error": f"Entity not found: {entity_name}"}
 
-            entity_id = entity_nodes[0]['id']
+            entity_id = entity_nodes[0]["id"]
             attr_id = f"{entity_name}_{attribute_name}"
 
             attr_props = {
-                'attr_id': attr_id,
-                'name': attribute_name,
-                'value': str(attribute_value),
-                'attribute_type': attribute_type,
-                'created_at': datetime.now().isoformat(),
-                **(properties or {})
+                "attr_id": attr_id,
+                "name": attribute_name,
+                "value": str(attribute_value),
+                "attribute_type": attribute_type,
+                "created_at": datetime.now().isoformat(),
+                **(properties or {}),
             }
 
             if embedding:
-                attr_props['embedding'] = embedding
+                attr_props["embedding"] = embedding
 
             # Create or update attribute node
             result = await self.merge_node(
-                labels=['Attribute'],
-                match_properties={'attr_id': attr_id},
+                labels=["Attribute"],
+                match_properties={"attr_id": attr_id},
                 set_properties=attr_props,
-                database=database
+                database=database,
             )
 
             if not result:
-                return {'success': False, 'error': 'Failed to create attribute node'}
+                return {"success": False, "error": "Failed to create attribute node"}
 
-            attr_node_id = result['id']
+            attr_node_id = result["id"]
 
             # Create HAS_ATTRIBUTE relationship if new
-            if result.get('created', False):
+            if result.get("created", False):
                 await self.create_relationship(
                     start_node_id=entity_id,
                     end_node_id=attr_node_id,
-                    rel_type='HAS_ATTRIBUTE',
-                    database=database
+                    rel_type="HAS_ATTRIBUTE",
+                    database=database,
                 )
 
-            return {
-                'success': True,
-                'node_id': attr_node_id,
-                'attribute': attr_props
-            }
+            return {"success": True, "node_id": attr_node_id, "attribute": attr_props}
 
         except Exception as e:
             logger.error(f"Failed to store attribute {attribute_name}: {e}")
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     async def search_entities(
         self,
@@ -1383,7 +1312,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         top_k: int = 10,
         similarity_threshold: float = 0.7,
         user_id: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Search entities by vector similarity.
 
@@ -1408,26 +1337,24 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 ORDER BY score DESC
             """
 
-            params = {
-                'embedding': embedding,
-                'top_k': top_k,
-                'threshold': similarity_threshold
-            }
+            params = {"embedding": embedding, "top_k": top_k, "threshold": similarity_threshold}
             if user_id:
-                params['user_id'] = user_id
+                params["user_id"] = user_id
 
             async with self.session(database) as session:
                 result = await session.run(cypher, **params)
                 results = []
                 async for record in result:
-                    node = record['node']
-                    results.append({
-                        'id': record['id'],
-                        'name': node.get('name'),
-                        'entity_type': node.get('entity_type'),
-                        'score': record['score'],
-                        'properties': dict(node)
-                    })
+                    node = record["node"]
+                    results.append(
+                        {
+                            "id": record["id"],
+                            "name": node.get("name"),
+                            "entity_type": node.get("entity_type"),
+                            "score": record["score"],
+                            "properties": dict(node),
+                        }
+                    )
                 return results
 
         except Exception as e:
@@ -1440,7 +1367,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         top_k: int = 10,
         similarity_threshold: float = 0.7,
         user_id: Optional[str] = None,
-        database: str = None
+        database: str = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Search document chunks by vector similarity.
 
@@ -1465,26 +1392,24 @@ class AsyncNeo4jClient(AsyncBaseClient):
                 ORDER BY score DESC
             """
 
-            params = {
-                'embedding': embedding,
-                'top_k': top_k,
-                'threshold': similarity_threshold
-            }
+            params = {"embedding": embedding, "top_k": top_k, "threshold": similarity_threshold}
             if user_id:
-                params['user_id'] = user_id
+                params["user_id"] = user_id
 
             async with self.session(database) as session:
                 result = await session.run(cypher, **params)
                 results = []
                 async for record in result:
-                    node = record['node']
-                    results.append({
-                        'id': record['id'],
-                        'chunk_id': node.get('chunk_id'),
-                        'text': node.get('text'),
-                        'score': record['score'],
-                        'properties': dict(node)
-                    })
+                    node = record["node"]
+                    results.append(
+                        {
+                            "id": record["id"],
+                            "chunk_id": node.get("chunk_id"),
+                            "text": node.get("text"),
+                            "score": record["score"],
+                            "properties": dict(node),
+                        }
+                    )
                 return results
 
         except Exception as e:
@@ -1492,11 +1417,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
             return []
 
     async def get_entity_neighbors(
-        self,
-        entity_name: str,
-        max_depth: int = 2,
-        limit: int = 50,
-        database: str = None
+        self, entity_name: str, max_depth: int = 2, limit: int = 50, database: str = None
     ) -> Optional[Dict[str, Any]]:
         """Get neighboring entities via graph traversal.
 
@@ -1520,31 +1441,25 @@ class AsyncNeo4jClient(AsyncBaseClient):
             """
 
             async with self.session(database) as session:
-                result = await session.run(
-                    cypher,
-                    entity_name=entity_name,
-                    limit=limit
-                )
+                result = await session.run(cypher, entity_name=entity_name, limit=limit)
                 neighbors = []
                 async for record in result:
-                    if record['neighbor']:
-                        neighbor = record['neighbor']
-                        neighbors.append({
-                            'name': neighbor.get('name'),
-                            'entity_type': neighbor.get('entity_type'),
-                            'distance': record['distance'],
-                            'properties': dict(neighbor)
-                        })
+                    if record["neighbor"]:
+                        neighbor = record["neighbor"]
+                        neighbors.append(
+                            {
+                                "name": neighbor.get("name"),
+                                "entity_type": neighbor.get("entity_type"),
+                                "distance": record["distance"],
+                                "properties": dict(neighbor),
+                            }
+                        )
 
-                return {
-                    'entity': entity_name,
-                    'neighbors': neighbors,
-                    'count': len(neighbors)
-                }
+                return {"entity": entity_name, "neighbors": neighbors, "count": len(neighbors)}
 
         except Exception as e:
             logger.error(f"Failed to get neighbors for {entity_name}: {e}")
-            return {'entity': entity_name, 'neighbors': [], 'error': str(e)}
+            return {"entity": entity_name, "neighbors": [], "error": str(e)}
 
     async def get_entity_context(
         self,
@@ -1552,7 +1467,7 @@ class AsyncNeo4jClient(AsyncBaseClient):
         include_attributes: bool = True,
         include_relationships: bool = True,
         include_documents: bool = True,
-        database: str = None
+        database: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Get full context for an entity including attributes, relationships, and linked documents.
 
@@ -1567,20 +1482,18 @@ class AsyncNeo4jClient(AsyncBaseClient):
             Dict with entity context
         """
         try:
-            context = {'entity': entity_name}
+            context = {"entity": entity_name}
 
             # Get entity
             entities = await self.find_nodes(
-                labels=['Entity'],
-                properties={'name': entity_name},
-                database=database
+                labels=["Entity"], properties={"name": entity_name}, database=database
             )
             if not entities:
-                return {'entity': entity_name, 'error': 'Entity not found'}
+                return {"entity": entity_name, "error": "Entity not found"}
 
             entity = entities[0]
-            context['properties'] = entity.get('properties', {})
-            context['id'] = entity['id']
+            context["properties"] = entity.get("properties", {})
+            context["id"] = entity["id"]
 
             # Get attributes
             if include_attributes:
@@ -1592,13 +1505,15 @@ class AsyncNeo4jClient(AsyncBaseClient):
                     result = await session.run(cypher, name=entity_name)
                     attrs = []
                     async for record in result:
-                        attr = record['a']
-                        attrs.append({
-                            'name': attr.get('name'),
-                            'value': attr.get('value'),
-                            'type': attr.get('attribute_type')
-                        })
-                    context['attributes'] = attrs
+                        attr = record["a"]
+                        attrs.append(
+                            {
+                                "name": attr.get("name"),
+                                "value": attr.get("value"),
+                                "type": attr.get("attribute_type"),
+                            }
+                        )
+                    context["attributes"] = attrs
 
             # Get relationships
             if include_relationships:
@@ -1611,13 +1526,15 @@ class AsyncNeo4jClient(AsyncBaseClient):
                     result = await session.run(cypher, name=entity_name)
                     rels = []
                     async for record in result:
-                        rels.append({
-                            'type': record['rel_type'],
-                            'other_entity': record['other_name'],
-                            'direction': record['direction'],
-                            'properties': dict(record['r'])
-                        })
-                    context['relationships'] = rels
+                        rels.append(
+                            {
+                                "type": record["rel_type"],
+                                "other_entity": record["other_name"],
+                                "direction": record["direction"],
+                                "properties": dict(record["r"]),
+                            }
+                        )
+                    context["relationships"] = rels
 
             # Get linked documents
             if include_documents:
@@ -1630,28 +1547,30 @@ class AsyncNeo4jClient(AsyncBaseClient):
                     result = await session.run(cypher, name=entity_name)
                     docs = []
                     async for record in result:
-                        doc = record['d']
-                        docs.append({
-                            'chunk_id': doc.get('chunk_id'),
-                            'text': doc.get('text', '')[:200],  # First 200 chars
-                            'source': doc.get('source')
-                        })
-                    context['documents'] = docs
+                        doc = record["d"]
+                        docs.append(
+                            {
+                                "chunk_id": doc.get("chunk_id"),
+                                "text": doc.get("text", "")[:200],  # First 200 chars
+                                "source": doc.get("source"),
+                            }
+                        )
+                    context["documents"] = docs
 
             return context
 
         except Exception as e:
             logger.error(f"Failed to get context for {entity_name}: {e}")
-            return {'entity': entity_name, 'error': str(e)}
+            return {"entity": entity_name, "error": str(e)}
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
     import asyncio
 
     async def main():
         # Using environment variables for credentials
-        async with AsyncNeo4jClient(host='localhost', port=7687) as client:
+        async with AsyncNeo4jClient(host="localhost", port=7687) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
@@ -1666,20 +1585,14 @@ if __name__ == '__main__':
 
             # Create test node with embedding
             node_id = await client.create_node(
-                labels=['TestEntity'],
-                properties={
-                    'name': 'test_native',
-                    'embedding': [0.1] * 1536
-                }
+                labels=["TestEntity"], properties={"name": "test_native", "embedding": [0.1] * 1536}
             )
             print(f"Created node: {node_id}")
 
             # Vector search (if index exists)
             if indexes:
                 results = await client.vector_search(
-                    index_name='entity_embeddings',
-                    embedding=[0.1] * 1536,
-                    top_k=5
+                    index_name="entity_embeddings", embedding=[0.1] * 1536, top_k=5
                 )
                 print(f"Vector search results: {results}")
 
