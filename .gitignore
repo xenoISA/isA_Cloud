@@ -114,3 +114,8 @@ backups/
 # from file:// deps; the source charts live under deployments/charts/.
 deployments/umbrella/*/charts/
 deployments/umbrella/*/Chart.lock
+
+# ARC GitHub App auth — filled-in copies of *.template.yaml hold a real
+# private key and must never be committed. The .template.yaml files are safe.
+*.local.yaml
+deployments/kubernetes/local/arc/manifests/github-app-secret.local.yaml
