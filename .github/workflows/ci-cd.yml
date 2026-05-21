@@ -40,6 +40,43 @@ on:
 
 jobs:
   # ============================================
+  # Lint isa_common Python library
+  # Tool versions are pinned via isA_common[dev] so lint is deterministic
+  # and stays in lock-step with .pre-commit-config.yaml.
+  # ============================================
+  lint:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install isa_common with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./isA_common[dev]"
+
+      - name: Check formatting with black
+        run: |
+          cd isA_common
+          black --check --diff .
+
+      - name: Check import order with isort
+        run: |
+          cd isA_common
+          isort --check-only --diff .
+
+      - name: Lint with ruff
+        run: |
+          cd isA_common
+          ruff check .
+
+  # ============================================
   # Test isa_common Python library
   # ============================================
   test:
