@@ -12,24 +12,24 @@ providing full support for all NATS operations including:
 - Object store
 """
 
-import os
-import time
 import asyncio
+import os
 import re
-from typing import List, Dict, Optional, AsyncIterator, Any
+import time
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import nats
 from nats.aio.client import Client as NATSClient
-from nats.js.api import StreamConfig, ConsumerConfig, DeliverPolicy, AckPolicy
-from nats.js.errors import NotFoundError
 from nats.errors import (
-    TimeoutError as NATSTimeoutError,
     ConnectionClosedError,
-    ConnectionReconnectingError,
     ConnectionDrainingError,
-    StaleConnectionError,
+    ConnectionReconnectingError,
     NoServersError,
+    StaleConnectionError,
 )
+from nats.errors import TimeoutError as NATSTimeoutError
+from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy, StreamConfig
+from nats.js.errors import NotFoundError
 
 from .async_base_client import AsyncBaseClient
 
@@ -49,9 +49,7 @@ class AsyncNATSClient(AsyncBaseClient):
     ENV_PREFIX = "NATS"
     TENANT_SEPARATOR = "."  # org.user.subject
 
-    def __init__(
-        self, username: Optional[str] = None, password: Optional[str] = None, **kwargs
-    ):
+    def __init__(self, username: Optional[str] = None, password: Optional[str] = None, **kwargs):
         """
         Initialize async NATS client with native driver.
 
@@ -143,9 +141,7 @@ class AsyncNATSClient(AsyncBaseClient):
             try:
                 await self._disconnect()
             except Exception as disconnect_error:
-                self._logger.debug(
-                    f"NATS disconnect during recovery failed: {disconnect_error}"
-                )
+                self._logger.debug(f"NATS disconnect during recovery failed: {disconnect_error}")
             await self._connect()
             self._connected = True
             self._reconnect_count += 1
@@ -164,9 +160,7 @@ class AsyncNATSClient(AsyncBaseClient):
                 try:
                     await self._disconnect()
                 except Exception as disconnect_error:
-                    self._logger.debug(
-                        f"NATS pre-connect cleanup failed: {disconnect_error}"
-                    )
+                    self._logger.debug(f"NATS pre-connect cleanup failed: {disconnect_error}")
             await self._connect()
             self._connected = True
 
@@ -188,9 +182,7 @@ class AsyncNATSClient(AsyncBaseClient):
             self._reconnect_count += 1
             self._last_reconnect_ts = time.monotonic()
             self._consecutive_errors = 0
-            self._logger.info(
-                f"NATS reconnected (total_reconnects={self._reconnect_count})"
-            )
+            self._logger.info(f"NATS reconnected (total_reconnects={self._reconnect_count})")
 
         async def _on_closed():
             self._connected = False
@@ -202,8 +194,7 @@ class AsyncNATSClient(AsyncBaseClient):
             n = self._consecutive_errors
             if n == 1 or (n & (n - 1)) == 0:
                 self._logger.warning(
-                    f"NATS async error: {error} "
-                    f"(consecutive_errors={self._consecutive_errors})"
+                    f"NATS async error: {error} (consecutive_errors={self._consecutive_errors})"
                 )
 
         connect_opts = {
@@ -368,9 +359,7 @@ class AsyncNATSClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "publish batch")
 
-    async def subscribe(
-        self, subject: str, queue_group: str = ""
-    ) -> AsyncIterator[Dict]:
+    async def subscribe(self, subject: str, queue_group: str = "") -> AsyncIterator[Dict]:
         """
         Subscribe to a subject and yield messages.
 
@@ -384,9 +373,7 @@ class AsyncNATSClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            sub = await self._nc.subscribe(
-                subject, queue=queue_group if queue_group else None
-            )
+            sub = await self._nc.subscribe(subject, queue=queue_group if queue_group else None)
             self._subscriptions[subject] = sub
 
             async for msg in sub.messages:
@@ -401,9 +388,7 @@ class AsyncNATSClient(AsyncBaseClient):
         except Exception as e:
             self.handle_error(e, "subscribe")
 
-    async def request(
-        self, subject: str, data: bytes, timeout_seconds: int = 5
-    ) -> Optional[Dict]:
+    async def request(self, subject: str, data: bytes, timeout_seconds: int = 5) -> Optional[Dict]:
         """Request-reply pattern."""
         try:
             await self._ensure_connected()
@@ -413,17 +398,13 @@ class AsyncNATSClient(AsyncBaseClient):
             return {"success": True, "data": response.data, "subject": response.subject}
 
         except NATSTimeoutError:
-            self._logger.warning(
-                f"NATS request to {subject} timed out after {timeout_seconds}s"
-            )
+            self._logger.warning(f"NATS request to {subject} timed out after {timeout_seconds}s")
             return None
         except Exception as e:
             if self._is_connection_error(e):
                 try:
                     await self._recover_connection("request", e)
-                    response = await self._nc.request(
-                        subject, data, timeout=timeout_seconds
-                    )
+                    response = await self._nc.request(subject, data, timeout=timeout_seconds)
                     return {
                         "success": True,
                         "data": response.data,
@@ -503,9 +484,7 @@ class AsyncNATSClient(AsyncBaseClient):
                 streams.append(
                     {
                         "name": info.config.name,
-                        "subjects": list(info.config.subjects)
-                        if info.config.subjects
-                        else [],
+                        "subjects": list(info.config.subjects) if info.config.subjects else [],
                         "messages": info.state.messages,
                         "bytes": info.state.bytes,
                     }
@@ -595,19 +574,17 @@ class AsyncNATSClient(AsyncBaseClient):
             )
 
             try:
-                consumer = await self._js.add_consumer(stream_name, config)
+                await self._js.add_consumer(stream_name, config)
             except Exception as add_err:
                 err_str = str(add_err)
                 # If consumer exists with different config (err_code 10012), delete and recreate
                 if "10012" in err_str and "deliver policy" in err_str.lower():
-                    self._logger.warning(
-                        f"Consumer {consumer_name} config mismatch, recreating..."
-                    )
+                    self._logger.warning(f"Consumer {consumer_name} config mismatch, recreating...")
                     try:
                         await self._js.delete_consumer(stream_name, consumer_name)
                     except Exception:
                         pass  # Ignore delete errors
-                    consumer = await self._js.add_consumer(stream_name, config)
+                    await self._js.add_consumer(stream_name, config)
                 else:
                     raise add_err
 
@@ -825,9 +802,7 @@ class AsyncNATSClient(AsyncBaseClient):
     # Object Store Operations
     # ============================================
 
-    async def object_put(
-        self, bucket: str, object_name: str, data: bytes
-    ) -> Optional[Dict]:
+    async def object_put(self, bucket: str, object_name: str, data: bytes) -> Optional[Dict]:
         """Put object in object store."""
         try:
             await self._ensure_connected()
@@ -911,19 +886,15 @@ class AsyncNATSClient(AsyncBaseClient):
             return {
                 "total_streams": account_info.streams,
                 "total_consumers": account_info.consumers,
-                "total_messages": account_info.store_info.messages
-                if hasattr(account_info, "store_info")
-                else 0,
-                "total_bytes": account_info.store_info.bytes
-                if hasattr(account_info, "store_info")
-                else 0,
+                "total_messages": (
+                    account_info.store_info.messages if hasattr(account_info, "store_info") else 0
+                ),
+                "total_bytes": (
+                    account_info.store_info.bytes if hasattr(account_info, "store_info") else 0
+                ),
                 "connections": 1 if self._nc.is_connected else 0,
-                "in_msgs": self._nc.stats.get("in_msgs", 0)
-                if hasattr(self._nc, "stats")
-                else 0,
-                "out_msgs": self._nc.stats.get("out_msgs", 0)
-                if hasattr(self._nc, "stats")
-                else 0,
+                "in_msgs": self._nc.stats.get("in_msgs", 0) if hasattr(self._nc, "stats") else 0,
+                "out_msgs": self._nc.stats.get("out_msgs", 0) if hasattr(self._nc, "stats") else 0,
             }
 
         except Exception as e:
@@ -933,9 +904,7 @@ class AsyncNATSClient(AsyncBaseClient):
     # Concurrent Operations
     # ============================================
 
-    async def publish_many_concurrent(
-        self, messages: List[Dict]
-    ) -> List[Optional[Dict]]:
+    async def publish_many_concurrent(self, messages: List[Dict]) -> List[Optional[Dict]]:
         """
         Publish multiple messages concurrently.
 
@@ -958,9 +927,7 @@ class AsyncNATSClient(AsyncBaseClient):
 if __name__ == "__main__":
 
     async def main():
-        async with AsyncNATSClient(
-            host="localhost", port=4222, user_id="test_user"
-        ) as client:
+        async with AsyncNATSClient(host="localhost", port=4222, user_id="test_user") as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")

@@ -86,11 +86,11 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore(gitops): update ${SERVICE} image to ${SHA}
-
-Triggered by: ${ACTOR}
-Source commit: ${SHA}
-Service: ${SERVICE}
+          git commit \
+            -m "chore(gitops): update ${SERVICE} image to ${SHA}" \
+            -m "Triggered by: ${ACTOR}" \
+            -m "Source commit: ${SHA}" \
+            -m "Service: ${SERVICE}"
 
           git push
 
