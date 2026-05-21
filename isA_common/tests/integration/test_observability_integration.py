@@ -42,6 +42,7 @@ def _make_collecting_exporter():
 
     return _CollectingExporter
 
+
 pytestmark = [
     pytest.mark.integration,
 ]
@@ -64,10 +65,12 @@ def metrics_app():
     async def items_endpoint(request):
         return JSONResponse({"items": [1, 2, 3]})
 
-    app = Starlette(routes=[
-        Route("/api/status", api_endpoint),
-        Route("/api/items", items_endpoint),
-    ])
+    app = Starlette(
+        routes=[
+            Route("/api/status", api_endpoint),
+            Route("/api/items", items_endpoint),
+        ]
+    )
 
     m.setup_metrics(app, service_name="test_integration", registry=registry)
 

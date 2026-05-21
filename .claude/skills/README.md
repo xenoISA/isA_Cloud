@@ -542,8 +542,8 @@ Create a complete gRPC service from scratch, including implementation, tests, an
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: 2026-02-04  
+**Version**: 1.0.0
+**Last Updated**: 2026-02-04
 **Maintainer**: isA Cloud Team
 
 ## Getting Help

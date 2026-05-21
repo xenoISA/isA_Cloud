@@ -10,11 +10,11 @@ This client connects directly to Loki's HTTP API, providing:
 - Built-in batching with configurable flush interval
 """
 
-import os
-import json
-import time
 import asyncio
-from typing import List, Dict, Optional, Any
+import json
+import os
+import time
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
@@ -41,7 +41,7 @@ class AsyncLokiClient(AsyncBaseClient):
         batch_size: int = 100,
         flush_interval: float = 1.0,
         default_labels: Optional[Dict[str, str]] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize async Loki client.
@@ -55,7 +55,7 @@ class AsyncLokiClient(AsyncBaseClient):
         """
         super().__init__(**kwargs)
 
-        self._tenant_id = tenant_id or os.getenv('LOKI_TENANT_ID', '')
+        self._tenant_id = tenant_id or os.getenv("LOKI_TENANT_ID", "")
         self._batch_size = batch_size
         self._flush_interval = flush_interval
         self._default_labels = default_labels or {}
@@ -113,9 +113,9 @@ class AsyncLokiClient(AsyncBaseClient):
             async with self._session.get("/ready") as resp:
                 is_ready = resp.status == 200
                 return {
-                    'healthy': is_ready,
-                    'loki_status': 'ready' if is_ready else 'not_ready',
-                    'status_code': resp.status,
+                    "healthy": is_ready,
+                    "loki_status": "ready" if is_ready else "not_ready",
+                    "status_code": resp.status,
                 }
         except Exception as e:
             return self.handle_error(e, "health check")

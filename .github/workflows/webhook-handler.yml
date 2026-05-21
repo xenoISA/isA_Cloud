@@ -12,21 +12,21 @@ jobs:
   deploy-service:
     runs-on: ubuntu-latest
     if: contains(fromJson('["isA_MCP", "isA_Model", "isA_Agent", "isA_user", "isA_Chain"]'), github.event.client_payload.repository)
-    
+
     steps:
     - name: Checkout isA_Cloud
       uses: actions/checkout@v4
-      
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
-        
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-      
+
     - name: Determine service name
       id: service
       run: |
@@ -39,7 +39,7 @@ jobs:
           isA_Chain) echo "service=blockchain" >> $GITHUB_OUTPUT ;;
           *) echo "service=unknown" >> $GITHUB_OUTPUT ;;
         esac
-        
+
     - name: Deploy triggered service
       if: steps.service.outputs.service != 'unknown'
       env:
@@ -48,7 +48,7 @@ jobs:
       run: |
         chmod +x deployments/scripts/deploy-service.sh
         ./deployments/scripts/deploy-service.sh ${{ steps.service.outputs.service }} staging deploy
-        
+
     - name: Notify Slack
       if: always()
       uses: 8398a7/action-slack@v3

@@ -16,10 +16,10 @@ Tests all async Qdrant operations including:
 
 import asyncio
 import os
+import random
 import sys
 import time
 import uuid
-import random
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -30,32 +30,43 @@ from isa_common import AsyncQdrantClient
 # Contract Mapping — see tests/contracts/qdrant/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':              [],
-    'test_create_collection':         ['BR-002'],
-    'test_list_collections':          [],
-    'test_get_collection_info':       [],
-    'test_upsert_points':            ['BR-003', 'BR-006', 'EC-008'],
-    'test_count_points':              [],
-    'test_search':                    ['BR-004'],
-    'test_search_with_filter':        ['BR-005'],
-    'test_search_with_score_threshold':[],
-    'test_scroll':                    [],
-    'test_recommend':                 [],
-    'test_update_payload':            ['BR-007'],
-    'test_delete_payload_fields':     [],
-    'test_create_field_index':        [],
-    'test_delete_points':             ['BR-006'],
-    'test_concurrent_searches':       [],
-    'test_concurrent_upserts':        [],
-    'test_delete_collection':         [],
+    "test_health_check": [],
+    "test_create_collection": ["BR-002"],
+    "test_list_collections": [],
+    "test_get_collection_info": [],
+    "test_upsert_points": ["BR-003", "BR-006", "EC-008"],
+    "test_count_points": [],
+    "test_search": ["BR-004"],
+    "test_search_with_filter": ["BR-005"],
+    "test_search_with_score_threshold": [],
+    "test_scroll": [],
+    "test_recommend": [],
+    "test_update_payload": ["BR-007"],
+    "test_delete_payload_fields": [],
+    "test_create_field_index": [],
+    "test_delete_points": ["BR-006"],
+    "test_concurrent_searches": [],
+    "test_concurrent_upserts": [],
+    "test_delete_collection": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-001', 'BR-008', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-001",
+    "BR-008",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "ER-001",
+]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '6333'))
-USER_ID = os.environ.get('USER_ID', 'test-user')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "6333"))
+USER_ID = os.environ.get("USER_ID", "test-user")
 
 # Test results
 PASSED = 0
@@ -90,7 +101,7 @@ async def test_health_check(client: AsyncQdrantClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, f"Health check (version: {health.get('version', 'unknown')})")
         return success
     except Exception as e:
@@ -105,9 +116,7 @@ async def test_create_collection(client: AsyncQdrantClient, collection_name: str
     """
     try:
         result = await client.create_collection(
-            collection_name=collection_name,
-            vector_size=VECTOR_DIM,
-            distance='Cosine'
+            collection_name=collection_name, vector_size=VECTOR_DIM, distance="Cosine"
         )
         test_result(result is True, f"Create collection '{collection_name}'")
     except Exception as e:
@@ -135,7 +144,10 @@ async def test_get_collection_info(client: AsyncQdrantClient, collection_name: s
     try:
         info = await client.get_collection_info(collection_name)
         success = info is not None
-        test_result(success, f"Get collection info (status: {info.get('status', 'unknown') if info else 'N/A'})")
+        test_result(
+            success,
+            f"Get collection info (status: {info.get('status', 'unknown') if info else 'N/A'})",
+        )
     except Exception as e:
         test_result(False, f"Get collection info - {e}")
 
@@ -151,14 +163,14 @@ async def test_upsert_points(client: AsyncQdrantClient, collection_name: str):
         # is treated as empty string (if id.GetNum() > 0 check fails for 0)
         points = [
             {
-                'id': i,
-                'vector': generate_vector(),
-                'payload': {
-                    'category': ['electronics', 'books', 'clothing'][i % 3],
-                    'price': 10.0 + i * 5,
-                    'name': f'Product {i}',
-                    'in_stock': i % 2 == 0
-                }
+                "id": i,
+                "vector": generate_vector(),
+                "payload": {
+                    "category": ["electronics", "books", "clothing"][i % 3],
+                    "price": 10.0 + i * 5,
+                    "name": f"Product {i}",
+                    "in_stock": i % 2 == 0,
+                },
             }
             for i in range(1, 21)  # IDs 1-20 instead of 0-19
         ]
@@ -191,10 +203,7 @@ async def test_search(client: AsyncQdrantClient, collection_name: str):
     try:
         query_vector = generate_vector()
         results = await client.search(
-            collection_name=collection_name,
-            vector=query_vector,
-            limit=5,
-            with_payload=True
+            collection_name=collection_name, vector=query_vector, limit=5, with_payload=True
         )
         success = results is not None and len(results) > 0
         test_result(success, f"Vector search ({len(results) if results else 0} results)")
@@ -209,16 +218,12 @@ async def test_search_with_filter(client: AsyncQdrantClient, collection_name: st
     """
     try:
         query_vector = generate_vector()
-        filter_conditions = {
-            'must': [
-                {'field': 'category', 'match': {'keyword': 'electronics'}}
-            ]
-        }
+        filter_conditions = {"must": [{"field": "category", "match": {"keyword": "electronics"}}]}
         results = await client.search_with_filter(
             collection_name=collection_name,
             vector=query_vector,
             filter_conditions=filter_conditions,
-            limit=5
+            limit=5,
         )
         success = results is not None
         test_result(success, f"Filtered search ({len(results) if results else 0} results)")
@@ -234,10 +239,7 @@ async def test_search_with_score_threshold(client: AsyncQdrantClient, collection
     try:
         query_vector = generate_vector()
         results = await client.search(
-            collection_name=collection_name,
-            vector=query_vector,
-            limit=10,
-            score_threshold=0.5
+            collection_name=collection_name, vector=query_vector, limit=10, score_threshold=0.5
         )
         success = results is not None
         test_result(success, f"Search with threshold ({len(results) if results else 0} results)")
@@ -251,12 +253,8 @@ async def test_scroll(client: AsyncQdrantClient, collection_name: str):
     Validates: (additional coverage)
     """
     try:
-        result = await client.scroll(
-            collection_name=collection_name,
-            limit=10,
-            with_payload=True
-        )
-        success = result is not None and 'points' in result
+        result = await client.scroll(collection_name=collection_name, limit=10, with_payload=True)
+        success = result is not None and "points" in result
         test_result(success, f"Scroll ({len(result.get('points', [])) if result else 0} points)")
     except Exception as e:
         test_result(False, f"Scroll - {e}")
@@ -271,8 +269,8 @@ async def test_recommend(client: AsyncQdrantClient, collection_name: str):
         results = await client.recommend(
             collection_name=collection_name,
             positive=[1, 2],  # Point IDs to use as positive examples (not 0 due to server bug)
-            negative=[3],     # Point IDs to use as negative examples
-            limit=5
+            negative=[3],  # Point IDs to use as negative examples
+            limit=5,
         )
         success = results is not None
         test_result(success, f"Recommendation ({len(results) if results else 0} results)")
@@ -289,7 +287,7 @@ async def test_update_payload(client: AsyncQdrantClient, collection_name: str):
         result = await client.update_payload(
             collection_name=collection_name,
             ids=[1, 2],  # Not using 0 due to server bug
-            payload={'updated': True, 'update_time': time.time()}
+            payload={"updated": True, "update_time": time.time()},
         )
         success = result is not None
         test_result(success, "Update payload")
@@ -306,7 +304,7 @@ async def test_delete_payload_fields(client: AsyncQdrantClient, collection_name:
         result = await client.delete_payload_fields(
             collection_name=collection_name,
             ids=[1],  # Not using 0 due to server bug
-            keys=['updated']
+            keys=["updated"],
         )
         success = result is not None
         test_result(success, "Delete payload fields")
@@ -321,9 +319,7 @@ async def test_create_field_index(client: AsyncQdrantClient, collection_name: st
     """
     try:
         result = await client.create_field_index(
-            collection_name=collection_name,
-            field_name='category',
-            field_type='keyword'
+            collection_name=collection_name, field_name="category", field_type="keyword"
         )
         success = result is not None
         test_result(success, "Create field index")
@@ -354,15 +350,15 @@ async def test_concurrent_searches(client: AsyncQdrantClient, collection_name: s
 
         start = time.time()
         results = await client.search_many_concurrent(
-            collection_name=collection_name,
-            vectors=vectors,
-            limit=5
+            collection_name=collection_name, vectors=vectors, limit=5
         )
         elapsed = (time.time() - start) * 1000
 
         success_count = sum(1 for r in results if r is not None)
         success = success_count == len(vectors)
-        test_result(success, f"Concurrent searches ({success_count}/{len(vectors)} in {elapsed:.1f}ms)")
+        test_result(
+            success, f"Concurrent searches ({success_count}/{len(vectors)} in {elapsed:.1f}ms)"
+        )
     except Exception as e:
         test_result(False, f"Concurrent searches - {e}")
 
@@ -374,8 +370,10 @@ async def test_concurrent_upserts(client: AsyncQdrantClient, collection_name: st
     """
     try:
         batches = [
-            [{'id': 100 + i * 5 + j, 'vector': generate_vector(), 'payload': {'batch': i}}
-             for j in range(5)]
+            [
+                {"id": 100 + i * 5 + j, "vector": generate_vector(), "payload": {"batch": i}}
+                for j in range(5)
+            ]
             for i in range(4)
         ]
 
@@ -385,7 +383,10 @@ async def test_concurrent_upserts(client: AsyncQdrantClient, collection_name: st
 
         success_count = sum(1 for r in results if r is not None)
         success = success_count == len(batches)
-        test_result(success, f"Concurrent upserts ({success_count}/{len(batches)} batches in {elapsed:.1f}ms)")
+        test_result(
+            success,
+            f"Concurrent upserts ({success_count}/{len(batches)} batches in {elapsed:.1f}ms)",
+        )
     except Exception as e:
         test_result(False, f"Concurrent upserts - {e}")
 
@@ -408,7 +409,7 @@ async def run_tests():
     print("     ASYNC QDRANT CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
     print()
-    print(f"Configuration:")
+    print("Configuration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  User: {USER_ID}")
@@ -419,11 +420,7 @@ async def run_tests():
     test_id = uuid.uuid4().hex[:8]
     collection_name = f"async_test_collection_{test_id}"
 
-    async with AsyncQdrantClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID
-    ) as client:
+    async with AsyncQdrantClient(host=HOST, port=PORT, user_id=USER_ID) as client:
         # Health check first
         print("--- Health Check ---")
         health_ok = await test_health_check(client)
@@ -492,5 +489,5 @@ async def run_tests():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(run_tests())

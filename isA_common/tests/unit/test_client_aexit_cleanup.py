@@ -1,6 +1,6 @@
 """Unit tests for #122 — verify NATS and MQTT clients clean up on context exit."""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import AsyncMock, MagicMock
 
 
 class TestNATSClientAexit:
@@ -134,9 +134,14 @@ class TestBaseClientAexitDefault:
         # Base __aexit__ doesn't close — subclasses override
         # Just verify it exists and doesn't raise
         class DummyClient(AsyncBaseClient):
-            async def _connect(self): pass
-            async def _disconnect(self): pass
-            async def health_check(self): return {"healthy": True}
+            async def _connect(self):
+                pass
+
+            async def _disconnect(self):
+                pass
+
+            async def health_check(self):
+                return {"healthy": True}
 
         client = DummyClient(lazy_connect=True)
         client._connected = True

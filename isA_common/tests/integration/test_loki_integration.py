@@ -3,10 +3,12 @@ AsyncLokiClient integration tests — requires a running Loki instance.
 
 Run with: LOKI_PORT=3101 python -m pytest isA_common/tests/integration/test_loki_integration.py -v
 """
-import os
-import time
+
 import asyncio
 import logging
+import os
+import time
+
 import pytest
 import pytest_asyncio
 
@@ -18,6 +20,7 @@ LOKI_HOST = os.getenv("LOKI_HOST", "localhost")
 def loki_available():
     """Check if Loki is reachable."""
     import socket
+
     try:
         sock = socket.create_connection((LOKI_HOST, LOKI_PORT), timeout=2)
         sock.close()
@@ -109,9 +112,9 @@ class TestLokiPushIntegration:
         for stream in streams:
             all_values.extend(stream.get("values", []))
         messages = [v[1] for v in all_values]
-        assert any(unique_id in m for m in messages), (
-            f"Expected message containing '{unique_id}' in {messages}"
-        )
+        assert any(
+            unique_id in m for m in messages
+        ), f"Expected message containing '{unique_id}' in {messages}"
 
 
 class TestLokiQueryIntegration:
@@ -178,7 +181,7 @@ class TestLokiHandlerIntegration:
 
         # Query Loki for the logs
         result = await client.query(
-            f'{{app="isa-handler-test"}}',
+            '{app="isa-handler-test"}',
             limit=20,
         )
         assert result is not None
@@ -189,9 +192,9 @@ class TestLokiHandlerIntegration:
         for stream in streams:
             all_messages.extend([v[1] for v in stream.get("values", [])])
 
-        assert any(unique_marker in m for m in all_messages), (
-            f"Expected '{unique_marker}' in Loki logs. Got: {all_messages[:5]}"
-        )
+        assert any(
+            unique_marker in m for m in all_messages
+        ), f"Expected '{unique_marker}' in Loki logs. Got: {all_messages[:5]}"
 
 
 class TestGrafanaProvisioningIntegration:
@@ -223,6 +226,6 @@ class TestGrafanaProvisioningIntegration:
             ) as resp:
                 assert resp.status == 200
                 dashboards = await resp.json()
-                assert len(dashboards) > 0, (
-                    f"No 'isA Platform Logs' dashboard found. Got: {dashboards}"
-                )
+                assert (
+                    len(dashboards) > 0
+                ), f"No 'isA Platform Logs' dashboard found. Got: {dashboards}"

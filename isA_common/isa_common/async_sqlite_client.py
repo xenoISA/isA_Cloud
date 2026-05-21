@@ -14,12 +14,12 @@ Key differences from PostgreSQL:
 - No connection pooling (SQLite handles this differently)
 """
 
+import asyncio
+import json
 import os
 import re
-import json
-import asyncio
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
@@ -29,7 +29,7 @@ from .async_base_client import AsyncBaseClient
 def _convert_pg_placeholders(sql: str) -> str:
     """Convert PostgreSQL $1, $2 placeholders to SQLite ? placeholders."""
     # Replace $N with ? while preserving order
-    return re.sub(r'\$\d+', '?', sql)
+    return re.sub(r"\$\d+", "?", sql)
 
 
 def _convert_pg_syntax(sql: str) -> str:
@@ -37,7 +37,7 @@ def _convert_pg_syntax(sql: str) -> str:
     result = sql
 
     # Convert ILIKE to LIKE (SQLite uses COLLATE NOCASE for case-insensitive)
-    result = re.sub(r'\bILIKE\b', 'LIKE', result, flags=re.IGNORECASE)
+    result = re.sub(r"\bILIKE\b", "LIKE", result, flags=re.IGNORECASE)
 
     # Convert PostgreSQL array overlap operator && to a custom check
     # This is complex - for now we'll handle it in query logic
@@ -74,7 +74,7 @@ def _deserialize_row(row: aiosqlite.Row, description: List) -> Dict:
         # Try to deserialize JSON strings
         if isinstance(value, str):
             try:
-                if value.startswith('{') or value.startswith('['):
+                if value.startswith("{") or value.startswith("["):
                     value = json.loads(value)
             except (json.JSONDecodeError, ValueError):
                 pass
@@ -98,12 +98,7 @@ class AsyncSQLiteClient(AsyncBaseClient):
     DEFAULT_PORT = 0  # Embedded, no port
     ENV_PREFIX = "SQLITE"
 
-    def __init__(
-        self,
-        database: Optional[str] = None,
-        db_path: Optional[str] = None,
-        **kwargs
-    ):
+    def __init__(self, database: Optional[str] = None, db_path: Optional[str] = None, **kwargs):
         """
         Initialize async SQLite client.
 
@@ -114,13 +109,13 @@ class AsyncSQLiteClient(AsyncBaseClient):
         """
         super().__init__(**kwargs)
 
-        self._database = database or os.getenv('SQLITE_DB', 'isa_mcp.db')
+        self._database = database or os.getenv("SQLITE_DB", "isa_mcp.db")
 
         # Determine database path
         if db_path:
             self._db_path = Path(db_path)
         else:
-            default_path = os.getenv('SQLITE_PATH', '~/.isa_mcp')
+            default_path = os.getenv("SQLITE_PATH", "~/.isa_mcp")
             self._db_path = Path(default_path).expanduser()
 
         # Ensure directory exists
@@ -136,12 +131,12 @@ class AsyncSQLiteClient(AsyncBaseClient):
         """Establish SQLite connection."""
         self._conn = await aiosqlite.connect(
             str(self._db_file),
-            isolation_level=None  # Autocommit mode, we manage transactions explicitly
+            isolation_level=None,  # Autocommit mode, we manage transactions explicitly
         )
         # Enable foreign keys
-        await self._conn.execute('PRAGMA foreign_keys = ON')
+        await self._conn.execute("PRAGMA foreign_keys = ON")
         # Enable WAL mode for better concurrency
-        await self._conn.execute('PRAGMA journal_mode = WAL')
+        await self._conn.execute("PRAGMA journal_mode = WAL")
         # Row factory for dict-like access
         self._conn.row_factory = aiosqlite.Row
 
@@ -162,24 +157,19 @@ class AsyncSQLiteClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            async with self._conn.execute('SELECT sqlite_version()') as cursor:
+            async with self._conn.execute("SELECT sqlite_version()") as cursor:
                 row = await cursor.fetchone()
-                version = row[0] if row else 'unknown'
+                version = row[0] if row else "unknown"
 
             details = {}
             if detailed:
                 # Get database file size
                 if self._db_file.exists():
-                    details['file_size_bytes'] = self._db_file.stat().st_size
-                details['version'] = version
-                details['path'] = str(self._db_file)
+                    details["file_size_bytes"] = self._db_file.stat().st_size
+                details["version"] = version
+                details["path"] = str(self._db_file)
 
-            return {
-                'status': 'healthy',
-                'healthy': True,
-                'version': version,
-                'details': details
-            }
+            return {"status": "healthy", "healthy": True, "version": version, "details": details}
 
         except Exception as e:
             return self.handle_error(e, "health check")
@@ -188,8 +178,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
     # Query Operations
     # ============================================
 
-    async def query(self, sql: str, params: Optional[List[Any]] = None,
-                   schema: str = 'public') -> Optional[List[Dict]]:
+    async def query(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[List[Dict]]:
         """Execute SELECT query.
 
         Args:
@@ -207,8 +198,8 @@ class AsyncSQLiteClient(AsyncBaseClient):
             sqlite_sql = _convert_pg_placeholders(_convert_pg_syntax(sql))
 
             # Handle schema by replacing schema references
-            if schema != 'public':
-                sqlite_sql = sqlite_sql.replace(f'{schema}.', f'{schema}_')
+            if schema != "public":
+                sqlite_sql = sqlite_sql.replace(f"{schema}.", f"{schema}_")
 
             # Serialize parameters
             sqlite_params = [_serialize_value(p) for p in (params or [])]
@@ -225,8 +216,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "query")
 
-    async def query_row(self, sql: str, params: Optional[List[Any]] = None,
-                       schema: str = 'public') -> Optional[Dict]:
+    async def query_row(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[Dict]:
         """Execute single row query.
 
         Args:
@@ -242,8 +234,8 @@ class AsyncSQLiteClient(AsyncBaseClient):
 
             sqlite_sql = _convert_pg_placeholders(_convert_pg_syntax(sql))
 
-            if schema != 'public':
-                sqlite_sql = sqlite_sql.replace(f'{schema}.', f'{schema}_')
+            if schema != "public":
+                sqlite_sql = sqlite_sql.replace(f"{schema}.", f"{schema}_")
 
             sqlite_params = [_serialize_value(p) for p in (params or [])]
 
@@ -257,8 +249,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "query row")
 
-    async def execute(self, sql: str, params: Optional[List[Any]] = None,
-                     schema: str = 'public') -> Optional[int]:
+    async def execute(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[int]:
         """Execute INSERT/UPDATE/DELETE statement.
 
         Args:
@@ -274,8 +267,8 @@ class AsyncSQLiteClient(AsyncBaseClient):
 
             sqlite_sql = _convert_pg_placeholders(_convert_pg_syntax(sql))
 
-            if schema != 'public':
-                sqlite_sql = sqlite_sql.replace(f'{schema}.', f'{schema}_')
+            if schema != "public":
+                sqlite_sql = sqlite_sql.replace(f"{schema}.", f"{schema}_")
 
             sqlite_params = [_serialize_value(p) for p in (params or [])]
 
@@ -286,8 +279,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "execute")
 
-    async def execute_batch(self, operations: List[Dict[str, Any]],
-                           schema: str = 'public') -> Optional[Dict]:
+    async def execute_batch(
+        self, operations: List[Dict[str, Any]], schema: str = "public"
+    ) -> Optional[Dict]:
         """Execute batch operations in a transaction.
 
         Args:
@@ -303,16 +297,16 @@ class AsyncSQLiteClient(AsyncBaseClient):
             results = []
             total_rows = 0
 
-            await self._conn.execute('BEGIN')
+            await self._conn.execute("BEGIN")
 
             try:
                 for op in operations:
-                    sql = op.get('sql', '')
-                    params = op.get('params', [])
+                    sql = op.get("sql", "")
+                    params = op.get("params", [])
 
                     sqlite_sql = _convert_pg_placeholders(_convert_pg_syntax(sql))
-                    if schema != 'public':
-                        sqlite_sql = sqlite_sql.replace(f'{schema}.', f'{schema}_')
+                    if schema != "public":
+                        sqlite_sql = sqlite_sql.replace(f"{schema}.", f"{schema}_")
 
                     sqlite_params = [_serialize_value(p) for p in params]
 
@@ -320,20 +314,17 @@ class AsyncSQLiteClient(AsyncBaseClient):
                         async with self._conn.execute(sqlite_sql, sqlite_params) as cursor:
                             rows_affected = cursor.rowcount
                             total_rows += rows_affected
-                            results.append({'rows_affected': rows_affected, 'error': ''})
+                            results.append({"rows_affected": rows_affected, "error": ""})
                     except Exception as e:
-                        results.append({'rows_affected': 0, 'error': str(e)})
+                        results.append({"rows_affected": 0, "error": str(e)})
 
-                await self._conn.execute('COMMIT')
+                await self._conn.execute("COMMIT")
 
-            except Exception as e:
-                await self._conn.execute('ROLLBACK')
+            except Exception:
+                await self._conn.execute("ROLLBACK")
                 raise
 
-            return {
-                'total_rows_affected': total_rows,
-                'results': results
-            }
+            return {"total_rows_affected": total_rows, "results": results}
 
         except Exception as e:
             return self.handle_error(e, "execute batch")
@@ -350,16 +341,16 @@ class AsyncSQLiteClient(AsyncBaseClient):
         order_by: Optional[List[str]] = None,
         limit: int = 0,
         offset: int = 0,
-        schema: str = 'public'
+        schema: str = "public",
     ) -> Optional[List[Dict]]:
         """Query builder style SELECT."""
         try:
             # Build SELECT clause
-            cols = ', '.join(columns) if columns else '*'
+            cols = ", ".join(columns) if columns else "*"
 
             # Handle schema
-            table_name = f'{schema}_{table}' if schema != 'public' else table
-            sql = f'SELECT {cols} FROM {table_name}'
+            table_name = f"{schema}_{table}" if schema != "public" else table
+            sql = f"SELECT {cols} FROM {table_name}"
 
             params = []
 
@@ -367,22 +358,22 @@ class AsyncSQLiteClient(AsyncBaseClient):
             if where:
                 conditions = []
                 for w in where:
-                    col = w.get('column', '')
-                    op = w.get('operator', '=')
-                    val = w.get('value')
-                    conditions.append(f'{col} {op} ?')
+                    col = w.get("column", "")
+                    op = w.get("operator", "=")
+                    val = w.get("value")
+                    conditions.append(f"{col} {op} ?")
                     params.append(_serialize_value(val))
-                sql += ' WHERE ' + ' AND '.join(conditions)
+                sql += " WHERE " + " AND ".join(conditions)
 
             # Build ORDER BY clause
             if order_by:
-                sql += ' ORDER BY ' + ', '.join(order_by)
+                sql += " ORDER BY " + ", ".join(order_by)
 
             # Add LIMIT and OFFSET
             if limit > 0:
-                sql += f' LIMIT {limit}'
+                sql += f" LIMIT {limit}"
             if offset > 0:
-                sql += f' OFFSET {offset}'
+                sql += f" OFFSET {offset}"
 
             await self._ensure_connected()
 
@@ -399,11 +390,7 @@ class AsyncSQLiteClient(AsyncBaseClient):
             return self.handle_error(e, "select from")
 
     async def insert_into(
-        self,
-        table: str,
-        rows: List[Dict],
-        returning: bool = False,
-        schema: str = 'public'
+        self, table: str, rows: List[Dict], returning: bool = False, schema: str = "public"
     ) -> Optional[int]:
         """Insert rows into table.
 
@@ -423,18 +410,18 @@ class AsyncSQLiteClient(AsyncBaseClient):
             await self._ensure_connected()
 
             # Handle schema
-            table_name = f'{schema}_{table}' if schema != 'public' else table
+            table_name = f"{schema}_{table}" if schema != "public" else table
 
             # Get columns from first row
             columns = list(rows[0].keys())
-            cols_str = ', '.join(columns)
+            cols_str = ", ".join(columns)
 
             # Build values placeholders
-            placeholders = ', '.join('?' for _ in columns)
-            sql = f'INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})'
+            placeholders = ", ".join("?" for _ in columns)
+            sql = f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})"
 
             count = 0
-            await self._conn.execute('BEGIN')
+            await self._conn.execute("BEGIN")
 
             try:
                 for row in rows:
@@ -442,10 +429,10 @@ class AsyncSQLiteClient(AsyncBaseClient):
                     await self._conn.execute(sql, values)
                     count += 1
 
-                await self._conn.execute('COMMIT')
+                await self._conn.execute("COMMIT")
 
-            except Exception as e:
-                await self._conn.execute('ROLLBACK')
+            except Exception:
+                await self._conn.execute("ROLLBACK")
                 raise
 
             return count
@@ -457,7 +444,7 @@ class AsyncSQLiteClient(AsyncBaseClient):
     # Table Operations
     # ============================================
 
-    async def list_tables(self, schema: str = 'public') -> List[str]:
+    async def list_tables(self, schema: str = "public") -> List[str]:
         """List all tables."""
         try:
             await self._ensure_connected()
@@ -470,9 +457,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
                 tables = [row[0] for row in rows]
 
                 # Filter by schema prefix if not public
-                if schema != 'public':
-                    prefix = f'{schema}_'
-                    tables = [t[len(prefix):] for t in tables if t.startswith(prefix)]
+                if schema != "public":
+                    prefix = f"{schema}_"
+                    tables = [t[len(prefix) :] for t in tables if t.startswith(prefix)]
 
                 return sorted(tables)
 
@@ -480,12 +467,12 @@ class AsyncSQLiteClient(AsyncBaseClient):
             self.handle_error(e, "list tables")
             return []
 
-    async def table_exists(self, table: str, schema: str = 'public') -> bool:
+    async def table_exists(self, table: str, schema: str = "public") -> bool:
         """Check if table exists."""
         try:
             await self._ensure_connected()
 
-            table_name = f'{schema}_{table}' if schema != 'public' else table
+            table_name = f"{schema}_{table}" if schema != "public" else table
 
             sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
 
@@ -513,14 +500,14 @@ class AsyncSQLiteClient(AsyncBaseClient):
             sqlite_script = _convert_pg_syntax(script)
 
             # Replace common PostgreSQL types
-            sqlite_script = sqlite_script.replace('SERIAL', 'INTEGER')
-            sqlite_script = sqlite_script.replace('BIGSERIAL', 'INTEGER')
-            sqlite_script = sqlite_script.replace('JSONB', 'TEXT')
-            sqlite_script = sqlite_script.replace('TEXT[]', 'TEXT')  # Arrays as JSON
-            sqlite_script = sqlite_script.replace('TIMESTAMP WITH TIME ZONE', 'TEXT')
-            sqlite_script = sqlite_script.replace('TIMESTAMPTZ', 'TEXT')
-            sqlite_script = sqlite_script.replace('UUID', 'TEXT')
-            sqlite_script = sqlite_script.replace('BOOLEAN', 'INTEGER')
+            sqlite_script = sqlite_script.replace("SERIAL", "INTEGER")
+            sqlite_script = sqlite_script.replace("BIGSERIAL", "INTEGER")
+            sqlite_script = sqlite_script.replace("JSONB", "TEXT")
+            sqlite_script = sqlite_script.replace("TEXT[]", "TEXT")  # Arrays as JSON
+            sqlite_script = sqlite_script.replace("TIMESTAMP WITH TIME ZONE", "TEXT")
+            sqlite_script = sqlite_script.replace("TIMESTAMPTZ", "TEXT")
+            sqlite_script = sqlite_script.replace("UUID", "TEXT")
+            sqlite_script = sqlite_script.replace("BOOLEAN", "INTEGER")
 
             await self._conn.executescript(sqlite_script)
             return True
@@ -538,9 +525,9 @@ class AsyncSQLiteClient(AsyncBaseClient):
         try:
             await self._ensure_connected()
 
-            async with self._conn.execute('SELECT sqlite_version()') as cursor:
+            async with self._conn.execute("SELECT sqlite_version()") as cursor:
                 row = await cursor.fetchone()
-                version = row[0] if row else 'unknown'
+                version = row[0] if row else "unknown"
 
             # Count tables
             async with self._conn.execute(
@@ -550,11 +537,11 @@ class AsyncSQLiteClient(AsyncBaseClient):
                 table_count = row[0] if row else 0
 
             return {
-                'database': {
-                    'version': version,
-                    'path': str(self._db_file),
-                    'size_bytes': self._db_file.stat().st_size if self._db_file.exists() else 0,
-                    'table_count': table_count
+                "database": {
+                    "version": version,
+                    "path": str(self._db_file),
+                    "size_bytes": self._db_file.stat().st_size if self._db_file.exists() else 0,
+                    "table_count": table_count,
                 }
             }
 
@@ -565,31 +552,32 @@ class AsyncSQLiteClient(AsyncBaseClient):
     # Transaction Support
     # ============================================
 
-    async def execute_in_transaction(self, operations: List[Dict[str, Any]],
-                                     schema: str = 'public') -> bool:
+    async def execute_in_transaction(
+        self, operations: List[Dict[str, Any]], schema: str = "public"
+    ) -> bool:
         """Execute multiple operations in a single transaction."""
         try:
             await self._ensure_connected()
 
-            await self._conn.execute('BEGIN')
+            await self._conn.execute("BEGIN")
 
             try:
                 for op in operations:
-                    sql = op.get('sql', '')
-                    params = op.get('params', [])
+                    sql = op.get("sql", "")
+                    params = op.get("params", [])
 
                     sqlite_sql = _convert_pg_placeholders(_convert_pg_syntax(sql))
-                    if schema != 'public':
-                        sqlite_sql = sqlite_sql.replace(f'{schema}.', f'{schema}_')
+                    if schema != "public":
+                        sqlite_sql = sqlite_sql.replace(f"{schema}.", f"{schema}_")
 
                     sqlite_params = [_serialize_value(p) for p in params]
                     await self._conn.execute(sqlite_sql, sqlite_params)
 
-                await self._conn.execute('COMMIT')
+                await self._conn.execute("COMMIT")
                 return True
 
-            except Exception as e:
-                await self._conn.execute('ROLLBACK')
+            except Exception:
+                await self._conn.execute("ROLLBACK")
                 raise
 
         except Exception as e:
@@ -600,62 +588,64 @@ class AsyncSQLiteClient(AsyncBaseClient):
     # Concurrent Operations
     # ============================================
 
-    async def query_many_concurrent(self, queries: List[Dict[str, Any]]) -> List[Optional[List[Dict]]]:
+    async def query_many_concurrent(
+        self, queries: List[Dict[str, Any]]
+    ) -> List[Optional[List[Dict]]]:
         """Execute multiple queries (sequentially for SQLite thread safety)."""
         results = []
         for q in queries:
             result = await self.query(
-                sql=q.get('sql', ''),
-                params=q.get('params'),
-                schema=q.get('schema', 'public')
+                sql=q.get("sql", ""), params=q.get("params"), schema=q.get("schema", "public")
             )
             results.append(result)
         return results
 
-    async def execute_many_concurrent(self, statements: List[Dict[str, Any]]) -> List[Optional[int]]:
+    async def execute_many_concurrent(
+        self, statements: List[Dict[str, Any]]
+    ) -> List[Optional[int]]:
         """Execute multiple statements (sequentially for SQLite thread safety)."""
         results = []
         for s in statements:
             result = await self.execute(
-                sql=s.get('sql', ''),
-                params=s.get('params'),
-                schema=s.get('schema', 'public')
+                sql=s.get("sql", ""), params=s.get("params"), schema=s.get("schema", "public")
             )
             results.append(result)
         return results
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
         async with AsyncSQLiteClient(
-            database='test.db',
-            db_path='/tmp/isa_test',
-            user_id='test_user'
+            database="test.db", db_path="/tmp/isa_test", user_id="test_user"
         ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Create table
-            await client.execute('''
+            await client.execute("""
                 CREATE TABLE IF NOT EXISTS test_table (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     data TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            """)
 
             # Insert
-            count = await client.insert_into('test_table', [
-                {'name': 'test1', 'data': json.dumps({'key': 'value1'})},
-                {'name': 'test2', 'data': json.dumps({'key': 'value2'})}
-            ])
+            count = await client.insert_into(
+                "test_table",
+                [
+                    {"name": "test1", "data": json.dumps({"key": "value1"})},
+                    {"name": "test2", "data": json.dumps({"key": "value2"})},
+                ],
+            )
             print(f"Inserted: {count}")
 
             # Query
-            results = await client.query("SELECT * FROM test_table WHERE name LIKE ?", ['test%'])
+            results = await client.query("SELECT * FROM test_table WHERE name LIKE ?", ["test%"])
             print(f"Query result: {results}")
 
             # List tables

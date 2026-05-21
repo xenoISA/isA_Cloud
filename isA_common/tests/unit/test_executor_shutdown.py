@@ -1,8 +1,9 @@
 """Unit tests for #123 — verify ThreadPoolExecutor shutdown is graceful."""
-import ast
-import pytest
+
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+import pytest
 
 _PKG_ROOT = Path(__file__).resolve().parents[2] / "isa_common"
 
@@ -20,18 +21,18 @@ class TestNoWaitFalseShutdown:
     def test_no_shutdown_wait_false(self, filepath):
         """Files must not use shutdown(wait=False) which orphans threads."""
         source = filepath.read_text()
-        assert "shutdown(wait=False)" not in source, (
-            f"{filepath.name} still uses shutdown(wait=False)"
-        )
+        assert (
+            "shutdown(wait=False)" not in source
+        ), f"{filepath.name} still uses shutdown(wait=False)"
 
     @pytest.mark.parametrize("filepath", FILES_TO_CHECK, ids=lambda p: p.name)
     def test_uses_graceful_shutdown(self, filepath):
         """Files should use shutdown(wait=True, cancel_futures=True)."""
         source = filepath.read_text()
         if "shutdown" in source:
-            assert "shutdown(wait=True" in source, (
-                f"{filepath.name} should use shutdown(wait=True, ...)"
-            )
+            assert (
+                "shutdown(wait=True" in source
+            ), f"{filepath.name} should use shutdown(wait=True, ...)"
 
 
 class TestDuckDBExecutorShutdown:
@@ -47,9 +48,7 @@ class TestDuckDBExecutorShutdown:
 
         await client._disconnect()
 
-        client._executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=True
-        )
+        client._executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
 
 
 class TestChromaExecutorShutdown:
@@ -70,9 +69,7 @@ class TestChromaExecutorShutdown:
         await client._disconnect()
 
         # _disconnect sets _executor = None after shutdown, so check the original mock
-        mock_executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
 
 
 class TestLocalStorageExecutorShutdown:
@@ -92,6 +89,4 @@ class TestLocalStorageExecutorShutdown:
         await client._disconnect()
 
         # _disconnect sets _executor = None after shutdown, so check the original mock
-        mock_executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)

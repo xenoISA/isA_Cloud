@@ -3,7 +3,7 @@
 ## Component Overview
 
 1. **MQTT Proto** (`api/proto/mqtt_service.proto`) - The source of truth
-2. **MQTT Go Client** (`pkg/infrastructure/messaging/mqtt/client.go`) - Backend SDK  
+2. **MQTT Go Client** (`pkg/infrastructure/messaging/mqtt/client.go`) - Backend SDK
 3. **MQTT gRPC Server** (`cmd/mqtt-service/server/server.go`) - gRPC implementation
 4. **MQTT Python Client** (`isA_common/isa_common/mqtt_client.py`) - Frontend SDK
 
@@ -118,4 +118,3 @@ The test script `test_mqtt_functional.sh` currently has **7 tests** covering:
 4. ⏳ Expand test coverage
 5. ⏳ Run comprehensive tests
 6. ⏳ Create Python examples
-

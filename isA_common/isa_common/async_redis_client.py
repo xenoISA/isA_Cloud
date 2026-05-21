@@ -12,10 +12,10 @@ providing full support for all Redis operations including:
 - Pipelining and batching
 """
 
-import os
 import asyncio
+import os
 import uuid
-from typing import List, Dict, Optional, AsyncIterator, Any
+from typing import AsyncIterator, Dict, List, Optional
 
 import redis.asyncio as redis
 from redis.asyncio import ConnectionPool
@@ -39,11 +39,7 @@ class AsyncRedisClient(AsyncBaseClient):
     TENANT_SEPARATOR = ":"  # org:user:key
 
     def __init__(
-        self,
-        password: Optional[str] = None,
-        db: int = 0,
-        max_connections: int = 20,
-        **kwargs
+        self, password: Optional[str] = None, db: int = 0, max_connections: int = 20, **kwargs
     ):
         """
         Initialize async Redis client with native driver.
@@ -56,7 +52,7 @@ class AsyncRedisClient(AsyncBaseClient):
         """
         super().__init__(**kwargs)
 
-        self._password = password or os.getenv('REDIS_PASSWORD')
+        self._password = password or os.getenv("REDIS_PASSWORD")
         self._db = db
         self._max_connections = max_connections
 
@@ -72,7 +68,7 @@ class AsyncRedisClient(AsyncBaseClient):
             password=self._password,
             db=self._db,
             decode_responses=True,
-            max_connections=self._max_connections
+            max_connections=self._max_connections,
         )
         self._client = redis.Redis(connection_pool=self._pool)
         self._logger.info(f"Connected to Redis at {self._host}:{self._port}")
@@ -99,10 +95,10 @@ class AsyncRedisClient(AsyncBaseClient):
             info = await self._client.info() if deep_check else {}
 
             return {
-                'healthy': True,
-                'redis_status': 'connected',
-                'connected_clients': info.get('connected_clients', 0),
-                'used_memory_bytes': info.get('used_memory', 0)
+                "healthy": True,
+                "redis_status": "connected",
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory_bytes": info.get("used_memory", 0),
             }
 
         except Exception as e:
@@ -123,7 +119,7 @@ class AsyncRedisClient(AsyncBaseClient):
             else:
                 result = await self._client.set(prefixed_key, value)
 
-            return result is True or result == 'OK'
+            return result is True or result == "OK"
 
         except Exception as e:
             return self.handle_error(e, "set")
@@ -227,32 +223,28 @@ class AsyncRedisClient(AsyncBaseClient):
             pipe = self._client.pipeline()
 
             for cmd in commands:
-                op = cmd.get('operation', '').upper()
-                key = self._prefix_key(cmd.get('key', ''))
-                value = cmd.get('value', '')
-                expiration = cmd.get('expiration')
+                op = cmd.get("operation", "").upper()
+                key = self._prefix_key(cmd.get("key", ""))
+                value = cmd.get("value", "")
+                expiration = cmd.get("expiration")
 
-                if op == 'SET':
+                if op == "SET":
                     if expiration:
                         pipe.setex(key, expiration, value)
                     else:
                         pipe.set(key, value)
-                elif op == 'GET':
+                elif op == "GET":
                     pipe.get(key)
-                elif op == 'DELETE':
+                elif op == "DELETE":
                     pipe.delete(key)
-                elif op == 'INCR':
+                elif op == "INCR":
                     pipe.incr(key)
-                elif op == 'DECR':
+                elif op == "DECR":
                     pipe.decr(key)
 
             results = await pipe.execute()
 
-            return {
-                'success': True,
-                'executed_count': len(results),
-                'errors': []
-            }
+            return {"success": True, "executed_count": len(results), "errors": []}
 
         except Exception as e:
             self.handle_error(e, "execute_batch")
@@ -306,10 +298,7 @@ class AsyncRedisClient(AsyncBaseClient):
         """Rename key."""
         try:
             await self._ensure_connected()
-            await self._client.rename(
-                self._prefix_key(old_key),
-                self._prefix_key(new_key)
-            )
+            await self._client.rename(self._prefix_key(old_key), self._prefix_key(new_key))
             return True
 
         except Exception as e:
@@ -326,7 +315,7 @@ class AsyncRedisClient(AsyncBaseClient):
             async for key in self._client.scan_iter(match=full_pattern, count=limit):
                 # Remove prefix from returned keys
                 if key.startswith(prefix):
-                    keys.append(key[len(prefix):])
+                    keys.append(key[len(prefix) :])
                 else:
                     keys.append(key)
                 if len(keys) >= limit:
@@ -512,8 +501,9 @@ class AsyncRedisClient(AsyncBaseClient):
             self.handle_error(e, "zadd")
             return None
 
-    async def zrange(self, key: str, start: int = 0, stop: int = -1,
-                     with_scores: bool = False) -> List:
+    async def zrange(
+        self, key: str, start: int = 0, stop: int = -1, with_scores: bool = False
+    ) -> List:
         """Get sorted set range."""
         try:
             await self._ensure_connected()
@@ -566,8 +556,9 @@ class AsyncRedisClient(AsyncBaseClient):
     # Distributed Lock Operations
     # ============================================
 
-    async def acquire_lock(self, lock_key: str, ttl_seconds: int = 10,
-                          wait_timeout_seconds: int = 5) -> Optional[str]:
+    async def acquire_lock(
+        self, lock_key: str, ttl_seconds: int = 10, wait_timeout_seconds: int = 5
+    ) -> Optional[str]:
         """Acquire distributed lock using SET NX."""
         try:
             await self._ensure_connected()
@@ -577,9 +568,7 @@ class AsyncRedisClient(AsyncBaseClient):
             deadline = asyncio.get_event_loop().time() + wait_timeout_seconds
 
             while asyncio.get_event_loop().time() < deadline:
-                acquired = await self._client.set(
-                    prefixed_key, lock_id, nx=True, ex=ttl_seconds
-                )
+                acquired = await self._client.set(prefixed_key, lock_id, nx=True, ex=ttl_seconds)
                 if acquired:
                     return lock_id
 
@@ -655,17 +644,13 @@ class AsyncRedisClient(AsyncBaseClient):
             await pubsub.subscribe(*prefixed_channels)
 
             async for message in pubsub.listen():
-                if message['type'] == 'message':
-                    channel = message['channel']
+                if message["type"] == "message":
+                    channel = message["channel"]
                     prefix = self._get_key_prefix()
                     if channel.startswith(prefix):
-                        channel = channel[len(prefix):]
+                        channel = channel[len(prefix) :]
 
-                    yield {
-                        'channel': channel,
-                        'message': message['data'],
-                        'timestamp': ''
-                    }
+                    yield {"channel": channel, "message": message["data"], "timestamp": ""}
 
         except Exception as e:
             self.handle_error(e, "subscribe")
@@ -725,12 +710,14 @@ class AsyncRedisClient(AsyncBaseClient):
             info = await self._client.info()
 
             return {
-                'total_keys': info.get('db0', {}).get('keys', 0) if isinstance(info.get('db0'), dict) else 0,
-                'memory_used_bytes': info.get('used_memory', 0),
-                'commands_processed': info.get('total_commands_processed', 0),
-                'connections_received': info.get('total_connections_received', 0),
-                'hit_rate': 0,  # Would need keyspace_hits / (keyspace_hits + keyspace_misses)
-                'key_type_distribution': {}
+                "total_keys": (
+                    info.get("db0", {}).get("keys", 0) if isinstance(info.get("db0"), dict) else 0
+                ),
+                "memory_used_bytes": info.get("used_memory", 0),
+                "commands_processed": info.get("total_commands_processed", 0),
+                "connections_received": info.get("total_connections_received", 0),
+                "hit_rate": 0,  # Would need keyspace_hits / (keyspace_hits + keyspace_misses)
+                "key_type_distribution": {},
             }
 
         except Exception as e:
@@ -744,36 +731,31 @@ class AsyncRedisClient(AsyncBaseClient):
         """Get multiple keys concurrently."""
         return await self.mget(keys)
 
-    async def set_many_concurrent(self, key_values: Dict[str, str],
-                                  ttl_seconds: int = 0) -> Dict[str, bool]:
+    async def set_many_concurrent(
+        self, key_values: Dict[str, str], ttl_seconds: int = 0
+    ) -> Dict[str, bool]:
         """Set multiple key-values concurrently."""
         success = await self.mset(key_values, ttl_seconds)
         return {k: success for k in key_values.keys()}
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
-        async with AsyncRedisClient(
-            host='localhost',
-            port=6379,
-            user_id='test_user'
-        ) as client:
+        async with AsyncRedisClient(host="localhost", port=6379, user_id="test_user") as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Basic operations
-            await client.set('test:key1', 'value1')
-            value = await client.get('test:key1')
+            await client.set("test:key1", "value1")
+            value = await client.get("test:key1")
             print(f"Got: {value}")
 
             # Batch operations
-            await client.mset({
-                'test:key2': 'value2',
-                'test:key3': 'value3'
-            })
-            values = await client.mget(['test:key2', 'test:key3'])
+            await client.mset({"test:key2": "value2", "test:key3": "value3"})
+            values = await client.mget(["test:key2", "test:key3"])
             print(f"Batch get: {values}")
 
     asyncio.run(main())

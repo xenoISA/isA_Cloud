@@ -55,7 +55,7 @@ class ApplicationLogger:
         with self.loki:
             message = f"{method} {path} - {status_code} ({duration_ms}ms)"
             level = 'ERROR' if status_code >= 400 else 'INFO'
-            
+
             self.loki.push_simple_log(
                 message,
                 service=self.service_name,
@@ -77,7 +77,7 @@ class ApplicationLogger:
             }
             if context:
                 labels.update(context)
-            
+
             self.loki.push_log(f'{error_type}: {error_message}', labels)
 
     def get_error_summary(self, hours=24):
@@ -86,7 +86,7 @@ class ApplicationLogger:
             from datetime import timedelta
             end = datetime.now()
             start = end - timedelta(hours=hours)
-            
+
             return self.loki.query_stats(
                 f'{{service="{self.service_name}", level="error"}}',
                 start, end
@@ -310,23 +310,23 @@ try:
         Label(key='service', value='my-app'),
         Label(key='level', value='info')
     ]
-    
+
     entry = LogEntry(
         timestamp=int(datetime.now().timestamp() * 1e9),
         message='User logged in',
         labels=labels
     )
-    
+
     request = PushLogRequest(
         user_id='my-service',
         logs=[entry]
     )
-    
+
     response = stub.PushLog(request)
-    
+
     if not response.success:
         raise Exception(response.error_message)
-        
+
 except grpc.RpcError as e:
     # Complex error handling
     print(f"gRPC error: {e}")
@@ -395,4 +395,3 @@ The Loki client gives you:
 - **Type-safe** results (dicts)
 
 Just pip install and focus on your application logging and debugging workflows!
-

@@ -11,11 +11,12 @@ This demonstrates how to use NATS for:
 - JetStream for Persistence
 """
 
-import sys
-import json
 import argparse
-from isa_common.nats_client import NATSClient
+import json
+import sys
+
 from isa_common.consul_client import ConsulRegistry
+from isa_common.nats_client import NATSClient
 
 
 # ============================================
@@ -27,7 +28,7 @@ def example_01_health_check(client: NATSClient):
 
     health = client.health_check()
     if health:
-        print(f"✅ Service is healthy")
+        print("✅ Service is healthy")
         print(f"   JetStream enabled: {health['jetstream_enabled']}")
         print(f"   Connections: {health['connections']}")
         return True
@@ -42,17 +43,17 @@ def example_02_basic_pubsub(client: NATSClient):
     print("\n=== Example 2: Basic Pub/Sub ===")
 
     # Publish simple message
-    if client.publish('events.user.login', b'User logged in'):
+    if client.publish("events.user.login", b"User logged in"):
         print("✅ Message published to events.user.login")
 
     # Publish JSON message
     event_data = {
-        'event_id': 'evt_123',
-        'user_id': 'user_456',
-        'action': 'login',
-        'timestamp': '2025-10-17T10:00:00Z'
+        "event_id": "evt_123",
+        "user_id": "user_456",
+        "action": "login",
+        "timestamp": "2025-10-17T10:00:00Z",
     }
-    if client.publish('events.user.login', json.dumps(event_data).encode()):
+    if client.publish("events.user.login", json.dumps(event_data).encode()):
         print("✅ JSON event published")
 
     return True
@@ -67,11 +68,11 @@ def example_03_subject_hierarchy(client: NATSClient):
 
     # Subjects support hierarchical structure (e.g., orders.created, orders.updated)
     subjects = [
-        ('orders.created', {'order_id': 'ord_001', 'total': 99.99}),
-        ('orders.updated', {'order_id': 'ord_001', 'status': 'shipped'}),
-        ('orders.cancelled', {'order_id': 'ord_002'}),
-        ('users.registered', {'user_id': 'usr_123'}),
-        ('users.login', {'user_id': 'usr_123'}),
+        ("orders.created", {"order_id": "ord_001", "total": 99.99}),
+        ("orders.updated", {"order_id": "ord_001", "status": "shipped"}),
+        ("orders.cancelled", {"order_id": "ord_002"}),
+        ("users.registered", {"user_id": "usr_123"}),
+        ("users.login", {"user_id": "usr_123"}),
     ]
 
     for subject, data in subjects:
@@ -94,18 +95,18 @@ def example_04_binary_large_messages(client: NATSClient):
 
     # Binary data
     binary_data = bytes(range(256))
-    if client.publish('data.binary', binary_data):
+    if client.publish("data.binary", binary_data):
         print(f"✅ Published {len(binary_data)} bytes of binary data")
 
     # Large message (1MB)
-    large_msg = b'X' * (1024 * 1024)
-    if client.publish('data.large', large_msg):
-        print(f"✅ Published 1MB message")
+    large_msg = b"X" * (1024 * 1024)
+    if client.publish("data.large", large_msg):
+        print("✅ Published 1MB message")
 
     # Bulk publishing (100 messages for demo)
     print("Publishing 100 messages...")
     for i in range(100):
-        if not client.publish('test.bulk', f'Message {i}'.encode()):
+        if not client.publish("test.bulk", f"Message {i}".encode()):
             print(f"Failed at message {i}")
             return False
 
@@ -120,16 +121,16 @@ def example_05_kv_store(client: NATSClient):
     """Use NATS KV store as Redis replacement"""
     print("\n=== Example 5: KV Store (Redis Integration) ===")
 
-    bucket = 'app-config'
+    bucket = "app-config"
 
     # Put key-value pairs
     print("Storing configuration...")
-    client.kv_put(bucket, 'database.host', b'localhost')
-    client.kv_put(bucket, 'database.port', b'5432')
-    client.kv_put(bucket, 'cache.ttl', b'300')
+    client.kv_put(bucket, "database.host", b"localhost")
+    client.kv_put(bucket, "database.port", b"5432")
+    client.kv_put(bucket, "cache.ttl", b"300")
 
     # Get value
-    result = client.kv_get(bucket, 'database.host')
+    result = client.kv_get(bucket, "database.host")
     if result:
         print(f"✅ Retrieved: {result['value'].decode()}")
         print(f"   Revision: {result['revision']}")
@@ -139,12 +140,12 @@ def example_05_kv_store(client: NATSClient):
     print(f"✅ Keys in bucket '{bucket}': {keys}")
 
     # Delete key
-    if client.kv_delete(bucket, 'cache.ttl'):
+    if client.kv_delete(bucket, "cache.ttl"):
         print("✅ Deleted cache.ttl")
 
     # Cleanup
     for key in keys:
-        if key != 'cache.ttl':  # Already deleted
+        if key != "cache.ttl":  # Already deleted
             client.kv_delete(bucket, key)
 
     return True
@@ -157,12 +158,12 @@ def example_06_jetstream_create_stream(client: NATSClient):
     """Create JetStream stream for persistent messaging"""
     print("\n=== Example 6: JetStream - Create Stream ===")
 
-    stream_name = 'TASKS'
+    stream_name = "TASKS"
     result = client.create_stream(
         name=stream_name,
-        subjects=['tasks.>'],  # All subjects starting with 'tasks.'
-        max_msgs=10000,        # Maximum messages to retain
-        max_bytes=10*1024*1024  # 10MB max storage
+        subjects=["tasks.>"],  # All subjects starting with 'tasks.'
+        max_msgs=10000,  # Maximum messages to retain
+        max_bytes=10 * 1024 * 1024,  # 10MB max storage
     )
 
     if result:
@@ -184,34 +185,32 @@ def example_07_publish_tasks(client: NATSClient, stream_name: str):
     # Define tasks (similar to Celery tasks)
     tasks = [
         {
-            'task_id': 'task_001',
-            'task_type': 'process_image',
-            'priority': 'high',
-            'payload': {'image_id': 'img_123', 'operations': ['resize', 'crop']},
-            'retry_count': 3
+            "task_id": "task_001",
+            "task_type": "process_image",
+            "priority": "high",
+            "payload": {"image_id": "img_123", "operations": ["resize", "crop"]},
+            "retry_count": 3,
         },
         {
-            'task_id': 'task_002',
-            'task_type': 'send_email',
-            'priority': 'normal',
-            'payload': {'to': 'user@example.com', 'subject': 'Welcome!'},
-            'retry_count': 2
+            "task_id": "task_002",
+            "task_type": "send_email",
+            "priority": "normal",
+            "payload": {"to": "user@example.com", "subject": "Welcome!"},
+            "retry_count": 2,
         },
         {
-            'task_id': 'task_003',
-            'task_type': 'generate_report',
-            'priority': 'low',
-            'payload': {'report_type': 'monthly', 'user_id': 'usr_456'},
-            'retry_count': 1
-        }
+            "task_id": "task_003",
+            "task_type": "generate_report",
+            "priority": "low",
+            "payload": {"report_type": "monthly", "user_id": "usr_456"},
+            "retry_count": 1,
+        },
     ]
 
     print(f"Publishing {len(tasks)} tasks to stream '{stream_name}'...")
     for task in tasks:
         result = client.publish_to_stream(
-            stream_name=stream_name,
-            subject='tasks.processing',
-            data=json.dumps(task).encode()
+            stream_name=stream_name, subject="tasks.processing", data=json.dumps(task).encode()
         )
         if result:
             print(f"✅ Task {task['task_id']} published - seq: {result['sequence']}")
@@ -226,11 +225,11 @@ def example_08_create_consumer(client: NATSClient, stream_name: str):
     """Create consumer for processing tasks (like Celery worker)"""
     print("\n=== Example 8: Create Consumer (Task Worker) ===")
 
-    consumer_name = 'task-worker'
+    consumer_name = "task-worker"
     result = client.create_consumer(
         stream_name=stream_name,
         consumer_name=consumer_name,
-        filter_subject='tasks.>'  # Process all task subjects
+        filter_subject="tasks.>",  # Process all task subjects
     )
 
     if result:
@@ -252,9 +251,7 @@ def example_09_pull_process_tasks(client: NATSClient, stream_name: str, consumer
 
     # Pull messages (batch processing)
     messages = client.pull_messages(
-        stream_name=stream_name,
-        consumer_name=consumer_name,
-        batch_size=10
+        stream_name=stream_name, consumer_name=consumer_name, batch_size=10
     )
 
     if len(messages) == 0:
@@ -267,7 +264,7 @@ def example_09_pull_process_tasks(client: NATSClient, stream_name: str, consumer
 
     # Process each task
     for msg in messages:
-        task = json.loads(msg['data'].decode())
+        task = json.loads(msg["data"].decode())
         print(f"\n=🔄 Processing task: {task.get('task_id')}")
         print(f"   Type: {task.get('task_type')}")
         print(f"   Priority: {task.get('priority')}")
@@ -277,7 +274,7 @@ def example_09_pull_process_tasks(client: NATSClient, stream_name: str, consumer
         # In real application, you would execute the actual task here
 
         # Acknowledge message after successful processing
-        if client.ack_message(stream_name, consumer_name, msg['sequence']):
+        if client.ack_message(stream_name, consumer_name, msg["sequence"]):
             print(f"   ✅ Task acknowledged (seq: {msg['sequence']})")
 
     return True
@@ -290,15 +287,15 @@ def example_10_object_store(client: NATSClient):
     """Use NATS Object Store (integrates with MinIO for streaming)"""
     print("\n=== Example 10: Object Store (MinIO Integration) ===")
 
-    bucket = 'documents'
+    bucket = "documents"
 
     # Put objects
     print("Storing objects...")
-    doc1 = b'This is document 1 content' * 50
-    client.object_put(bucket, 'doc1.txt', doc1)
+    doc1 = b"This is document 1 content" * 50
+    client.object_put(bucket, "doc1.txt", doc1)
 
-    doc2 = b'This is document 2 content' * 100
-    client.object_put(bucket, 'doc2.txt', doc2)
+    doc2 = b"This is document 2 content" * 100
+    client.object_put(bucket, "doc2.txt", doc2)
 
     # List objects
     objects = client.object_list(bucket)
@@ -311,15 +308,15 @@ def example_10_object_store(client: NATSClient):
         print("   (This may indicate the object store backend needs configuration)")
 
     # Get object
-    result = client.object_get(bucket, 'doc1.txt')
+    result = client.object_get(bucket, "doc1.txt")
     if result:
         print(f"✅ Retrieved object: {len(result['data'])} bytes")
     else:
         print("⚠️  Object retrieval failed")
 
     # Cleanup
-    client.object_delete(bucket, 'doc1.txt')
-    client.object_delete(bucket, 'doc2.txt')
+    client.object_delete(bucket, "doc1.txt")
+    client.object_delete(bucket, "doc2.txt")
 
     return True
 
@@ -360,13 +357,13 @@ def example_12_request_reply(client: NATSClient):
 
     print("Sending request to 'api.users.get'...")
     try:
-        result = client.request('api.users.get', b'user_id=123', timeout_seconds=2)
+        result = client.request("api.users.get", b"user_id=123", timeout_seconds=2)
         if result:
             print(f"✅ Response received: {result['data']}")
         else:
             print("⚠️  No response received")
     except Exception as e:
-        if 'timeout' in str(e).lower() or 'no responders' in str(e).lower():
+        if "timeout" in str(e).lower() or "no responders" in str(e).lower():
             print("⚠️  Timeout (expected - no responder set up)")
             print("   In production, you would have a service listening on 'api.users.get'")
         else:
@@ -380,7 +377,7 @@ def example_12_request_reply(client: NATSClient):
 # ============================================
 def example_13_cleanup_stream(client: NATSClient, stream_name: str):
     """Delete JetStream stream"""
-    print(f"\n=== Example 13: Cleanup Stream ===")
+    print("\n=== Example 13: Cleanup Stream ===")
 
     if client.delete_stream(stream_name):
         print(f"✅ Stream '{stream_name}' deleted")
@@ -398,24 +395,24 @@ def example_14_batch_publish(client: NATSClient):
 
     # Create batch of messages
     messages = [
-        {'subject': 'events.batch.1', 'data': b'Batch message 1'},
-        {'subject': 'events.batch.2', 'data': b'Batch message 2'},
+        {"subject": "events.batch.1", "data": b"Batch message 1"},
+        {"subject": "events.batch.2", "data": b"Batch message 2"},
         {
-            'subject': 'events.batch.3',
-            'data': json.dumps({'event': 'user.action', 'user_id': 'usr_123'}).encode(),
-            'headers': {'priority': 'high', 'source': 'batch-example'}
+            "subject": "events.batch.3",
+            "data": json.dumps({"event": "user.action", "user_id": "usr_123"}).encode(),
+            "headers": {"priority": "high", "source": "batch-example"},
         },
-        {'subject': 'events.batch.4', 'data': b'Batch message 4'},
-        {'subject': 'events.batch.5', 'data': b'Batch message 5'},
+        {"subject": "events.batch.4", "data": b"Batch message 4"},
+        {"subject": "events.batch.5", "data": b"Batch message 5"},
     ]
 
     print(f"Publishing batch of {len(messages)} messages...")
     result = client.publish_batch(messages)
 
     if result:
-        print(f"✅ Batch publish successful!")
+        print("✅ Batch publish successful!")
         print(f"   Published: {result['published_count']}/{len(messages)} messages")
-        if result.get('errors'):
+        if result.get("errors"):
             print(f"   Errors: {result['errors']}")
         return True
 
@@ -437,10 +434,10 @@ def example_15_subscribe(client: NATSClient):
 
     def message_handler(msg):
         """Callback function for handling received messages"""
-        print(f"\n= Message received:")
+        print("\n= Message received:")
         print(f"   Subject: {msg['subject']}")
         print(f"   Data: {msg['data'][:100]}...")  # Show first 100 bytes
-        if msg.get('headers'):
+        if msg.get("headers"):
             print(f"   Headers: {msg['headers']}")
         received_messages.append(msg)
 
@@ -455,9 +452,9 @@ def example_15_subscribe(client: NATSClient):
             def subscribe_thread():
                 try:
                     print("\n= Starting subscriber for 'demo.events.*'...")
-                    sub_client.subscribe('demo.events.*', message_handler, timeout_seconds=8)
+                    sub_client.subscribe("demo.events.*", message_handler, timeout_seconds=8)
                 except Exception as e:
-                    if 'timeout' not in str(e).lower():
+                    if "timeout" not in str(e).lower():
                         print(f"⚠️  Subscribe error: {e}")
 
             thread = threading.Thread(target=subscribe_thread)
@@ -469,11 +466,11 @@ def example_15_subscribe(client: NATSClient):
 
             # Publish some test messages
             print("\n= Publishing test messages...")
-            pub_client.publish('demo.events.login', b'User logged in')
+            pub_client.publish("demo.events.login", b"User logged in")
             time.sleep(0.5)
-            pub_client.publish('demo.events.logout', b'User logged out')
+            pub_client.publish("demo.events.logout", b"User logged out")
             time.sleep(0.5)
-            pub_client.publish('demo.events.signup', json.dumps({'user_id': 'usr_456'}).encode())
+            pub_client.publish("demo.events.signup", json.dumps({"user_id": "usr_456"}).encode())
             time.sleep(0.5)
 
             # Wait for messages to be processed
@@ -502,7 +499,7 @@ def example_16_subscribe_wildcards(client: NATSClient):
 
     def wildcard_handler(msg):
         """Track which subjects we receive"""
-        received_subjects.append(msg['subject'])
+        received_subjects.append(msg["subject"])
         print(f"✅ Received: {msg['subject']}")
 
     # Create two separate clients - one for publishing, one for subscribing
@@ -515,7 +512,7 @@ def example_16_subscribe_wildcards(client: NATSClient):
             def subscribe_thread():
                 try:
                     print("\n= Subscribing to 'orders.*' (single-level wildcard)...")
-                    sub_client.subscribe('orders.*', wildcard_handler, timeout_seconds=6)
+                    sub_client.subscribe("orders.*", wildcard_handler, timeout_seconds=6)
                 except Exception:
                     pass
 
@@ -527,12 +524,12 @@ def example_16_subscribe_wildcards(client: NATSClient):
 
             # Publish to matching subjects
             print("\n= Publishing to various subjects...")
-            pub_client.publish('orders.created', b'Order created')
-            pub_client.publish('orders.updated', b'Order updated')
-            pub_client.publish('orders.cancelled', b'Order cancelled')
-            pub_client.publish('orders.shipped', b'Order shipped')
+            pub_client.publish("orders.created", b"Order created")
+            pub_client.publish("orders.updated", b"Order updated")
+            pub_client.publish("orders.cancelled", b"Order cancelled")
+            pub_client.publish("orders.shipped", b"Order shipped")
             # This should NOT match the wildcard
-            pub_client.publish('orders.payment.completed', b'Should not receive')
+            pub_client.publish("orders.payment.completed", b"Should not receive")
 
             time.sleep(2)
 
@@ -543,7 +540,7 @@ def example_16_subscribe_wildcards(client: NATSClient):
             print("   'orders.>' WOULD match: orders.payment.completed (multi-level)")
 
             # Check we didn't receive the multi-level subject
-            if 'orders.payment.completed' not in received_subjects:
+            if "orders.payment.completed" not in received_subjects:
                 print("\n✅ Wildcard filtering worked correctly!")
                 return True
             else:
@@ -564,9 +561,9 @@ def example_17_unsubscribe(client: NATSClient):
 
     # Unsubscribe from a subject
     print("Unsubscribing from 'demo.events.*'...")
-    result = client.unsubscribe('demo.events.*')
+    result = client.unsubscribe("demo.events.*")
 
-    if result and result.get('success'):
+    if result and result.get("success"):
         print("✅ Unsubscribe successful")
         print("   No more messages will be received from 'demo.events.*'")
         return True
@@ -580,7 +577,7 @@ def example_17_unsubscribe(client: NATSClient):
 # ============================================
 def main():
     parser = argparse.ArgumentParser(
-        description='NATS Client Examples - Event Streaming, Task Queues, KV Store, Object Store',
+        description="NATS Client Examples - Event Streaming, Task Queues, KV Store, Object Store",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -592,17 +589,30 @@ Examples:
 
   # List all examples
   python nats_client_examples.py --list
-        """
+        """,
     )
 
-    parser.add_argument('--host', default=None, help='NATS service host (optional, uses Consul discovery if not provided)')
-    parser.add_argument('--port', type=int, default=None, help='NATS service port (optional, uses Consul discovery if not provided)')
-    parser.add_argument('--user-id', default='example-user', help='User ID (default: example-user)')
-    parser.add_argument('--consul-host', default='localhost', help='Consul host (default: localhost)')
-    parser.add_argument('--consul-port', type=int, default=8500, help='Consul port (default: 8500)')
-    parser.add_argument('--use-consul', action='store_true', help='Use Consul for service discovery')
-    parser.add_argument('--example', type=int, help='Run specific example (1-17)')
-    parser.add_argument('--list', action='store_true', help='List all available examples')
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="NATS service host (optional, uses Consul discovery if not provided)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="NATS service port (optional, uses Consul discovery if not provided)",
+    )
+    parser.add_argument("--user-id", default="example-user", help="User ID (default: example-user)")
+    parser.add_argument(
+        "--consul-host", default="localhost", help="Consul host (default: localhost)"
+    )
+    parser.add_argument("--consul-port", type=int, default=8500, help="Consul port (default: 8500)")
+    parser.add_argument(
+        "--use-consul", action="store_true", help="Use Consul for service discovery"
+    )
+    parser.add_argument("--example", type=int, help="Run specific example (1-17)")
+    parser.add_argument("--list", action="store_true", help="List all available examples")
 
     args = parser.parse_args()
 
@@ -629,7 +639,7 @@ Examples:
         return 0
 
     print(f"\n{'='*70}")
-    print(f"  NATS Client Examples")
+    print("  NATS Client Examples")
     print(f"{'='*70}")
 
     # Default: Try Consul first, fallback to localhost
@@ -637,29 +647,27 @@ Examples:
     if args.host is None or args.port is None:
         if not args.use_consul:  # use_consul now means "skip consul"
             try:
-                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
-                consul_registry = ConsulRegistry(
-                    consul_host=args.consul_host,
-                    consul_port=args.consul_port
+                print(
+                    f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}..."
                 )
-                print(f"✅ Consul connected, will auto-discover NATS service")
+                consul_registry = ConsulRegistry(
+                    consul_host=args.consul_host, consul_port=args.consul_port
+                )
+                print("✅ Consul connected, will auto-discover NATS service")
             except Exception as e:
                 print(f"⚠️  Consul discovery failed: {e}")
-                print(f"📍 Falling back to localhost:50056...")
+                print("📍 Falling back to localhost:50056...")
 
     if args.host and args.port:
         print(f"🔗 Connecting to {args.host}:{args.port}")
     elif consul_registry:
-        print(f"🔗 Will auto-discover NATS via Consul...")
+        print("🔗 Will auto-discover NATS via Consul...")
     else:
-        print(f"🔗 Connecting to localhost:50056")
+        print("🔗 Connecting to localhost:50056")
 
     try:
         with NATSClient(
-            host=args.host,
-            port=args.port,
-            user_id=args.user_id,
-            consul_registry=consul_registry
+            host=args.host, port=args.port, user_id=args.user_id, consul_registry=consul_registry
         ) as client:
             # Run specific example
             if args.example:
@@ -704,7 +712,9 @@ Examples:
                 elif args.example == 13:
                     print("Please specify a stream name to delete")
                 else:
-                    print(f"Example {args.example} not found. Use --list to see available examples.")
+                    print(
+                        f"Example {args.example} not found. Use --list to see available examples."
+                    )
                     return 1
             else:
                 # Run all examples
@@ -743,11 +753,12 @@ Examples:
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

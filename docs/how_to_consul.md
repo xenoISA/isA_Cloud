@@ -83,8 +83,8 @@ Consul 是 HashiCorp 开发的分布式服务网格解决方案，在 isA Cloud 
 
 #### 1. Consul Server (consul-0)
 
-**部署类型**: StatefulSet  
-**副本数**: 1 (开发/测试环境)  
+**部署类型**: StatefulSet
+**副本数**: 1 (开发/测试环境)
 **持久化**: 1Gi PVC
 
 **职责**:
@@ -113,8 +113,8 @@ Consul 是 HashiCorp 开发的分布式服务网格解决方案，在 isA Cloud 
 
 #### 2. Consul Agent (consul-agent)
 
-**部署类型**: Deployment  
-**副本数**: 1  
+**部署类型**: Deployment
+**副本数**: 1
 **持久化**: emptyDir (无持久化)
 
 **职责**:
@@ -155,14 +155,14 @@ Consul 是 HashiCorp 开发的分布式服务网格解决方案，在 isA Cloud 
       ▼
 ┌────────────────┐
 │  Consul Agent  │  共享注册点
-│ (consul-agent) │  
+│ (consul-agent) │
 └─────┬──────────┘
       │
       │ 2. Gossip Protocol (8301)
       ▼
 ┌────────────────┐
 │ Consul Server  │  数据存储
-│   (consul-0)   │  
+│   (consul-0)   │
 └─────┬──────────┘
       │
       │ 3. Raft Consensus
@@ -216,19 +216,19 @@ spec:
         args:
         - "agent"
         - "-config-file=/consul/config-from-cm/consul.json"
-        
+
         ports:
         - containerPort: 8500  # HTTP/API
         - containerPort: 8600  # DNS
         - containerPort: 8300  # Server RPC
         - containerPort: 8301  # Serf LAN
-        
+
         volumeMounts:
         - name: data           # 持久化数据
           mountPath: /consul/data
         - name: config         # 配置文件
           mountPath: /consul/config-from-cm
-        
+
         resources:
           requests:
             cpu: 100m
@@ -236,7 +236,7 @@ spec:
           limits:
             cpu: 256m
             memory: 512Mi
-  
+
   volumeClaimTemplates:
   - metadata:
       name: data
@@ -315,18 +315,18 @@ spec:
         - "-config-file=/consul/config/grpc-services.json"  # 预注册 gRPC 服务
         - "-client=0.0.0.0"
         - "-bind=0.0.0.0"
-        
+
         ports:
         - containerPort: 8500  # HTTP/API
         - containerPort: 8502  # gRPC
         - containerPort: 8600  # DNS
-        
+
         volumeMounts:
         - name: config
           mountPath: /consul/config
         - name: data
           mountPath: /consul/data
-      
+
       volumes:
       - name: config
         configMap:
@@ -575,21 +575,21 @@ curl -X PUT http://consul-agent.isa-cloud-staging.svc.cluster.local:8500/v1/agen
   "data_dir": "/consul/data",           // 数据目录（持久化）
   "client_addr": "0.0.0.0",             // 客户端监听地址（所有接口）
   "bind_addr": "0.0.0.0",               // 集群通信地址
-  
+
   "ui_config": {
     "enabled": true                     // 启用 Web UI
   },
-  
+
   "server": true,                       // Server 模式
   "bootstrap_expect": 1,                // 期望 Server 数量（测试环境）
-  
+
   "dns_config": {
     "enable_truncate": true,            // DNS 响应过大时截断
     "only_passing": true,               // DNS 只返回健康的服务
     "allow_stale": true,                // 允许从 follower 读取
     "max_stale": "87600h"               // 最大过期时间（10年）
   },
-  
+
   "log_level": "INFO",                  // 日志级别: DEBUG, INFO, WARN, ERROR
   "disable_anonymous_signature": true,  // 禁用匿名签名
   "disable_update_check": true          // 禁用更新检查
@@ -607,25 +607,25 @@ curl -X PUT http://consul-agent.isa-cloud-staging.svc.cluster.local:8500/v1/agen
   "data_dir": "/consul/data",
   "client_addr": "0.0.0.0",
   "bind_addr": "0.0.0.0",
-  
+
   "retry_join": [
     "consul-0.consul.isa-cloud-staging.svc.cluster.local"  // 自动加入 Server
   ],
-  
+
   "enable_script_checks": true,         // 允许脚本健康检查
   "enable_local_script_checks": true,   // 本地脚本检查
-  
+
   "log_level": "INFO",
-  
+
   "performance": {
     "raft_multiplier": 1                // Raft 性能调优（1=最快，5=最慢）
   },
-  
+
   "telemetry": {
     "prometheus_retention_time": "60s", // Prometheus 指标保留时间
     "disable_hostname": false           // 在指标中包含主机名
   },
-  
+
   "ports": {
     "http": 8500,                       // HTTP API
     "grpc": 8502,                       // gRPC API
@@ -1152,7 +1152,7 @@ spec:
                 values:
                 - consul
             topologyKey: kubernetes.io/hostname
-      
+
       containers:
       - name: consul
         resources:
@@ -1207,7 +1207,7 @@ spec:
     "api_path": "/api/v1/auth",        // API 路径
     "version": "1.0.0",                // 服务版本
     "protocol": "http",                // 协议类型
-    
+
     // 可选字段（用于路由和治理）
     "auth_required": "true",           // 是否需要认证
     "rate_limit": "100",               // 速率限制
@@ -1234,7 +1234,7 @@ spec:
       "timeout": "3s",
       "deregister_critical_service_after": "30s"  // 失败 30s 后自动注销
     },
-    
+
     // TTL 心跳检查（备用）
     {
       "id": "ttl-heartbeat",
@@ -1258,13 +1258,13 @@ async def health_check():
     try:
         # 检查数据库连接
         db.ping()
-        
+
         # 检查 Redis 连接
         redis.ping()
-        
+
         # 检查其他依赖
         # ...
-        
+
         return {
             "status": "healthy",
             "checks": {
@@ -1347,7 +1347,7 @@ consul tls cert create -server -dc staging
     "leave_drain_time": "5s",          // 节点离开前的排空时间
     "rpc_hold_timeout": "7s"           // RPC 保持超时
   },
-  
+
   "limits": {
     "http_max_conns_per_client": 200,  // 每客户端最大 HTTP 连接
     "https_handshake_timeout": "5s",
@@ -1355,7 +1355,7 @@ consul tls cert create -server -dc staging
     "rpc_rate": 100,                   // RPC 速率限制（无限制=-1）
     "kv_max_value_size": 524288        // KV 最大值大小（512KB）
   },
-  
+
   "dns_config": {
     "node_ttl": "0s",                  // 节点 DNS TTL
     "service_ttl": {
@@ -1456,11 +1456,11 @@ aws s3 ls $S3_BUCKET/ | awk '{print $4}' | \
    ```bash
    # 重新部署集群
    kubectl apply -f deployments/kubernetes/base/infrastructure/consul/
-   
+
    # 恢复数据
    # 等待 consul-0 启动
    kubectl wait --for=condition=ready pod/consul-0 -n isa-cloud-staging
-   
+
    # 恢复快照
    kubectl cp backup-latest.snap isa-cloud-staging/consul-0:/tmp/
    kubectl exec -n isa-cloud-staging consul-0 -- \
@@ -1719,7 +1719,7 @@ gRPC 基础设施服务 (9):
 
 ---
 
-**文档版本**: v1.0  
-**最后更新**: 2025-11-17  
-**维护者**: isA Cloud Platform Team  
+**文档版本**: v1.0
+**最后更新**: 2025-11-17
+**维护者**: isA Cloud Platform Team
 **反馈**: 如有问题或建议，请提交 Issue

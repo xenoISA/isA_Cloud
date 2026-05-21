@@ -1,8 +1,9 @@
 """Unit tests for ConsulRegistry — #119."""
-import json
-import pytest
-from unittest.mock import MagicMock, patch, call
 
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ============================================================================
 # L1 — Pure helper functions
@@ -14,24 +15,29 @@ class TestIsLoopback:
 
     def test_ipv4_loopback(self):
         from isa_common.consul_client import _is_loopback
+
         assert _is_loopback("127.0.0.1") is True
 
     def test_ipv6_loopback(self):
         from isa_common.consul_client import _is_loopback
+
         assert _is_loopback("::1") is True
 
     def test_localhost_string(self):
         from isa_common.consul_client import _is_loopback
+
         assert _is_loopback("localhost") is True
         assert _is_loopback("LOCALHOST") is True
 
     def test_non_loopback(self):
         from isa_common.consul_client import _is_loopback
+
         assert _is_loopback("10.0.0.1") is False
         assert _is_loopback("192.168.1.1") is False
 
     def test_127_x_variants(self):
         from isa_common.consul_client import _is_loopback
+
         assert _is_loopback("127.0.0.2") is True
         assert _is_loopback("127.255.255.255") is True
 
@@ -53,6 +59,7 @@ class TestConsulRegistryInit:
     def test_init_discovery_only(self):
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
+
             registry = ConsulRegistry()
             assert registry.service_name is None
             assert registry.service_id is None
@@ -61,9 +68,11 @@ class TestConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
-                 patch.dict("os.environ", {}, clear=True):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"),
+                patch.dict("os.environ", {}, clear=True),
+            ):
                 registry = ConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -76,14 +85,16 @@ class TestConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch(
-                     "isa_common.consul_client.socket.getaddrinfo",
-                     return_value=[
-                         (2, None, None, None, ("198.18.0.177", 0)),
-                     ],
-                 ), \
-                 patch.dict("os.environ", {}, clear=True):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch(
+                    "isa_common.consul_client.socket.getaddrinfo",
+                    return_value=[
+                        (2, None, None, None, ("198.18.0.177", 0)),
+                    ],
+                ),
+                patch.dict("os.environ", {}, clear=True),
+            ):
                 registry = ConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -96,12 +107,14 @@ class TestConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch.dict(
-                     "os.environ",
-                     {"DOCKER_DESKTOP_HOST_GATEWAY_IP": "192.168.99.1"},
-                     clear=True,
-                 ):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch.dict(
+                    "os.environ",
+                    {"DOCKER_DESKTOP_HOST_GATEWAY_IP": "192.168.99.1"},
+                    clear=True,
+                ),
+            ):
                 registry = ConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -114,18 +127,20 @@ class TestConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch(
-                     "isa_common.consul_client.socket.getaddrinfo",
-                     return_value=[
-                         (2, None, None, None, ("192.168.65.254", 0)),
-                     ],
-                 ), \
-                 patch.dict(
-                     "os.environ",
-                     {"SERVICE_HOST": "host.docker.internal"},
-                     clear=True,
-                 ):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch(
+                    "isa_common.consul_client.socket.getaddrinfo",
+                    return_value=[
+                        (2, None, None, None, ("192.168.65.254", 0)),
+                    ],
+                ),
+                patch.dict(
+                    "os.environ",
+                    {"SERVICE_HOST": "host.docker.internal"},
+                    clear=True,
+                ),
+            ):
                 registry = ConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -138,16 +153,18 @@ class TestConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import ConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch("isa_common.consul_client.socket.getaddrinfo", return_value=[object()]), \
-                 patch.dict(
-                     "os.environ",
-                     {
-                         "KUBERNETES_SERVICE_HOST": "10.96.0.1",
-                         "HOSTNAME": "apisix-pod-0",
-                     },
-                     clear=True,
-                 ):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch("isa_common.consul_client.socket.getaddrinfo", return_value=[object()]),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "KUBERNETES_SERVICE_HOST": "10.96.0.1",
+                        "HOSTNAME": "apisix-pod-0",
+                    },
+                    clear=True,
+                ),
+            ):
                 registry = ConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -252,16 +269,12 @@ class TestConsulRegistryConfig:
     """KV store get/set/get_all operations."""
 
     def test_get_config_string(self, consul_registry):
-        consul_registry.consul.kv.get.return_value = (
-            1, {"Value": b"hello"}
-        )
+        consul_registry.consul.kv.get.return_value = (1, {"Value": b"hello"})
         result = consul_registry.get_config("key1")
         assert result == "hello"
 
     def test_get_config_json(self, consul_registry):
-        consul_registry.consul.kv.get.return_value = (
-            1, {"Value": json.dumps({"a": 1}).encode()}
-        )
+        consul_registry.consul.kv.get.return_value = (1, {"Value": json.dumps({"a": 1}).encode()})
         result = consul_registry.get_config("key1")
         assert result == {"a": 1}
 
@@ -279,9 +292,7 @@ class TestConsulRegistryConfig:
         consul_registry.consul.kv.put.return_value = True
         result = consul_registry.set_config("key1", "value1")
         assert result is True
-        consul_registry.consul.kv.put.assert_called_once_with(
-            "test-service/key1", "value1"
-        )
+        consul_registry.consul.kv.put.assert_called_once_with("test-service/key1", "value1")
 
     def test_set_config_dict(self, consul_registry):
         consul_registry.consul.kv.put.return_value = True
@@ -296,10 +307,13 @@ class TestConsulRegistryConfig:
         assert result is False
 
     def test_get_all_config(self, consul_registry):
-        consul_registry.consul.kv.get.return_value = (1, [
-            {"Key": "test-service/db_host", "Value": b"localhost"},
-            {"Key": "test-service/db_port", "Value": b"5432"},
-        ])
+        consul_registry.consul.kv.get.return_value = (
+            1,
+            [
+                {"Key": "test-service/db_host", "Value": b"localhost"},
+                {"Key": "test-service/db_port", "Value": b"5432"},
+            ],
+        )
         result = consul_registry.get_all_config()
         assert result == {"db_host": "localhost", "db_port": 5432}
 
@@ -318,26 +332,29 @@ class TestConsulRegistryDiscovery:
     """Service discovery operations."""
 
     def test_discover_service(self, consul_registry):
-        consul_registry.consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "svc-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8080,
-                    "Tags": ["v1"],
-                    "Meta": {},
-                }
-            },
-            {
-                "Service": {
-                    "ID": "svc-2",
-                    "Address": "10.0.0.2",
-                    "Port": 8080,
-                    "Tags": ["v1"],
-                    "Meta": {},
-                }
-            },
-        ])
+        consul_registry.consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "svc-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8080,
+                        "Tags": ["v1"],
+                        "Meta": {},
+                    }
+                },
+                {
+                    "Service": {
+                        "ID": "svc-2",
+                        "Address": "10.0.0.2",
+                        "Port": 8080,
+                        "Tags": ["v1"],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
 
         instances = consul_registry.discover_service("my-service")
         assert len(instances) == 2
@@ -358,17 +375,20 @@ class TestConsulRegistryEndpoint:
     """get_service_endpoint and get_service_address."""
 
     def test_get_service_endpoint_single(self, consul_registry):
-        consul_registry.consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "svc-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8080,
-                    "Tags": [],
-                    "Meta": {},
-                }
-            },
-        ])
+        consul_registry.consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "svc-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8080,
+                        "Tags": [],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
         result = consul_registry.get_service_endpoint("my-service")
         assert result == "http://10.0.0.1:8080"
 
@@ -390,17 +410,20 @@ class TestConsulRegistryEndpoint:
             consul_registry.get_service_address("missing", max_retries=1)
 
     def test_get_service_address_success(self, consul_registry):
-        consul_registry.consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "svc-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8080,
-                    "Tags": [],
-                    "Meta": {},
-                }
-            },
-        ])
+        consul_registry.consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "svc-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8080,
+                        "Tags": [],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
         result = consul_registry.get_service_address("my-service")
         assert result == "http://10.0.0.1:8080"
 
@@ -414,17 +437,20 @@ class TestConsulRegistryConvenience:
             consul_registry.get_auth_service_url()
 
     def test_get_auth_service_url_found(self, consul_registry):
-        consul_registry.consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "auth-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8001,
-                    "Tags": [],
-                    "Meta": {},
-                }
-            },
-        ])
+        consul_registry.consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "auth-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8001,
+                        "Tags": [],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
         result = consul_registry.get_auth_service_url()
         assert result == "http://10.0.0.1:8001"
 

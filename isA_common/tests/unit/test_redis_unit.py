@@ -1,5 +1,5 @@
 """AsyncRedisClient unit tests — mocked redis driver, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock
 
 
@@ -29,10 +29,12 @@ class TestRedisHealthCheck:
 
     async def test_health_check_deep(self, redis_client):
         redis_client._client.ping = AsyncMock(return_value=True)
-        redis_client._client.info = AsyncMock(return_value={
-            "connected_clients": 5,
-            "used_memory": 2048,
-        })
+        redis_client._client.info = AsyncMock(
+            return_value={
+                "connected_clients": 5,
+                "used_memory": 2048,
+            }
+        )
 
         result = await redis_client.health_check(deep_check=True)
 

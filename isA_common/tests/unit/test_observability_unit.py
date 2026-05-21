@@ -1,7 +1,6 @@
 """Unified observability setup unit tests — no infrastructure required."""
-import pytest
-from unittest.mock import MagicMock, patch
 
+from unittest.mock import MagicMock, patch
 
 # ============================================================================
 # setup_observability() — all pillars enabled

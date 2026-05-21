@@ -40,7 +40,7 @@ for service_id in $services; do
         break
       fi
     done
-    
+
     if [ "$is_valid" = true ]; then
       echo "✅ Keeping valid: $service_id"
       ((kept_count++))

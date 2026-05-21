@@ -48,6 +48,3 @@ default_storage_type: "file"                   # 默认存储类型（file 或 m
 #   ISA_CLOUD_NATS_USERNAME
 #   ISA_CLOUD_NATS_PASSWORD
 #   ISA_CLOUD_NATS_TOKEN
-
-
-

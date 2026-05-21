@@ -121,7 +121,7 @@ class AnalyticsService:
             FROM user_activity
             WHERE total_revenue > 0
             """
-            
+
             return self.duckdb.execute_query(self.database_id, sql)
 
     def save_results(self, query, output_path):
@@ -627,7 +627,7 @@ try:
     result = conn.execute("""
         SELECT * FROM read_parquet('s3://bucket/data.parquet')
     """).fetchall()
-    
+
 except Exception as e:
     print(f"Error: {e}")
 finally:
@@ -726,4 +726,3 @@ The DuckDB client gives you:
 - **Auto-cleanup** context managers and lifecycle management
 
 Just pip install and focus on your analytical queries and data insights!
-

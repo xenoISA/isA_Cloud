@@ -1,5 +1,5 @@
 """AsyncLokiClient unit tests — mocked aiohttp session, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
 

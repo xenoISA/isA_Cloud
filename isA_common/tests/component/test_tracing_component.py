@@ -1,11 +1,10 @@
 """L2 Component tests for isa_common.tracing — verify span creation and no-op behavior."""
 
 import pytest
-from unittest.mock import MagicMock
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     _OTEL_SDK_AVAILABLE = True
 except ImportError:
@@ -41,8 +40,8 @@ class TestNoOpTracer:
     """Test no-op tracer behavior (always available, no deps required)."""
 
     def test_get_tracer_returns_noop_without_setup(self):
-        from isa_common.tracing import _NoOpTracer, _noop_tracer
         import isa_common.tracing as t
+        from isa_common.tracing import _noop_tracer, _NoOpTracer
 
         old_tracer = t._tracer
         t._tracer = _noop_tracer
@@ -61,7 +60,7 @@ class TestNoOpTracer:
             span.add_event("test_event")
 
     def test_noop_span_start_span(self):
-        from isa_common.tracing import _NoOpTracer, _NoOpSpan
+        from isa_common.tracing import _NoOpSpan, _NoOpTracer
 
         tracer = _NoOpTracer()
         span = tracer.start_span("test")

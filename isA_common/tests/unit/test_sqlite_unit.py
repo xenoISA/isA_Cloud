@@ -1,8 +1,6 @@
 """Unit tests for AsyncSQLiteClient — #119."""
-import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
+from unittest.mock import AsyncMock, MagicMock
 
 # ============================================================================
 # L1 — Pure helper functions (no I/O)
@@ -14,18 +12,21 @@ class TestConvertPgPlaceholders:
 
     def test_single_placeholder(self):
         from isa_common.async_sqlite_client import _convert_pg_placeholders
-        assert _convert_pg_placeholders("SELECT * FROM t WHERE id = $1") == \
-            "SELECT * FROM t WHERE id = ?"
+
+        assert (
+            _convert_pg_placeholders("SELECT * FROM t WHERE id = $1")
+            == "SELECT * FROM t WHERE id = ?"
+        )
 
     def test_multiple_placeholders(self):
         from isa_common.async_sqlite_client import _convert_pg_placeholders
-        result = _convert_pg_placeholders(
-            "INSERT INTO t (a, b, c) VALUES ($1, $2, $3)"
-        )
+
+        result = _convert_pg_placeholders("INSERT INTO t (a, b, c) VALUES ($1, $2, $3)")
         assert result == "INSERT INTO t (a, b, c) VALUES (?, ?, ?)"
 
     def test_no_placeholders(self):
         from isa_common.async_sqlite_client import _convert_pg_placeholders
+
         sql = "SELECT * FROM t"
         assert _convert_pg_placeholders(sql) == sql
 
@@ -35,11 +36,13 @@ class TestConvertPgSyntax:
 
     def test_ilike_to_like(self):
         from isa_common.async_sqlite_client import _convert_pg_syntax
+
         assert "LIKE" in _convert_pg_syntax("SELECT * FROM t WHERE name ILIKE '%foo%'")
         assert "ILIKE" not in _convert_pg_syntax("SELECT * FROM t WHERE name ILIKE '%foo%'")
 
     def test_preserves_regular_like(self):
         from isa_common.async_sqlite_client import _convert_pg_syntax
+
         sql = "SELECT * FROM t WHERE name LIKE '%foo%'"
         assert _convert_pg_syntax(sql) == sql
 
@@ -49,16 +52,19 @@ class TestSerializeValue:
 
     def test_dict(self):
         from isa_common.async_sqlite_client import _serialize_value
+
         result = _serialize_value({"key": "value"})
         assert result == '{"key": "value"}'
 
     def test_list(self):
         from isa_common.async_sqlite_client import _serialize_value
+
         result = _serialize_value([1, 2, 3])
         assert result == "[1, 2, 3]"
 
     def test_scalar_passthrough(self):
         from isa_common.async_sqlite_client import _serialize_value
+
         assert _serialize_value(42) == 42
         assert _serialize_value("hello") == "hello"
         assert _serialize_value(None) is None
@@ -69,6 +75,7 @@ class TestDeserializeRow:
 
     def test_basic_row(self):
         from isa_common.async_sqlite_client import _deserialize_row
+
         row = ("alice", 30)
         description = [("name",), ("age",)]
         result = _deserialize_row(row, description)
@@ -76,6 +83,7 @@ class TestDeserializeRow:
 
     def test_json_string_value(self):
         from isa_common.async_sqlite_client import _deserialize_row
+
         row = ('{"key": "value"}',)
         description = [("data",)]
         result = _deserialize_row(row, description)
@@ -83,13 +91,15 @@ class TestDeserializeRow:
 
     def test_json_array_value(self):
         from isa_common.async_sqlite_client import _deserialize_row
-        row = ('[1, 2, 3]',)
+
+        row = ("[1, 2, 3]",)
         description = [("tags",)]
         result = _deserialize_row(row, description)
         assert result == {"tags": [1, 2, 3]}
 
     def test_non_json_string(self):
         from isa_common.async_sqlite_client import _deserialize_row
+
         row = ("hello world",)
         description = [("name",)]
         result = _deserialize_row(row, description)
@@ -106,14 +116,14 @@ class TestSQLiteClientInit:
 
     def test_default_init(self, tmp_path):
         from isa_common import AsyncSQLiteClient
-        client = AsyncSQLiteClient(
-            database="test.db", db_path=str(tmp_path), lazy_connect=True
-        )
+
+        client = AsyncSQLiteClient(database="test.db", db_path=str(tmp_path), lazy_connect=True)
         assert client._database == "test.db"
         assert client._db_file == tmp_path / "test.db"
 
     def test_default_database_name(self, tmp_path):
         from isa_common import AsyncSQLiteClient
+
         client = AsyncSQLiteClient(db_path=str(tmp_path), lazy_connect=True)
         assert client._database == "isa_mcp.db"
 
@@ -183,9 +193,7 @@ class TestSQLiteClientExecute:
         sqlite_client._conn.execute = MagicMock(return_value=mock_cursor)
         sqlite_client._conn.commit = AsyncMock()
 
-        result = await sqlite_client.execute(
-            "DELETE FROM users WHERE active = $1", [False]
-        )
+        result = await sqlite_client.execute("DELETE FROM users WHERE active = $1", [False])
         assert result == 3
 
 

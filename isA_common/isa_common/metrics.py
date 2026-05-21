@@ -20,10 +20,9 @@ Usage:
     my_counter.labels(status="success").inc()
 """
 
-import os
-import time
 import logging
-from typing import Optional, List, Dict, Sequence
+import time
+from typing import List, Optional, Sequence
 
 logger = logging.getLogger("isa_common.metrics")
 
@@ -32,15 +31,17 @@ logger = logging.getLogger("isa_common.metrics")
 # =============================================================================
 try:
     from prometheus_client import (
-        Counter,
-        Histogram,
-        Gauge,
-        Info,
-        CollectorRegistry,
-        REGISTRY as DEFAULT_REGISTRY,
-        generate_latest,
         CONTENT_TYPE_LATEST,
     )
+    from prometheus_client import REGISTRY as DEFAULT_REGISTRY
+    from prometheus_client import (
+        Counter,
+        Gauge,
+        Histogram,
+        Info,
+        generate_latest,
+    )
+
     _PROMETHEUS_AVAILABLE = True
 except ImportError:
     _PROMETHEUS_AVAILABLE = False
@@ -285,6 +286,7 @@ def _normalize_path(path: str) -> str:
     /api/orders/12345 -> /api/orders/{id}
     """
     import re
+
     # UUID pattern
     path = re.sub(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
@@ -316,27 +318,21 @@ def _create_metrics_middleware(app):
         try:
             response = await call_next(request)
         except Exception:
-            HTTP_REQUESTS_TOTAL.labels(
-                method=method, path=normalized, status_code="500"
-            ).inc()
+            HTTP_REQUESTS_TOTAL.labels(method=method, path=normalized, status_code="500").inc()
             HTTP_REQUESTS_IN_PROGRESS.labels(method=method).dec()
             raise
 
         duration = time.perf_counter() - start
         status = str(response.status_code)
 
-        HTTP_REQUESTS_TOTAL.labels(
-            method=method, path=normalized, status_code=status
-        ).inc()
+        HTTP_REQUESTS_TOTAL.labels(method=method, path=normalized, status_code=status).inc()
         HTTP_REQUEST_DURATION.labels(method=method, path=normalized).observe(duration)
         HTTP_REQUESTS_IN_PROGRESS.labels(method=method).dec()
 
         # Response size (if available)
         content_length = response.headers.get("content-length")
         if content_length:
-            HTTP_RESPONSE_SIZE.labels(method=method, path=normalized).observe(
-                int(content_length)
-            )
+            HTTP_RESPONSE_SIZE.labels(method=method, path=normalized).observe(int(content_length))
 
         return response
 
@@ -412,10 +408,12 @@ def setup_metrics(
 
     # Add middleware
     from starlette.middleware.base import BaseHTTPMiddleware
+
     app.add_middleware(BaseHTTPMiddleware, dispatch=_create_metrics_middleware(app))
 
     # Add /metrics endpoint
     from starlette.routing import Route
+
     app.routes.append(Route("/metrics", _create_metrics_endpoint()))
 
     logger.info(f"Prometheus metrics initialized for {service_name}")

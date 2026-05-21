@@ -16,10 +16,9 @@ Features:
 
 import asyncio
 import fnmatch
-import time
-from typing import List, Dict, Optional, Any, AsyncIterator
-from collections import defaultdict
 import threading
+import time
+from typing import Any, Dict, List, Optional
 
 from .async_base_client import AsyncBaseClient
 
@@ -46,11 +45,7 @@ class AsyncMemoryClient(AsyncBaseClient):
     _global_expiry: Dict[str, float] = {}
     _global_lock = threading.Lock()
 
-    def __init__(
-        self,
-        use_global_store: bool = True,
-        **kwargs
-    ):
+    def __init__(self, use_global_store: bool = True, **kwargs):
         """
         Initialize async in-memory cache client.
 
@@ -105,8 +100,7 @@ class AsyncMemoryClient(AsyncBaseClient):
         now = time.time()
         async with self._lock:
             expired_keys = [
-                key for key, exp_time in self._expiry.items()
-                if exp_time > 0 and exp_time < now
+                key for key, exp_time in self._expiry.items() if exp_time > 0 and exp_time < now
             ]
             for key in expired_keys:
                 self._store.pop(key, None)
@@ -133,11 +127,11 @@ class AsyncMemoryClient(AsyncBaseClient):
                 expired_count = sum(1 for k in self._expiry if self._is_expired(k))
 
             return {
-                'healthy': True,
-                'cache_status': 'connected',
-                'key_count': key_count,
-                'expired_pending': expired_count,
-                'used_memory_estimate': key_count * 1024  # Rough estimate
+                "healthy": True,
+                "cache_status": "connected",
+                "key_count": key_count,
+                "expired_pending": expired_count,
+                "used_memory_estimate": key_count * 1024,  # Rough estimate
             }
 
         except Exception as e:
@@ -256,7 +250,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             prefixed_key = self._prefix_key(key)
 
             async with self._lock:
-                current = self._store.get(prefixed_key, '0')
+                current = self._store.get(prefixed_key, "0")
                 try:
                     new_value = int(current) + amount
                 except ValueError:
@@ -337,7 +331,7 @@ class AsyncMemoryClient(AsyncBaseClient):
     # Key Operations
     # ============================================
 
-    async def keys(self, pattern: str = '*') -> List[str]:
+    async def keys(self, pattern: str = "*") -> List[str]:
         """Get keys matching pattern."""
         try:
             await self._ensure_connected()
@@ -357,8 +351,7 @@ class AsyncMemoryClient(AsyncBaseClient):
             self.handle_error(e, "keys")
             return []
 
-    async def scan(self, cursor: int = 0, pattern: str = '*',
-                  count: int = 100) -> tuple:
+    async def scan(self, cursor: int = 0, pattern: str = "*", count: int = 100) -> tuple:
         """Scan keys with pattern."""
         try:
             await self._ensure_connected()
@@ -366,7 +359,8 @@ class AsyncMemoryClient(AsyncBaseClient):
 
             async with self._lock:
                 all_keys = [
-                    k for k in self._store.keys()
+                    k
+                    for k in self._store.keys()
                     if fnmatch.fnmatch(k, prefixed_pattern) and not self._is_expired(k)
                 ]
 
@@ -567,7 +561,7 @@ class AsyncMemoryClient(AsyncBaseClient):
                 # Handle negative indices like Redis
                 if end == -1:
                     return lst[start:]
-                return lst[start:end + 1]
+                return lst[start : end + 1]
 
         except Exception as e:
             self.handle_error(e, "lrange")
@@ -607,10 +601,10 @@ class AsyncMemoryClient(AsyncBaseClient):
                 active_keys = total_keys - expired_keys
 
             return {
-                'total_keys': total_keys,
-                'active_keys': active_keys,
-                'expired_pending': expired_keys,
-                'storage_type': 'in-memory'
+                "total_keys": total_keys,
+                "active_keys": active_keys,
+                "expired_pending": expired_keys,
+                "storage_type": "in-memory",
             }
 
         except Exception as e:
@@ -618,39 +612,38 @@ class AsyncMemoryClient(AsyncBaseClient):
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
-        async with AsyncMemoryClient(
-            user_id='test_user'
-        ) as client:
+        async with AsyncMemoryClient(user_id="test_user") as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Set/Get
-            await client.set('test_key', 'test_value', ttl_seconds=60)
-            value = await client.get('test_key')
+            await client.set("test_key", "test_value", ttl_seconds=60)
+            value = await client.get("test_key")
             print(f"Get: {value}")
 
             # TTL
-            ttl = await client.ttl('test_key')
+            ttl = await client.ttl("test_key")
             print(f"TTL: {ttl}")
 
             # Keys
-            await client.set('key1', 'value1')
-            await client.set('key2', 'value2')
-            keys = await client.keys('key*')
+            await client.set("key1", "value1")
+            await client.set("key2", "value2")
+            keys = await client.keys("key*")
             print(f"Keys: {keys}")
 
             # Hash
-            await client.hset('hash1', 'field1', 'value1')
-            await client.hset('hash1', 'field2', 'value2')
-            hash_val = await client.hgetall('hash1')
+            await client.hset("hash1", "field1", "value1")
+            await client.hset("hash1", "field2", "value2")
+            hash_val = await client.hgetall("hash1")
             print(f"Hash: {hash_val}")
 
             # List
-            await client.rpush('list1', 'a', 'b', 'c')
-            list_val = await client.lrange('list1', 0, -1)
+            await client.rpush("list1", "a", "b", "c")
+            list_val = await client.lrange("list1", 0, -1)
             print(f"List: {list_val}")
 
             # Stats

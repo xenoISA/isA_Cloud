@@ -15,9 +15,9 @@ Usage:
     # That's it — metrics, logs, and traces are all configured.
 """
 
-import os
 import logging
-from typing import Optional, Dict
+import os
+from typing import Dict, Optional
 
 logger = logging.getLogger("isa_common.observability")
 
@@ -79,6 +79,7 @@ def setup_observability(
     if enable_metrics:
         try:
             from .metrics import setup_metrics
+
             result["metrics"] = setup_metrics(
                 app,
                 service_name=service_name,
@@ -94,6 +95,7 @@ def setup_observability(
     if enable_logging:
         try:
             from .loki_handler import setup_loki_logging
+
             url = loki_url or os.getenv("LOKI_URL", "http://localhost:3100")
             labels = {"env": env}
             if extra_labels:
@@ -114,6 +116,7 @@ def setup_observability(
     if enable_tracing:
         try:
             from .tracing import setup_tracing
+
             setup_tracing(
                 app=app,
                 service_name=service_name,

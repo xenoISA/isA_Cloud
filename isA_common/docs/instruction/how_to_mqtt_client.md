@@ -63,15 +63,15 @@ class IoTDeviceManager:
                 device_type,
                 metadata or {}
             )
-            
+
             if result and result.get('success'):
                 # Connect device to broker
                 conn = self.mqtt.connect(f'{device_id}-connection')
                 self.sessions[device_id] = conn['session_id']
-                
+
                 # Update status to ONLINE
                 self.mqtt.update_device_status(device_id, 1)
-                
+
                 return True
             return False
 
@@ -131,11 +131,11 @@ class IoTDeviceManager:
             if session_id:
                 # Update status to OFFLINE
                 self.mqtt.update_device_status(device_id, 2)
-                
+
                 # Disconnect
                 self.mqtt.disconnect(session_id)
                 del self.sessions[device_id]
-                
+
                 return True
 ```
 
@@ -336,7 +336,7 @@ for i, temp in enumerate(readings):
     # Publish reading
     reading = {'reading': i, 'temperature': temp}
     client.publish_json(session_id, 'sensors/temp/current', reading, qos=1)
-    
+
     # Send alert if threshold exceeded
     if temp > threshold_high:
         alert = {
@@ -480,11 +480,11 @@ mqtt_client.on_publish = on_publish
 try:
     mqtt_client.connect("localhost", 1883, 60)
     mqtt_client.loop_start()
-    
+
     # Publish message
     result = mqtt_client.publish("sensors/temp", "22.5", qos=1)
     result.wait_for_publish()
-    
+
 except Exception as e:
     print(f"Error: {e}")
 finally:
@@ -695,4 +695,3 @@ The MQTT client gives you:
 - **Auto-cleanup** via context managers
 
 Just pip install and focus on your IoT application logic and device workflows!
-

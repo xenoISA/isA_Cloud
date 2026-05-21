@@ -17,7 +17,6 @@ import pytest_asyncio
 
 from isa_common import AsyncFalkorClient
 
-
 HOST = os.environ.get("FALKOR_HOST", os.environ.get("HOST", "localhost"))
 PORT = int(os.environ.get("FALKOR_PORT", os.environ.get("PORT", "6379")))
 
@@ -112,21 +111,13 @@ class TestFalkorIntegration:
         assert rows[0]["c"] == 2
 
     async def test_vector_index_round_trip(self, client):
-        ok = await client.create_index(
-            "Doc", "embedding", kind="vector", dim=4, metric="cosine"
-        )
+        ok = await client.create_index("Doc", "embedding", kind="vector", dim=4, metric="cosine")
         assert ok is True
 
-        await client.query(
-            "CREATE (:Doc {id: 'a', embedding: vecf32([1.0, 0.0, 0.0, 0.0])})"
-        )
-        await client.query(
-            "CREATE (:Doc {id: 'b', embedding: vecf32([0.0, 1.0, 0.0, 0.0])})"
-        )
+        await client.query("CREATE (:Doc {id: 'a', embedding: vecf32([1.0, 0.0, 0.0, 0.0])})")
+        await client.query("CREATE (:Doc {id: 'b', embedding: vecf32([0.0, 1.0, 0.0, 0.0])})")
 
-        results = await client.query_vector(
-            "Doc", "embedding", vector=[1.0, 0.0, 0.0, 0.0], k=2
-        )
+        results = await client.query_vector("Doc", "embedding", vector=[1.0, 0.0, 0.0, 0.0], k=2)
         assert results is not None
         assert len(results) >= 1
         top = results[0]

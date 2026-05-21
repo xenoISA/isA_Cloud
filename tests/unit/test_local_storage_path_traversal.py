@@ -7,6 +7,7 @@ Fixes #118.
 """
 
 import os
+
 import pytest
 
 from isa_common.async_local_storage_client import AsyncLocalStorageClient

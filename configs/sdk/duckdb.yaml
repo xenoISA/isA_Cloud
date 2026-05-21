@@ -30,6 +30,3 @@ extensions:
 # 可以通过环境变量覆盖配置：
 #   ISA_CLOUD_DUCKDB_DATABASE_PATH
 #   ISA_CLOUD_DUCKDB_MEMORY_LIMIT
-
-
-

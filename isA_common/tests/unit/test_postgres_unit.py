@@ -1,5 +1,5 @@
 """AsyncPostgresClient unit tests — mocked asyncpg pool, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -55,9 +55,7 @@ class TestPostgresQuery:
     async def test_query_with_params(self, postgres_client):
         postgres_client._conn.fetch = AsyncMock(return_value=[])
 
-        result = await postgres_client.query(
-            "SELECT * FROM users WHERE id = $1", params=[42]
-        )
+        result = await postgres_client.query("SELECT * FROM users WHERE id = $1", params=[42])
 
         assert result == []
         postgres_client._conn.fetch.assert_awaited_once_with(
@@ -98,9 +96,7 @@ class TestPostgresExecute:
         assert result is not None
 
     async def test_execute_error_returns_none(self, postgres_client):
-        postgres_client._conn.execute = AsyncMock(
-            side_effect=Exception("constraint violation")
-        )
+        postgres_client._conn.execute = AsyncMock(side_effect=Exception("constraint violation"))
 
         result = await postgres_client.execute("INSERT INTO users VALUES (1)")
 

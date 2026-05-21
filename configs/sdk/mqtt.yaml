@@ -44,6 +44,3 @@ will_retain: true                          # 遗嘱保留
 #   ISA_CLOUD_MQTT_CLIENT_ID
 #   ISA_CLOUD_MQTT_USERNAME
 #   ISA_CLOUD_MQTT_PASSWORD
-
-
-

@@ -1,15 +1,17 @@
 """
 Unit test fixtures — all tests use mocked backends, no infrastructure required.
 """
+
 import logging
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
-
 
 # ============================================================================
 # Redis
 # ============================================================================
+
 
 @pytest_asyncio.fixture
 async def redis_client():
@@ -17,8 +19,10 @@ async def redis_client():
     from isa_common import AsyncRedisClient
 
     client = AsyncRedisClient(
-        host="localhost", port=6379,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=6379,
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._client = AsyncMock()
@@ -32,14 +36,18 @@ async def redis_client():
 # PostgreSQL
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def postgres_client():
     """AsyncPostgresClient with mocked asyncpg pool."""
     from isa_common import AsyncPostgresClient
 
     client = AsyncPostgresClient(
-        host="localhost", port=5432, database="testdb",
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=5432,
+        database="testdb",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     # asyncpg pool.acquire() is a sync call returning an async context manager
@@ -65,20 +73,23 @@ async def postgres_client():
 # Neo4j
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def neo4j_client():
     """AsyncNeo4jClient with mocked neo4j driver."""
     import isa_common.async_neo4j_client as neo4j_module
 
     # Patch missing module-level logger
-    if not hasattr(neo4j_module, 'logger'):
-        neo4j_module.logger = logging.getLogger('test_neo4j')
+    if not hasattr(neo4j_module, "logger"):
+        neo4j_module.logger = logging.getLogger("test_neo4j")
 
     from isa_common import AsyncNeo4jClient
 
     client = AsyncNeo4jClient(
-        host="localhost", port=7687,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=7687,
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     # driver.session() is a sync call returning a session with async methods
@@ -98,14 +109,17 @@ async def neo4j_client():
 # MinIO
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def minio_client():
     """AsyncMinIOClient with mocked aioboto3 session."""
     from isa_common import AsyncMinIOClient
 
     client = AsyncMinIOClient(
-        host="localhost", port=9000,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=9000,
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._session = MagicMock()
@@ -118,14 +132,17 @@ async def minio_client():
 # Qdrant
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def qdrant_client():
     """AsyncQdrantClient with mocked qdrant-client."""
     from isa_common import AsyncQdrantClient
 
     client = AsyncQdrantClient(
-        host="localhost", port=6333,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=6333,
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._client = AsyncMock()
@@ -138,15 +155,18 @@ async def qdrant_client():
 # FalkorDB
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def falkor_client():
     """AsyncFalkorClient with mocked falkordb async driver."""
     from isa_common import AsyncFalkorClient
 
     client = AsyncFalkorClient(
-        host="localhost", port=6379,
+        host="localhost",
+        port=6379,
         graph="test_graph",
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
 
@@ -176,13 +196,15 @@ async def falkor_client():
 # DuckDB
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def duckdb_client():
     """AsyncDuckDBClient with mocked duckdb connection."""
     from isa_common import AsyncDuckDBClient
 
     client = AsyncDuckDBClient(
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._conn = MagicMock()
@@ -195,14 +217,17 @@ async def duckdb_client():
 # MQTT
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def mqtt_client():
     """AsyncMQTTClient with mocked state."""
     from isa_common import AsyncMQTTClient
 
     client = AsyncMQTTClient(
-        host="localhost", port=1883,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=1883,
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._connected = True
@@ -214,14 +239,17 @@ async def mqtt_client():
 # Loki
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def loki_client():
     """AsyncLokiClient with mocked aiohttp session."""
     from isa_common import AsyncLokiClient
 
     client = AsyncLokiClient(
-        host="localhost", port=3100,
-        user_id="test_user", organization_id="org1",
+        host="localhost",
+        port=3100,
+        user_id="test_user",
+        organization_id="org1",
         default_labels={"app": "test-service", "env": "test"},
         lazy_connect=True,
     )
@@ -236,6 +264,7 @@ async def loki_client():
 # SQLite
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def sqlite_client(tmp_path):
     """AsyncSQLiteClient with a real temp database (no external deps)."""
@@ -244,7 +273,8 @@ async def sqlite_client(tmp_path):
     client = AsyncSQLiteClient(
         database="test.db",
         db_path=str(tmp_path),
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     # Mock _conn so tests don't need aiosqlite
@@ -258,6 +288,7 @@ async def sqlite_client(tmp_path):
 # LocalStorage
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def local_storage_client(tmp_path):
     """AsyncLocalStorageClient with a real temp directory."""
@@ -265,7 +296,8 @@ async def local_storage_client(tmp_path):
 
     client = AsyncLocalStorageClient(
         base_path=str(tmp_path),
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._connected = True
@@ -277,6 +309,7 @@ async def local_storage_client(tmp_path):
 # ChromaDB
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def chroma_client(tmp_path):
     """AsyncChromaClient with mocked chromadb backend."""
@@ -284,7 +317,8 @@ async def chroma_client(tmp_path):
 
     client = AsyncChromaClient(
         persist_directory=str(tmp_path),
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._client = MagicMock()
@@ -297,6 +331,7 @@ async def chroma_client(tmp_path):
 # Memory (In-memory cache)
 # ============================================================================
 
+
 @pytest_asyncio.fixture
 async def memory_client():
     """AsyncMemoryClient with instance-local store (no global bleed)."""
@@ -304,7 +339,8 @@ async def memory_client():
 
     client = AsyncMemoryClient(
         use_global_store=False,
-        user_id="test_user", organization_id="org1",
+        user_id="test_user",
+        organization_id="org1",
         lazy_connect=True,
     )
     client._connected = True
@@ -317,6 +353,7 @@ async def memory_client():
 # ============================================================================
 # Consul
 # ============================================================================
+
 
 @pytest.fixture
 def consul_registry():
@@ -339,6 +376,7 @@ def consul_registry():
 # ============================================================================
 # AsyncConsulRegistry
 # ============================================================================
+
 
 @pytest_asyncio.fixture
 async def async_consul_registry():

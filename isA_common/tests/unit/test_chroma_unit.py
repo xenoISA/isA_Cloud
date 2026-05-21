@@ -1,8 +1,8 @@
 """Unit tests for AsyncChromaClient — #119."""
-import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
+from unittest.mock import MagicMock
+
+import pytest
 
 # ============================================================================
 # L1 — Pure helper functions
@@ -14,9 +14,8 @@ class TestFlattenPayload:
 
     def _make_client(self, tmp_path):
         from isa_common import AsyncChromaClient
-        return AsyncChromaClient(
-            persist_directory=str(tmp_path), lazy_connect=True
-        )
+
+        return AsyncChromaClient(persist_directory=str(tmp_path), lazy_connect=True)
 
     def test_primitives_pass_through(self, tmp_path):
         client = self._make_client(tmp_path)
@@ -44,9 +43,8 @@ class TestUnflattenPayload:
 
     def _make_client(self, tmp_path):
         from isa_common import AsyncChromaClient
-        return AsyncChromaClient(
-            persist_directory=str(tmp_path), lazy_connect=True
-        )
+
+        return AsyncChromaClient(persist_directory=str(tmp_path), lazy_connect=True)
 
     def test_json_dict_parsed(self, tmp_path):
         client = self._make_client(tmp_path)
@@ -81,32 +79,33 @@ class TestBuildWhereClause:
 
     def _make_client(self, tmp_path):
         from isa_common import AsyncChromaClient
-        return AsyncChromaClient(
-            persist_directory=str(tmp_path), lazy_connect=True
-        )
+
+        return AsyncChromaClient(persist_directory=str(tmp_path), lazy_connect=True)
 
     def test_single_must_keyword(self, tmp_path):
         client = self._make_client(tmp_path)
-        result = client._build_where_clause({
-            "must": [{"field": "type", "match": {"keyword": "tool"}}]
-        })
+        result = client._build_where_clause(
+            {"must": [{"field": "type", "match": {"keyword": "tool"}}]}
+        )
         assert result == {"type": {"$eq": "tool"}}
 
     def test_multiple_must_uses_and(self, tmp_path):
         client = self._make_client(tmp_path)
-        result = client._build_where_clause({
-            "must": [
-                {"field": "type", "match": {"keyword": "tool"}},
-                {"field": "active", "match": {"boolean": True}},
-            ]
-        })
+        result = client._build_where_clause(
+            {
+                "must": [
+                    {"field": "type", "match": {"keyword": "tool"}},
+                    {"field": "active", "match": {"boolean": True}},
+                ]
+            }
+        )
         assert "$and" in result
 
     def test_range_condition(self, tmp_path):
         client = self._make_client(tmp_path)
-        result = client._build_where_clause({
-            "must": [{"field": "score", "range": {"gte": 0.5, "lt": 1.0}}]
-        })
+        result = client._build_where_clause(
+            {"must": [{"field": "score", "range": {"gte": 0.5, "lt": 1.0}}]}
+        )
         assert result == {"score": {"$gte": 0.5, "$lt": 1.0}}
 
     def test_empty_must_returns_none(self, tmp_path):
@@ -125,9 +124,8 @@ class TestParseSearchResults:
 
     def _make_client(self, tmp_path):
         from isa_common import AsyncChromaClient
-        return AsyncChromaClient(
-            persist_directory=str(tmp_path), lazy_connect=True
-        )
+
+        return AsyncChromaClient(persist_directory=str(tmp_path), lazy_connect=True)
 
     def test_basic_parse(self, tmp_path):
         client = self._make_client(tmp_path)
@@ -172,9 +170,7 @@ class TestChromaClientDisconnect:
         mock_executor = MagicMock()
         chroma_client._executor = mock_executor
         await chroma_client._disconnect()
-        mock_executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
         assert chroma_client._client is None
         assert chroma_client._executor is None
 
@@ -193,9 +189,7 @@ class TestChromaClientCollections:
         mock_col1.name = "col1"
         mock_col2 = MagicMock()
         mock_col2.name = "col2"
-        chroma_client._client.list_collections = MagicMock(
-            return_value=[mock_col1, mock_col2]
-        )
+        chroma_client._client.list_collections = MagicMock(return_value=[mock_col1, mock_col2])
 
         result = await chroma_client.list_collections()
         assert result == ["col1", "col2"]

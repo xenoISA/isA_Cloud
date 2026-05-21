@@ -16,7 +16,7 @@
 # - Batch operations (MSET, MGET, ExecuteBatch)
 # - Session Management (Create, Get, Update, Delete, List)
 # - Monitoring (GetStatistics, GetKeyInfo)
-# 
+#
 # Total: 18 test cases covering 60+ individual operations
 # Success Rate: 100% (18/18 tests passing)
 
@@ -175,7 +175,7 @@ try:
     with client:
         # Delete counter key first to ensure clean start
         client.delete('test:counter')
-        
+
         val = client.incr('test:counter', 1)
         if val != 1:
             print(f"FAIL: INCR {val}")
@@ -345,7 +345,7 @@ try:
         client.set('test:key_old', 'value')
         client.set('test:key1', 'val1')
         client.set('test:key2', 'val2')
-        
+
         # Test rename
         if not client.rename('test:key_old', 'test:key_new'):
             print("FAIL: Rename failed")
@@ -390,7 +390,7 @@ try:
         client.hset('test:hash2', 'field1', 'value1')
         client.hset('test:hash2', 'field2', 'value2')
         client.hset('test:hash2', 'counter', '10')
-        
+
         # Test hexists
         if not client.hexists('test:hash2', 'field1'):
             print("FAIL: HExists failed")
@@ -440,7 +440,7 @@ try:
         # Setup
         client.delete('test:list2')
         client.rpush('test:list2', ['a', 'b', 'c', 'd', 'e'])
-        
+
         # Test llen
         length = client.llen('test:list2')
         if length != 5:
@@ -494,7 +494,7 @@ try:
         # Setup sets
         client.sadd('test:set1', ['a', 'b', 'c'])
         client.sadd('test:set2', ['b', 'c', 'd'])
-        
+
         # Test sismember
         if not client.sismember('test:set1', 'a'):
             print("FAIL: SIsMember failed")
@@ -553,7 +553,7 @@ try:
     with client:
         # Setup
         client.zadd('test:zset', {'player1': 100, 'player2': 200, 'player3': 150})
-        
+
         # Test zcard
         count = client.zcard('test:zset')
         if count != 3:
@@ -688,7 +688,7 @@ try:
         else:
             # Give server time to process
             time.sleep(0.2)
-            
+
             # Test list sessions (should show our session)
             sessions = client.list_sessions()
             if not isinstance(sessions, list):
@@ -696,13 +696,13 @@ try:
             elif len(sessions) == 0:
                 print("WARN: List sessions returned empty (session may use different namespace)")
                 # Still try to test update and delete
-                
+
             # Test update session
             updated = client.update_session(session_id, {'user': 'john', 'role': 'superadmin'})
-            
+
             # Test delete session
             deleted = client.delete_session(session_id)
-            
+
             # If we got here without exceptions, consider it a partial pass
             print("PASS: Session management successful (basic operations work)")
 except Exception as e:
@@ -728,7 +728,7 @@ try:
     with client:
         # Setup some test data
         client.set('test:monitor', 'value')
-        
+
         # Test get_statistics
         stats = client.get_statistics()
         if not stats or 'total_keys' not in stats:

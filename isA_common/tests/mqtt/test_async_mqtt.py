@@ -28,34 +28,47 @@ from isa_common import AsyncMQTTClient
 # Contract Mapping — see tests/contracts/mqtt/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':           [],
-    'test_connect':                [],
-    'test_connection_status':      [],
-    'test_publish':                ['BR-003', 'BR-006'],
-    'test_publish_batch':          ['BR-003'],
-    'test_publish_json':           ['BR-006'],
-    'test_validate_topic':         [],
-    'test_register_device':        [],
-    'test_list_devices':           [],
-    'test_get_device_info':        [],
-    'test_update_device_status':   [],
-    'test_list_topics':            [],
-    'test_set_retained_message':   ['BR-004'],
-    'test_get_retained_message':   ['BR-004'],
-    'test_delete_retained_message':['BR-004'],
-    'test_get_statistics':         [],
-    'test_bulk_publish':           [],
-    'test_unregister_device':      [],
-    'test_disconnect':             [],
+    "test_health_check": [],
+    "test_connect": [],
+    "test_connection_status": [],
+    "test_publish": ["BR-003", "BR-006"],
+    "test_publish_batch": ["BR-003"],
+    "test_publish_json": ["BR-006"],
+    "test_validate_topic": [],
+    "test_register_device": [],
+    "test_list_devices": [],
+    "test_get_device_info": [],
+    "test_update_device_status": [],
+    "test_list_topics": [],
+    "test_set_retained_message": ["BR-004"],
+    "test_get_retained_message": ["BR-004"],
+    "test_delete_retained_message": ["BR-004"],
+    "test_get_statistics": [],
+    "test_bulk_publish": [],
+    "test_unregister_device": [],
+    "test_disconnect": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-001', 'BR-002', 'BR-005', 'BR-007', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-001",
+    "BR-002",
+    "BR-005",
+    "BR-007",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "ER-001",
+]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '1883'))
-USER_ID = os.environ.get('USER_ID', 'test-user')
-ORG_ID = os.environ.get('ORG_ID', 'test-org')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "1883"))
+USER_ID = os.environ.get("USER_ID", "test-user")
+ORG_ID = os.environ.get("ORG_ID", "test-org")
 
 # Test results
 PASSED = 0
@@ -80,7 +93,7 @@ async def test_health_check(client: AsyncMQTTClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, f"Health check (broker: {health.get('broker_status', 'unknown')})")
         return success
     except Exception as e:
@@ -95,14 +108,14 @@ async def test_connect(client: AsyncMQTTClient, client_id: str) -> str:
     """
     try:
         result = await client.mqtt_connect(client_id)
-        if result and result.get('success'):
+        if result and result.get("success"):
             test_result(True, f"Connect (session: {result['session_id'][:8]}...)")
-            return result['session_id']
+            return result["session_id"]
         test_result(False, "Connect - no session")
-        return ''
+        return ""
     except Exception as e:
         test_result(False, f"Connect - {e}")
-        return ''
+        return ""
 
 
 async def test_connection_status(client: AsyncMQTTClient, session_id: str):
@@ -113,7 +126,10 @@ async def test_connection_status(client: AsyncMQTTClient, session_id: str):
     try:
         status = await client.get_connection_status(session_id)
         success = status is not None
-        test_result(success, f"Connection status (connected: {status.get('connected') if status else False})")
+        test_result(
+            success,
+            f"Connection status (connected: {status.get('connected') if status else False})",
+        )
     except Exception as e:
         test_result(False, f"Connection status - {e}")
 
@@ -124,9 +140,11 @@ async def test_publish(client: AsyncMQTTClient, session_id: str):
     Validates: BR-003 (Quality of Service), BR-006 (Message Payload)
     """
     try:
-        result = await client.publish(session_id, 'test/async/topic', b'Hello from async client', qos=1)
-        success = result is not None and result.get('success')
-        test_result(success, f"Publish message")
+        result = await client.publish(
+            session_id, "test/async/topic", b"Hello from async client", qos=1
+        )
+        success = result is not None and result.get("success")
+        test_result(success, "Publish message")
     except Exception as e:
         test_result(False, f"Publish - {e}")
 
@@ -138,12 +156,12 @@ async def test_publish_batch(client: AsyncMQTTClient, session_id: str):
     """
     try:
         messages = [
-            {'topic': 'test/async/batch/1', 'payload': b'Message 1', 'qos': 1},
-            {'topic': 'test/async/batch/2', 'payload': b'Message 2', 'qos': 1},
-            {'topic': 'test/async/batch/3', 'payload': b'Message 3', 'qos': 1},
+            {"topic": "test/async/batch/1", "payload": b"Message 1", "qos": 1},
+            {"topic": "test/async/batch/2", "payload": b"Message 2", "qos": 1},
+            {"topic": "test/async/batch/3", "payload": b"Message 3", "qos": 1},
         ]
         result = await client.publish_batch(session_id, messages)
-        success = result is not None and result.get('published_count', 0) == 3
+        success = result is not None and result.get("published_count", 0) == 3
         test_result(success, f"Publish batch ({result.get('published_count', 0)} messages)")
     except Exception as e:
         test_result(False, f"Publish batch - {e}")
@@ -155,13 +173,9 @@ async def test_publish_json(client: AsyncMQTTClient, session_id: str):
     Validates: BR-006 (Message Payload)
     """
     try:
-        data = {
-            'temperature': 25.5,
-            'humidity': 60,
-            'timestamp': time.time()
-        }
-        result = await client.publish_json(session_id, 'test/async/json', data)
-        success = result is not None and result.get('success')
+        data = {"temperature": 25.5, "humidity": 60, "timestamp": time.time()}
+        result = await client.publish_json(session_id, "test/async/json", data)
+        success = result is not None and result.get("success")
         test_result(success, "Publish JSON message")
     except Exception as e:
         test_result(False, f"Publish JSON - {e}")
@@ -173,8 +187,8 @@ async def test_validate_topic(client: AsyncMQTTClient):
     Validates: (additional coverage)
     """
     try:
-        result = await client.validate_topic('sensors/temperature')
-        success = result is not None and result.get('valid', False)
+        result = await client.validate_topic("sensors/temperature")
+        success = result is not None and result.get("valid", False)
         test_result(success, "Validate topic")
     except Exception as e:
         test_result(False, f"Validate topic - {e}")
@@ -188,11 +202,11 @@ async def test_register_device(client: AsyncMQTTClient, device_id: str):
     try:
         result = await client.register_device(
             device_id=device_id,
-            device_name='Async Test Device',
-            device_type='sensor',
-            metadata={'location': 'test-lab', 'version': '1.0'}
+            device_name="Async Test Device",
+            device_type="sensor",
+            metadata={"location": "test-lab", "version": "1.0"},
         )
-        success = result is not None and result.get('success')
+        success = result is not None and result.get("success")
         test_result(success, f"Register device '{device_id}'")
     except Exception as e:
         test_result(False, f"Register device - {e}")
@@ -205,7 +219,7 @@ async def test_list_devices(client: AsyncMQTTClient):
     """
     try:
         result = await client.list_devices()
-        success = result is not None and 'devices' in result
+        success = result is not None and "devices" in result
         test_result(success, f"List devices ({len(result.get('devices', []))} found)")
     except Exception as e:
         test_result(False, f"List devices - {e}")
@@ -218,8 +232,8 @@ async def test_get_device_info(client: AsyncMQTTClient, device_id: str):
     """
     try:
         info = await client.get_device_info(device_id)
-        success = info is not None and info.get('device_id') == device_id
-        test_result(success, f"Get device info")
+        success = info is not None and info.get("device_id") == device_id
+        test_result(success, "Get device info")
     except Exception as e:
         test_result(False, f"Get device info - {e}")
 
@@ -230,8 +244,10 @@ async def test_update_device_status(client: AsyncMQTTClient, device_id: str):
     Validates: (additional coverage)
     """
     try:
-        result = await client.update_device_status(device_id, status=1, metadata={'updated': 'true'})
-        success = result is not None and result.get('success')
+        result = await client.update_device_status(
+            device_id, status=1, metadata={"updated": "true"}
+        )
+        success = result is not None and result.get("success")
         test_result(success, "Update device status")
     except Exception as e:
         test_result(False, f"Update device status - {e}")
@@ -244,7 +260,7 @@ async def test_list_topics(client: AsyncMQTTClient):
     """
     try:
         result = await client.list_topics()
-        success = result is not None and 'topics' in result
+        success = result is not None and "topics" in result
         test_result(success, f"List topics ({len(result.get('topics', []))} found)")
     except Exception as e:
         test_result(False, f"List topics - {e}")
@@ -256,7 +272,7 @@ async def test_set_retained_message(client: AsyncMQTTClient):
     Validates: BR-004 (Retained Messages)
     """
     try:
-        success = await client.set_retained_message('test/async/retained', b'Retained data', qos=1)
+        success = await client.set_retained_message("test/async/retained", b"Retained data", qos=1)
         test_result(success, "Set retained message")
     except Exception as e:
         test_result(False, f"Set retained message - {e}")
@@ -268,7 +284,7 @@ async def test_get_retained_message(client: AsyncMQTTClient):
     Validates: BR-004 (Retained Messages)
     """
     try:
-        result = await client.get_retained_message('test/async/retained')
+        result = await client.get_retained_message("test/async/retained")
         success = result is not None
         test_result(success, f"Get retained message (found: {result.get('found', False)})")
     except Exception as e:
@@ -281,7 +297,7 @@ async def test_delete_retained_message(client: AsyncMQTTClient):
     Validates: BR-004 (Retained Messages)
     """
     try:
-        success = await client.delete_retained_message('test/async/retained')
+        success = await client.delete_retained_message("test/async/retained")
         test_result(success, "Delete retained message")
     except Exception as e:
         test_result(False, f"Delete retained message - {e}")
@@ -295,7 +311,9 @@ async def test_get_statistics(client: AsyncMQTTClient):
     try:
         stats = await client.get_statistics()
         success = stats is not None
-        test_result(success, f"Get statistics (devices: {stats.get('total_devices', 0) if stats else 0})")
+        test_result(
+            success, f"Get statistics (devices: {stats.get('total_devices', 0) if stats else 0})"
+        )
     except Exception as e:
         test_result(False, f"Get statistics - {e}")
 
@@ -309,7 +327,7 @@ async def test_bulk_publish(client: AsyncMQTTClient, session_id: str):
         # Note: MQTT with aiomqtt creates new connection per publish call,
         # so we use publish_batch which shares a single connection
         messages = [
-            {'topic': f'test/async/bulk/{i}', 'payload': f'Message {i}'.encode(), 'qos': 1}
+            {"topic": f"test/async/bulk/{i}", "payload": f"Message {i}".encode(), "qos": 1}
             for i in range(10)
         ]
 
@@ -317,8 +335,11 @@ async def test_bulk_publish(client: AsyncMQTTClient, session_id: str):
         result = await client.publish_batch(session_id, messages)
         elapsed = (time.time() - start) * 1000
 
-        success = result is not None and result.get('published_count', 0) == len(messages)
-        test_result(success, f"Bulk publish ({result.get('published_count', 0)}/{len(messages)} in {elapsed:.1f}ms)")
+        success = result is not None and result.get("published_count", 0) == len(messages)
+        test_result(
+            success,
+            f"Bulk publish ({result.get('published_count', 0)}/{len(messages)} in {elapsed:.1f}ms)",
+        )
     except Exception as e:
         test_result(False, f"Bulk publish - {e}")
 
@@ -342,7 +363,7 @@ async def test_disconnect(client: AsyncMQTTClient, session_id: str):
     """
     try:
         result = await client.disconnect(session_id)
-        success = result is not None and result.get('success')
+        success = result is not None and result.get("success")
         test_result(success, "Disconnect")
     except Exception as e:
         test_result(False, f"Disconnect - {e}")
@@ -354,7 +375,7 @@ async def run_tests():
     print("     ASYNC MQTT CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
     print()
-    print(f"Configuration:")
+    print("Configuration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  User: {USER_ID}")
@@ -366,10 +387,7 @@ async def run_tests():
     device_id = f"async-device-{test_id}"
 
     async with AsyncMQTTClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID,
-        organization_id=ORG_ID
+        host=HOST, port=PORT, user_id=USER_ID, organization_id=ORG_ID
     ) as client:
         # Health check first
         print("--- Health Check ---")
@@ -445,5 +463,5 @@ async def run_tests():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(run_tests())

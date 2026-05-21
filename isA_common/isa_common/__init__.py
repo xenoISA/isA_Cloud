@@ -33,39 +33,39 @@ from typing import Dict
 from .async_base_client import AsyncBaseClient
 from .async_client_config import (
     ClientConfig,
+    LokiConfig,
+    MinIOConfig,
     PostgresConfig,
     RedisConfig,
-    MinIOConfig,
-    LokiConfig,
 )
+from .async_duckdb_client import AsyncDuckDBClient
+from .async_falkor_client import AsyncFalkorClient
+from .async_loki_client import AsyncLokiClient
+from .async_minio_client import AsyncMinIOClient
+from .async_mqtt_client import AsyncMQTTClient
+from .async_nats_client import AsyncNATSClient
+from .async_neo4j_client import AsyncNeo4jClient
+from .async_postgres_client import AsyncPostgresClient
+from .async_qdrant_client import AsyncQdrantClient
 
 # =============================================================================
 # Native Async Clients (Direct Connections)
 # =============================================================================
 from .async_redis_client import AsyncRedisClient
-from .async_postgres_client import AsyncPostgresClient
-from .async_nats_client import AsyncNATSClient
-from .async_neo4j_client import AsyncNeo4jClient
-from .async_minio_client import AsyncMinIOClient
-from .async_duckdb_client import AsyncDuckDBClient
-from .async_mqtt_client import AsyncMQTTClient
-from .async_qdrant_client import AsyncQdrantClient
-from .async_falkor_client import AsyncFalkorClient
-from .async_loki_client import AsyncLokiClient
 from .loki_handler import LokiHandler, setup_loki_logging
 
 # =============================================================================
 # Observability (Metrics, Tracing, Unified Setup)
 # =============================================================================
 from .metrics import (
-    setup_metrics,
     create_counter,
-    create_histogram,
     create_gauge,
+    create_histogram,
     metrics_text,
+    setup_metrics,
 )
-from .tracing import setup_tracing, get_tracer
 from .observability import setup_observability
+from .tracing import get_tracer, setup_tracing
 
 # =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
@@ -93,19 +93,19 @@ except ModuleNotFoundError:
     AsyncMemoryClient = None  # type: ignore[assignment]
 
 # Service Discovery
-from .consul_client import ConsulRegistry, AsyncConsulRegistry, consul_lifespan
+from .consul_client import AsyncConsulRegistry, ConsulRegistry, consul_lifespan
 
 # =============================================================================
 # Quota Enforcement (per-org/tenant resource limits — product_spec tiers)
 # =============================================================================
 from .quota_enforcer import (
+    UNLIMITED,
+    PartialConsumption,
+    QuotaDecision,
     QuotaEnforcer,
+    QuotaExceededError,
     QuotaType,
     TierQuota,
-    QuotaDecision,
-    PartialConsumption,
-    QuotaExceededError,
-    UNLIMITED,
 )
 
 # =============================================================================

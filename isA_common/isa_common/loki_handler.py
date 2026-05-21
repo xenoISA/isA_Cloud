@@ -16,7 +16,6 @@ import asyncio
 import atexit
 import logging
 import threading
-import time
 from typing import Dict, Optional
 
 from .async_loki_client import AsyncLokiClient
@@ -60,9 +59,7 @@ class LokiHandler(logging.Handler):
 
         # Background thread with its own event loop
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="loki-handler"
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="loki-handler")
         self._thread.start()
 
         # Schedule periodic flush
@@ -97,9 +94,7 @@ class LokiHandler(logging.Handler):
                 if len(self._queue) >= self._batch_size:
                     batch = self._queue
                     self._queue = []
-                    asyncio.run_coroutine_threadsafe(
-                        self._client.push_batch(batch), self._loop
-                    )
+                    asyncio.run_coroutine_threadsafe(self._client.push_batch(batch), self._loop)
         except Exception:
             self.handleError(record)
 
@@ -116,9 +111,7 @@ class LokiHandler(logging.Handler):
                 return
             batch = self._queue
             self._queue = []
-        asyncio.run_coroutine_threadsafe(
-            self._client.push_batch(batch), self._loop
-        )
+        asyncio.run_coroutine_threadsafe(self._client.push_batch(batch), self._loop)
 
     def close(self) -> None:
         """Flush remaining entries and shut down."""
@@ -136,9 +129,7 @@ class LokiHandler(logging.Handler):
                 pass
 
         # Now close the client session
-        close_future = asyncio.run_coroutine_threadsafe(
-            self._client.close(), self._loop
-        )
+        close_future = asyncio.run_coroutine_threadsafe(self._client.close(), self._loop)
         try:
             close_future.result(timeout=5)
         except Exception:

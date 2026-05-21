@@ -5,7 +5,7 @@ Shared configuration dataclass for async infrastructure clients.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -16,10 +16,11 @@ class ClientConfig:
 
     Can be instantiated directly or loaded from environment variables.
     """
+
     host: str
     port: int
-    user_id: str = 'default'
-    organization_id: str = 'default-org'
+    user_id: str = "default"
+    organization_id: str = "default-org"
     lazy_connect: bool = True
 
     # Optional authentication
@@ -32,11 +33,8 @@ class ClientConfig:
 
     @classmethod
     def from_env(
-        cls,
-        prefix: str,
-        default_host: str = 'localhost',
-        default_port: int = 0
-    ) -> 'ClientConfig':
+        cls, prefix: str, default_host: str = "localhost", default_port: int = 0
+    ) -> "ClientConfig":
         """
         Load config from environment variables.
 
@@ -53,98 +51,102 @@ class ClientConfig:
             USER_ID, ORGANIZATION_ID
         """
         return cls(
-            host=os.getenv(f'{prefix}_HOST', default_host),
-            port=int(os.getenv(f'{prefix}_PORT', str(default_port))),
-            user_id=os.getenv('USER_ID', 'default'),
-            organization_id=os.getenv('ORGANIZATION_ID', 'default-org'),
-            username=os.getenv(f'{prefix}_USER'),
-            password=os.getenv(f'{prefix}_PASSWORD'),
+            host=os.getenv(f"{prefix}_HOST", default_host),
+            port=int(os.getenv(f"{prefix}_PORT", str(default_port))),
+            user_id=os.getenv("USER_ID", "default"),
+            organization_id=os.getenv("ORGANIZATION_ID", "default-org"),
+            username=os.getenv(f"{prefix}_USER"),
+            password=os.getenv(f"{prefix}_PASSWORD"),
         )
 
     def to_dict(self) -> dict:
         """Convert config to dictionary."""
         return {
-            'host': self.host,
-            'port': self.port,
-            'user_id': self.user_id,
-            'organization_id': self.organization_id,
-            'lazy_connect': self.lazy_connect,
-            'username': self.username,
-            'password': self.password,
-            'timeout': self.timeout,
-            'max_retries': self.max_retries,
+            "host": self.host,
+            "port": self.port,
+            "user_id": self.user_id,
+            "organization_id": self.organization_id,
+            "lazy_connect": self.lazy_connect,
+            "username": self.username,
+            "password": self.password,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
         }
 
 
 @dataclass
 class PostgresConfig(ClientConfig):
     """PostgreSQL-specific configuration."""
-    database: str = 'postgres'
+
+    database: str = "postgres"
     min_pool_size: int = 5
     max_pool_size: int = 20
     ssl: bool = False
 
     @classmethod
-    def from_env(cls, prefix: str = 'POSTGRES') -> 'PostgresConfig':
-        base = ClientConfig.from_env(prefix, 'localhost', 5432)
+    def from_env(cls, prefix: str = "POSTGRES") -> "PostgresConfig":
+        base = ClientConfig.from_env(prefix, "localhost", 5432)
         return cls(
             **base.to_dict(),
-            database=os.getenv(f'{prefix}_DB', 'postgres'),
-            min_pool_size=int(os.getenv(f'{prefix}_MIN_POOL', '5')),
-            max_pool_size=int(os.getenv(f'{prefix}_MAX_POOL', '20')),
-            ssl=os.getenv(f'{prefix}_SSL', 'false').lower() == 'true',
+            database=os.getenv(f"{prefix}_DB", "postgres"),
+            min_pool_size=int(os.getenv(f"{prefix}_MIN_POOL", "5")),
+            max_pool_size=int(os.getenv(f"{prefix}_MAX_POOL", "20")),
+            ssl=os.getenv(f"{prefix}_SSL", "false").lower() == "true",
         )
 
 
 @dataclass
 class RedisConfig(ClientConfig):
     """Redis-specific configuration."""
+
     db: int = 0
     max_connections: int = 20
 
     @classmethod
-    def from_env(cls, prefix: str = 'REDIS') -> 'RedisConfig':
-        base = ClientConfig.from_env(prefix, 'localhost', 6379)
+    def from_env(cls, prefix: str = "REDIS") -> "RedisConfig":
+        base = ClientConfig.from_env(prefix, "localhost", 6379)
         return cls(
             **base.to_dict(),
-            db=int(os.getenv(f'{prefix}_DB', '0')),
-            max_connections=int(os.getenv(f'{prefix}_MAX_CONNECTIONS', '20')),
+            db=int(os.getenv(f"{prefix}_DB", "0")),
+            max_connections=int(os.getenv(f"{prefix}_MAX_CONNECTIONS", "20")),
         )
 
 
 @dataclass
 class MinIOConfig(ClientConfig):
     """MinIO-specific configuration."""
+
     access_key: Optional[str] = None
     secret_key: Optional[str] = None
     secure: bool = False
-    region: str = 'us-east-1'
+    region: str = "us-east-1"
 
     @classmethod
-    def from_env(cls, prefix: str = 'MINIO') -> 'MinIOConfig':
-        base = ClientConfig.from_env(prefix, 'localhost', 9000)
+    def from_env(cls, prefix: str = "MINIO") -> "MinIOConfig":
+        base = ClientConfig.from_env(prefix, "localhost", 9000)
         return cls(
             **base.to_dict(),
-            access_key=os.getenv(f'{prefix}_ACCESS_KEY', 'minioadmin'),
-            secret_key=os.getenv(f'{prefix}_SECRET_KEY', 'minioadmin'),
-            secure=os.getenv(f'{prefix}_SECURE', 'false').lower() == 'true',
-            region=os.getenv(f'{prefix}_REGION', 'us-east-1'),
+            access_key=os.getenv(f"{prefix}_ACCESS_KEY", "minioadmin"),
+            secret_key=os.getenv(f"{prefix}_SECRET_KEY", "minioadmin"),
+            secure=os.getenv(f"{prefix}_SECURE", "false").lower() == "true",
+            region=os.getenv(f"{prefix}_REGION", "us-east-1"),
         )
 
 
 @dataclass
 class LokiConfig(ClientConfig):
     """Loki-specific configuration."""
-    tenant_id: str = ''
+
+    tenant_id: str = ""
     batch_size: int = 100
     flush_interval: float = 1.0
 
     @classmethod
-    def from_env(cls, prefix: str = 'LOKI') -> 'LokiConfig':
-        base = ClientConfig.from_env(prefix, 'localhost', 3100)
+    def from_env(cls, prefix: str = "LOKI") -> "LokiConfig":
+        base = ClientConfig.from_env(prefix, "localhost", 3100)
         return cls(
             **base.to_dict(),
-            tenant_id=os.getenv(f'{prefix}_TENANT_ID', ''),
-            batch_size=int(os.getenv(f'{prefix}_BATCH_SIZE', '100')),
-            flush_interval=float(os.getenv(f'{prefix}_FLUSH_INTERVAL', '1.0')),
+            tenant_id=os.getenv(f"{prefix}_TENANT_ID", ""),
+            batch_size=int(os.getenv(f"{prefix}_BATCH_SIZE", "100")),
+            flush_interval=float(os.getenv(f"{prefix}_FLUSH_INTERVAL", "1.0")),
         )

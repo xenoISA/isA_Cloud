@@ -33,13 +33,13 @@ mqtt:
   qos: 2                                  # 生产环境使用最高 QoS
   keep_alive: "120s"
   auto_reconnect: true
-  
+
   # TLS 配置
   tls_enabled: true
   tls_cert: "/etc/certs/client.crt"
   tls_key: "/etc/certs/client.key"
   tls_ca: "/etc/certs/ca.crt"
-  
+
   # 遗嘱消息
   will_enabled: true
   will_topic: "devices/${POD_NAME}/status"
@@ -74,6 +74,3 @@ duckdb:
     - httpfs
     - parquet
     - json
-
-
-

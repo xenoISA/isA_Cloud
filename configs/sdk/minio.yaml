@@ -27,6 +27,3 @@ max_retries: 3                            # 最大重试次数
 #   ISA_CLOUD_MINIO_ENDPOINT
 #   ISA_CLOUD_MINIO_ACCESS_KEY
 #   ISA_CLOUD_MINIO_SECRET_KEY
-
-
-

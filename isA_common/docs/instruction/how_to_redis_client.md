@@ -56,7 +56,7 @@ class CacheService:
         # Just business logic - no Redis complexity!
         with self.redis:
             cache_key = f'api:{endpoint}:user:{user_id}'
-            
+
             # Cache with automatic expiration - ONE LINE
             return self.redis.set_with_ttl(
                 cache_key,
@@ -69,7 +69,7 @@ class CacheService:
         with self.redis:
             cache_key = f'api:{endpoint}:user:{user_id}'
             cached = self.redis.get(cache_key)
-            
+
             if cached:
                 return json.loads(cached)
             return None
@@ -79,7 +79,7 @@ class CacheService:
         with self.redis:
             key = f'ratelimit:{user_id}'
             count = self.redis.get(key)
-            
+
             if count is None:
                 # First request in window
                 self.redis.set_with_ttl(key, '1', 60)
@@ -263,10 +263,10 @@ if lock_id:
     try:
         # Critical section
         print("Lock acquired, performing operation...")
-        
+
         # Renew if operation takes longer
         client.renew_lock('resource:database', lock_id, ttl_seconds=30)
-        
+
     finally:
         # Always release lock
         client.release_lock('resource:database', lock_id)
@@ -421,10 +421,10 @@ redis_client = redis.Redis(
 try:
     # Set key
     redis_client.set('user:123', 'Alice')
-    
+
     # Get key
     value = redis_client.get('user:123')
-    
+
     # Handle errors
 except redis.ConnectionError as e:
     print(f"Connection error: {e}")
@@ -627,4 +627,3 @@ The Redis client gives you:
 - **Type-safe** results (dicts, lists, sets)
 
 Just pip install and focus on your caching, sessions, and real-time features!
-

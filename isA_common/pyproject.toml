@@ -104,8 +104,10 @@ ignore = ["E501"]
 # - N806: PascalCase locals are idiomatic for mocked/patched class objects
 # - E402: imports after sys.path tweaks in standalone test scripts
 # - E722: bare excepts in throwaway example scripts
-"tests/**" = ["F841", "N806", "E402"]
-"examples/**" = ["F841", "E722"]
+# Patterns are `**/`-prefixed so they match whether ruff runs from the repo
+# root (pre-commit) or from inside isA_common/ (the CI lint job).
+"**/tests/**" = ["F841", "N806", "E402"]
+"**/examples/**" = ["F841", "E722"]
 
 [tool.mypy]
 python_version = "3.8"

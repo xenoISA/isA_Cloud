@@ -21,14 +21,13 @@ Usage:
     HOST=redis-service PORT=50055 python test_async_redis.py
 """
 
+import asyncio
 import os
 import sys
-import asyncio
 import time
-from typing import Dict, List, Optional
 
 # Add parent path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from isa_common import AsyncRedisClient, BatchedRedisGet, BatchedRedisSet
 
@@ -36,32 +35,32 @@ from isa_common import AsyncRedisClient, BatchedRedisGet, BatchedRedisSet
 # Contract Mapping — see tests/contracts/redis/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':          [],
-    'test_string_operations':     ['BR-001', 'BR-003', 'EC-003', 'EC-004'],
-    'test_ttl_expiration':        ['BR-002'],
-    'test_batch_operations':      [],
-    'test_counter_operations':    [],
-    'test_hash_operations':       ['BR-005'],
-    'test_list_operations':       [],
-    'test_set_operations':        [],
-    'test_sorted_set_operations': [],
-    'test_lock_operations':       [],
-    'test_pubsub_publish':        [],
-    'test_session_management':    [],
-    'test_concurrent_operations': ['EC-007'],
-    'test_get_many_concurrent':   ['EC-007'],
-    'test_auto_batching_get':     [],
-    'test_auto_batching_set':     [],
-    'test_execute_batch':         [],
-    'test_statistics':            [],
+    "test_health_check": [],
+    "test_string_operations": ["BR-001", "BR-003", "EC-003", "EC-004"],
+    "test_ttl_expiration": ["BR-002"],
+    "test_batch_operations": [],
+    "test_counter_operations": [],
+    "test_hash_operations": ["BR-005"],
+    "test_list_operations": [],
+    "test_set_operations": [],
+    "test_sorted_set_operations": [],
+    "test_lock_operations": [],
+    "test_pubsub_publish": [],
+    "test_session_management": [],
+    "test_concurrent_operations": ["EC-007"],
+    "test_get_many_concurrent": ["EC-007"],
+    "test_auto_batching_get": [],
+    "test_auto_batching_set": [],
+    "test_execute_batch": [],
+    "test_statistics": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-004', 'EC-001', 'EC-002', 'EC-005', 'EC-006', 'ER-001', 'ER-002']
+UNCOVERED_CONTRACTS = ["BR-004", "EC-001", "EC-002", "EC-005", "EC-006", "ER-001", "ER-002"]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '6379'))
-USER_ID = os.environ.get('USER_ID', 'test_user')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "6379"))
+USER_ID = os.environ.get("USER_ID", "test_user")
 
 # Test results
 PASSED = 0
@@ -88,7 +87,7 @@ async def test_health_check(client: AsyncRedisClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, "Health check")
         return success
     except Exception as e:
@@ -104,31 +103,31 @@ async def test_string_operations(client: AsyncRedisClient):
     """
     try:
         # SET
-        success = await client.set('async:test:key1', 'value1')
+        success = await client.set("async:test:key1", "value1")
         if not success:
             test_result(False, "String SET")
             return
 
         # GET
-        val = await client.get('async:test:key1')
-        if val != 'value1':
+        val = await client.get("async:test:key1")
+        if val != "value1":
             test_result(False, f"String GET - got {val}")
             return
 
         # EXISTS
-        exists = await client.exists('async:test:key1')
+        exists = await client.exists("async:test:key1")
         if not exists:
             test_result(False, "String EXISTS")
             return
 
         # DELETE
-        deleted = await client.delete('async:test:key1')
+        deleted = await client.delete("async:test:key1")
         if not deleted:
             test_result(False, "String DELETE")
             return
 
         # Verify deleted
-        exists = await client.exists('async:test:key1')
+        exists = await client.exists("async:test:key1")
         if exists:
             test_result(False, "String DELETE verification")
             return
@@ -145,10 +144,10 @@ async def test_ttl_expiration(client: AsyncRedisClient):
     """
     try:
         # Set with TTL
-        await client.set_with_ttl('async:test:expire', 'temp_value', 2)
+        await client.set_with_ttl("async:test:expire", "temp_value", 2)
 
         # Check TTL
-        ttl = await client.ttl('async:test:expire')
+        ttl = await client.ttl("async:test:expire")
         if ttl is None or ttl <= 0 or ttl > 2:
             test_result(False, f"TTL check - got {ttl}")
             return
@@ -157,7 +156,7 @@ async def test_ttl_expiration(client: AsyncRedisClient):
         await asyncio.sleep(3)
 
         # Verify expired
-        exists = await client.exists('async:test:expire')
+        exists = await client.exists("async:test:expire")
         if exists:
             test_result(False, "Key not expired")
             return
@@ -175,9 +174,9 @@ async def test_batch_operations(client: AsyncRedisClient):
     try:
         # MSET - now uses single ExecuteBatch RPC
         data = {
-            'async:test:batch1': 'val1',
-            'async:test:batch2': 'val2',
-            'async:test:batch3': 'val3'
+            "async:test:batch1": "val1",
+            "async:test:batch2": "val2",
+            "async:test:batch3": "val3",
         }
         success = await client.mset(data)
         if not success:
@@ -185,7 +184,7 @@ async def test_batch_operations(client: AsyncRedisClient):
             return
 
         # MGET
-        vals = await client.mget(['async:test:batch1', 'async:test:batch2', 'async:test:batch3'])
+        vals = await client.mget(["async:test:batch1", "async:test:batch2", "async:test:batch3"])
         if len(vals) != 3:
             test_result(False, f"Batch MGET - got {len(vals)} values")
             return
@@ -202,22 +201,22 @@ async def test_counter_operations(client: AsyncRedisClient):
     """
     try:
         # Clean up first
-        await client.delete('async:test:counter')
+        await client.delete("async:test:counter")
 
         # INCR
-        val = await client.incr('async:test:counter', 1)
+        val = await client.incr("async:test:counter", 1)
         if val != 1:
             test_result(False, f"INCR - got {val}")
             return
 
         # INCR by 5
-        val = await client.incr('async:test:counter', 5)
+        val = await client.incr("async:test:counter", 5)
         if val != 6:
             test_result(False, f"INCR+5 - got {val}")
             return
 
         # DECR
-        val = await client.decr('async:test:counter', 2)
+        val = await client.decr("async:test:counter", 2)
         if val != 4:
             test_result(False, f"DECR - got {val}")
             return
@@ -234,33 +233,33 @@ async def test_hash_operations(client: AsyncRedisClient):
     """
     try:
         # HSET
-        success = await client.hset('async:test:hash', 'field1', 'value1')
+        success = await client.hset("async:test:hash", "field1", "value1")
         if not success:
             test_result(False, "HSET")
             return
 
-        await client.hset('async:test:hash', 'field2', 'value2')
+        await client.hset("async:test:hash", "field2", "value2")
 
         # HGET
-        val = await client.hget('async:test:hash', 'field1')
-        if val != 'value1':
+        val = await client.hget("async:test:hash", "field1")
+        if val != "value1":
             test_result(False, f"HGET - got {val}")
             return
 
         # HGETALL
-        all_fields = await client.hgetall('async:test:hash')
+        all_fields = await client.hgetall("async:test:hash")
         if len(all_fields) < 2:
             test_result(False, f"HGETALL - got {len(all_fields)} fields")
             return
 
         # HEXISTS
-        exists = await client.hexists('async:test:hash', 'field1')
+        exists = await client.hexists("async:test:hash", "field1")
         if not exists:
             test_result(False, "HEXISTS")
             return
 
         # HDELETE
-        count = await client.hdelete('async:test:hash', ['field1'])
+        count = await client.hdelete("async:test:hash", ["field1"])
         if count != 1:
             test_result(False, f"HDELETE - deleted {count}")
             return
@@ -277,40 +276,40 @@ async def test_list_operations(client: AsyncRedisClient):
     """
     try:
         # Clean up
-        await client.delete('async:test:list')
+        await client.delete("async:test:list")
 
         # LPUSH
-        length = await client.lpush('async:test:list', ['a', 'b'])
+        length = await client.lpush("async:test:list", ["a", "b"])
         if length < 2:
             test_result(False, f"LPUSH - length {length}")
             return
 
         # RPUSH
-        length = await client.rpush('async:test:list', ['c', 'd'])
+        length = await client.rpush("async:test:list", ["c", "d"])
         if length < 4:
             test_result(False, f"RPUSH - length {length}")
             return
 
         # LRANGE
-        items = await client.lrange('async:test:list', 0, -1)
+        items = await client.lrange("async:test:list", 0, -1)
         if len(items) != 4:
             test_result(False, f"LRANGE - got {len(items)} items")
             return
 
         # LLEN
-        length = await client.llen('async:test:list')
+        length = await client.llen("async:test:list")
         if length != 4:
             test_result(False, f"LLEN - got {length}")
             return
 
         # LPOP
-        val = await client.lpop('async:test:list')
+        val = await client.lpop("async:test:list")
         if val is None:
             test_result(False, "LPOP")
             return
 
         # RPOP
-        val = await client.rpop('async:test:list')
+        val = await client.rpop("async:test:list")
         if val is None:
             test_result(False, "RPOP")
             return
@@ -327,31 +326,31 @@ async def test_set_operations(client: AsyncRedisClient):
     """
     try:
         # Clean up
-        await client.delete('async:test:set1')
-        await client.delete('async:test:set2')
+        await client.delete("async:test:set1")
+        await client.delete("async:test:set2")
 
         # SADD
-        count = await client.sadd('async:test:set1', ['a', 'b', 'c'])
+        count = await client.sadd("async:test:set1", ["a", "b", "c"])
         if count != 3:
             test_result(False, f"SADD - added {count}")
             return
 
-        await client.sadd('async:test:set2', ['b', 'c', 'd'])
+        await client.sadd("async:test:set2", ["b", "c", "d"])
 
         # SISMEMBER
-        is_member = await client.sismember('async:test:set1', 'a')
+        is_member = await client.sismember("async:test:set1", "a")
         if not is_member:
             test_result(False, "SISMEMBER")
             return
 
         # SCARD
-        count = await client.scard('async:test:set1')
+        count = await client.scard("async:test:set1")
         if count != 3:
             test_result(False, f"SCARD - got {count}")
             return
 
         # SMEMBERS
-        members = await client.smembers('async:test:set1')
+        members = await client.smembers("async:test:set1")
         if len(members) != 3:
             test_result(False, f"SMEMBERS - got {len(members)}")
             return
@@ -368,34 +367,36 @@ async def test_sorted_set_operations(client: AsyncRedisClient):
     """
     try:
         # Clean up
-        await client.delete('async:test:zset')
+        await client.delete("async:test:zset")
 
         # ZADD
-        count = await client.zadd('async:test:zset', {'player1': 100, 'player2': 200, 'player3': 150})
+        count = await client.zadd(
+            "async:test:zset", {"player1": 100, "player2": 200, "player3": 150}
+        )
         if count != 3:
             test_result(False, f"ZADD - added {count}")
             return
 
         # ZCARD
-        count = await client.zcard('async:test:zset')
+        count = await client.zcard("async:test:zset")
         if count != 3:
             test_result(False, f"ZCARD - got {count}")
             return
 
         # ZSCORE
-        score = await client.zscore('async:test:zset', 'player2')
+        score = await client.zscore("async:test:zset", "player2")
         if score != 200:
             test_result(False, f"ZSCORE - got {score}")
             return
 
         # ZRANK
-        rank = await client.zrank('async:test:zset', 'player2')
+        rank = await client.zrank("async:test:zset", "player2")
         if rank is None:
             test_result(False, "ZRANK")
             return
 
         # ZRANGE
-        members = await client.zrange('async:test:zset', 0, -1)
+        members = await client.zrange("async:test:zset", 0, -1)
         if len(members) != 3:
             test_result(False, f"ZRANGE - got {len(members)}")
             return
@@ -412,30 +413,30 @@ async def test_lock_operations(client: AsyncRedisClient):
     """
     try:
         # Acquire lock
-        lock_id = await client.acquire_lock('async:test:lock', ttl_seconds=10)
+        lock_id = await client.acquire_lock("async:test:lock", ttl_seconds=10)
         if not lock_id:
             test_result(False, "Acquire lock")
             return
 
         # Renew lock
-        renewed = await client.renew_lock('async:test:lock', lock_id, ttl_seconds=10)
+        renewed = await client.renew_lock("async:test:lock", lock_id, ttl_seconds=10)
         if not renewed:
             test_result(False, "Renew lock")
             return
 
         # Release lock
-        released = await client.release_lock('async:test:lock', lock_id)
+        released = await client.release_lock("async:test:lock", lock_id)
         if not released:
             test_result(False, "Release lock")
             return
 
         # Verify release by re-acquiring
-        lock_id2 = await client.acquire_lock('async:test:lock', ttl_seconds=5)
+        lock_id2 = await client.acquire_lock("async:test:lock", ttl_seconds=5)
         if not lock_id2:
             test_result(False, "Re-acquire lock after release")
             return
 
-        await client.release_lock('async:test:lock', lock_id2)
+        await client.release_lock("async:test:lock", lock_id2)
         test_result(True, "Distributed lock operations (ACQUIRE/RENEW/RELEASE)")
     except Exception as e:
         test_result(False, f"Lock operations - {e}")
@@ -448,7 +449,7 @@ async def test_pubsub_publish(client: AsyncRedisClient):
     """
     try:
         # Publish (subscribers count may be 0)
-        count = await client.publish('async:test:channel', 'Hello World')
+        count = await client.publish("async:test:channel", "Hello World")
         if count is None:
             test_result(False, "Publish returned None")
             return
@@ -465,7 +466,9 @@ async def test_session_management(client: AsyncRedisClient):
     """
     try:
         # Create session
-        session_id = await client.create_session({'user': 'john', 'role': 'admin'}, ttl_seconds=3600)
+        session_id = await client.create_session(
+            {"user": "john", "role": "admin"}, ttl_seconds=3600
+        )
         if not session_id:
             test_result(False, "Create session")
             return
@@ -487,20 +490,22 @@ async def test_concurrent_operations(client: AsyncRedisClient):
     """
     try:
         # Setup keys
-        await client.mset({
-            'async:test:concurrent1': 'val1',
-            'async:test:concurrent2': 'val2',
-            'async:test:concurrent3': 'val3'
-        })
+        await client.mset(
+            {
+                "async:test:concurrent1": "val1",
+                "async:test:concurrent2": "val2",
+                "async:test:concurrent3": "val3",
+            }
+        )
 
         # Concurrent GET using asyncio.gather
         start = time.time()
         results = await asyncio.gather(
-            client.get('async:test:concurrent1'),
-            client.get('async:test:concurrent2'),
-            client.get('async:test:concurrent3'),
-            client.get('async:test:concurrent1'),
-            client.get('async:test:concurrent2'),
+            client.get("async:test:concurrent1"),
+            client.get("async:test:concurrent2"),
+            client.get("async:test:concurrent3"),
+            client.get("async:test:concurrent1"),
+            client.get("async:test:concurrent2"),
         )
         elapsed = time.time() - start
 
@@ -508,7 +513,7 @@ async def test_concurrent_operations(client: AsyncRedisClient):
             test_result(False, f"Concurrent GET - got {len(results)} results")
             return
 
-        if results[0] != 'val1' or results[1] != 'val2':
+        if results[0] != "val1" or results[1] != "val2":
             test_result(False, "Concurrent GET - values mismatch")
             return
 
@@ -524,24 +529,20 @@ async def test_get_many_concurrent(client: AsyncRedisClient):
     """
     try:
         # Setup keys
-        await client.mset({
-            'async:test:many1': 'val1',
-            'async:test:many2': 'val2',
-            'async:test:many3': 'val3'
-        })
+        await client.mset(
+            {"async:test:many1": "val1", "async:test:many2": "val2", "async:test:many3": "val3"}
+        )
 
         # Use helper method
-        results = await client.get_many_concurrent([
-            'async:test:many1',
-            'async:test:many2',
-            'async:test:many3'
-        ])
+        results = await client.get_many_concurrent(
+            ["async:test:many1", "async:test:many2", "async:test:many3"]
+        )
 
         if len(results) != 3:
             test_result(False, f"get_many_concurrent - got {len(results)} results")
             return
 
-        if results.get('async:test:many1') != 'val1':
+        if results.get("async:test:many1") != "val1":
             test_result(False, "get_many_concurrent - value mismatch")
             return
 
@@ -557,11 +558,9 @@ async def test_auto_batching_get(client: AsyncRedisClient):
     """
     try:
         # Setup keys
-        await client.mset({
-            'async:test:auto1': 'val1',
-            'async:test:auto2': 'val2',
-            'async:test:auto3': 'val3'
-        })
+        await client.mset(
+            {"async:test:auto1": "val1", "async:test:auto2": "val2", "async:test:auto3": "val3"}
+        )
 
         # Create batched getter
         batched_get = BatchedRedisGet(client, max_size=100, max_wait_ms=10)
@@ -569,9 +568,9 @@ async def test_auto_batching_get(client: AsyncRedisClient):
         # These concurrent gets should be automatically batched
         start = time.time()
         results = await asyncio.gather(
-            batched_get.get('async:test:auto1'),
-            batched_get.get('async:test:auto2'),
-            batched_get.get('async:test:auto3'),
+            batched_get.get("async:test:auto1"),
+            batched_get.get("async:test:auto2"),
+            batched_get.get("async:test:auto3"),
         )
         elapsed = time.time() - start
 
@@ -579,7 +578,7 @@ async def test_auto_batching_get(client: AsyncRedisClient):
             test_result(False, f"Auto-batch GET - got {len(results)} results")
             return
 
-        if results[0] != 'val1':
+        if results[0] != "val1":
             test_result(False, f"Auto-batch GET - value mismatch: {results[0]}")
             return
 
@@ -600,14 +599,16 @@ async def test_auto_batching_set(client: AsyncRedisClient):
         # These concurrent sets should be automatically batched
         start = time.time()
         results = await asyncio.gather(
-            batched_set.set('async:test:autoset1', 'val1'),
-            batched_set.set('async:test:autoset2', 'val2'),
-            batched_set.set('async:test:autoset3', 'val3'),
+            batched_set.set("async:test:autoset1", "val1"),
+            batched_set.set("async:test:autoset2", "val2"),
+            batched_set.set("async:test:autoset3", "val3"),
         )
         elapsed = time.time() - start
 
         # Verify values were set
-        vals = await client.mget(['async:test:autoset1', 'async:test:autoset2', 'async:test:autoset3'])
+        vals = await client.mget(
+            ["async:test:autoset1", "async:test:autoset2", "async:test:autoset3"]
+        )
         if len(vals) != 3:
             test_result(False, f"Auto-batch SET verification - got {len(vals)}")
             return
@@ -624,18 +625,23 @@ async def test_execute_batch(client: AsyncRedisClient):
     """
     try:
         commands = [
-            {'operation': 'SET', 'key': 'async:test:batch_exec1', 'value': 'val1'},
-            {'operation': 'SET', 'key': 'async:test:batch_exec2', 'value': 'val2', 'expiration': 300},
+            {"operation": "SET", "key": "async:test:batch_exec1", "value": "val1"},
+            {
+                "operation": "SET",
+                "key": "async:test:batch_exec2",
+                "value": "val2",
+                "expiration": 300,
+            },
         ]
         result = await client.execute_batch(commands)
 
-        if not result or not result.get('success'):
+        if not result or not result.get("success"):
             test_result(False, "Execute batch")
             return
 
         # Verify
-        val = await client.get('async:test:batch_exec1')
-        if val != 'val1':
+        val = await client.get("async:test:batch_exec1")
+        if val != "val1":
             test_result(False, f"Execute batch verification - got {val}")
             return
 
@@ -651,7 +657,7 @@ async def test_statistics(client: AsyncRedisClient):
     """
     try:
         stats = await client.get_statistics()
-        if not stats or 'total_keys' not in stats:
+        if not stats or "total_keys" not in stats:
             test_result(False, "Get statistics")
             return
 
@@ -663,7 +669,7 @@ async def test_statistics(client: AsyncRedisClient):
 async def cleanup(client: AsyncRedisClient):
     """Cleanup test keys."""
     print("\nCleaning up test keys...")
-    keys = await client.list_keys('async:test:*', 1000)
+    keys = await client.list_keys("async:test:*", 1000)
     if keys:
         await client.delete_multiple(keys)
 
@@ -673,17 +679,14 @@ async def main():
     print("=" * 70)
     print("     ASYNC REDIS CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  User: {USER_ID}")
     print()
 
     async with AsyncRedisClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID,
-        organization_id='test-org'
+        host=HOST, port=PORT, user_id=USER_ID, organization_id="test-org"
     ) as client:
         # Initial cleanup
         await cleanup(client)
@@ -763,6 +766,6 @@ async def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)

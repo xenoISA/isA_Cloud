@@ -42,9 +42,9 @@ Features Demonstrated:
 Note: All operations include proper error handling and use context managers for resource cleanup.
 """
 
-import sys
 import argparse
 import random
+import sys
 
 # Import the QdrantClient from isa_common
 try:
@@ -60,7 +60,7 @@ except ImportError:
     sys.exit(1)
 
 
-def example_01_health_check(host='localhost', port=50062):
+def example_01_health_check(host="localhost", port=50062):
     """
     Example 1: Health Check
 
@@ -70,17 +70,17 @@ def example_01_health_check(host='localhost', port=50062):
     print("Example 1: Service Health Check")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
         health = client.health_check()
 
-        if health and health.get('healthy'):
-            print(f"✅ Service is healthy!")
+        if health and health.get("healthy"):
+            print("✅ Service is healthy!")
             print(f"   Version: {health.get('version')}")
         else:
             print("❌ Service is not healthy")
 
 
-def example_02_collection_create(host='localhost', port=50062):
+def example_02_collection_create(host="localhost", port=50062):
     """
     Example 2: Collection Creation
 
@@ -90,8 +90,8 @@ def example_02_collection_create(host='localhost', port=50062):
     print("Example 2: Collection Creation")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         # Delete if exists
@@ -101,12 +101,12 @@ def example_02_collection_create(host='localhost', port=50062):
             pass
 
         # Create collection with Cosine distance
-        result = client.create_collection(collection_name, vector_size, distance='Cosine')
+        result = client.create_collection(collection_name, vector_size, distance="Cosine")
 
         if result:
             print(f"✅ Created collection '{collection_name}'")
             print(f"   Vector dimension: {vector_size}")
-            print(f"   Distance metric: Cosine")
+            print("   Distance metric: Cosine")
 
         # List all collections
         collections = client.list_collections()
@@ -115,7 +115,7 @@ def example_02_collection_create(host='localhost', port=50062):
             print(f"   • {coll}")
 
 
-def example_03_collection_info(host='localhost', port=50062):
+def example_03_collection_info(host="localhost", port=50062):
     """
     Example 3: Collection Information
 
@@ -125,8 +125,8 @@ def example_03_collection_info(host='localhost', port=50062):
     print("Example 3: Collection Information")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         info = client.get_collection_info(collection_name)
 
@@ -137,7 +137,7 @@ def example_03_collection_info(host='localhost', port=50062):
             print(f"   Segments count: {info.get('segments_count')}")
 
 
-def example_04_upsert_points(host='localhost', port=50062):
+def example_04_upsert_points(host="localhost", port=50062):
     """
     Example 4: Upsert Points
 
@@ -147,31 +147,30 @@ def example_04_upsert_points(host='localhost', port=50062):
     print("Example 4: Upsert Points")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         # Generate sample embeddings
         documents = [
-            {'id': 1, 'text': 'Python programming tutorial', 'category': 'programming'},
-            {'id': 2, 'text': 'Machine learning basics', 'category': 'ai'},
-            {'id': 3, 'text': 'Database design patterns', 'category': 'database'},
-            {'id': 4, 'text': 'Web development with React', 'category': 'web'},
-            {'id': 5, 'text': 'Deep learning with PyTorch', 'category': 'ai'},
+            {"id": 1, "text": "Python programming tutorial", "category": "programming"},
+            {"id": 2, "text": "Machine learning basics", "category": "ai"},
+            {"id": 3, "text": "Database design patterns", "category": "database"},
+            {"id": 4, "text": "Web development with React", "category": "web"},
+            {"id": 5, "text": "Deep learning with PyTorch", "category": "ai"},
         ]
 
         points = []
         for doc in documents:
             # Generate random vector (in real use, use actual embeddings from a model)
             vector = [random.random() for _ in range(vector_size)]
-            points.append({
-                'id': doc['id'],
-                'vector': vector,
-                'payload': {
-                    'text': doc['text'],
-                    'category': doc['category']
+            points.append(
+                {
+                    "id": doc["id"],
+                    "vector": vector,
+                    "payload": {"text": doc["text"], "category": doc["category"]},
                 }
-            })
+            )
 
         operation_id = client.upsert_points(collection_name, points)
 
@@ -184,7 +183,7 @@ def example_04_upsert_points(host='localhost', port=50062):
         print(f"\n✅ Total points in collection: {count}")
 
 
-def example_05_vector_search(host='localhost', port=50062):
+def example_05_vector_search(host="localhost", port=50062):
     """
     Example 5: Vector Similarity Search
 
@@ -194,8 +193,8 @@ def example_05_vector_search(host='localhost', port=50062):
     print("Example 5: Vector Similarity Search")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         # Create query vector (in real use, this would be an embedding of a query)
@@ -203,11 +202,7 @@ def example_05_vector_search(host='localhost', port=50062):
 
         # Search for top 3 similar vectors
         results = client.search(
-            collection_name,
-            query_vector,
-            limit=3,
-            with_payload=True,
-            with_vectors=False
+            collection_name, query_vector, limit=3, with_payload=True, with_vectors=False
         )
 
         if results:
@@ -215,12 +210,12 @@ def example_05_vector_search(host='localhost', port=50062):
             for i, result in enumerate(results, 1):
                 print(f"\n   {i}. Score: {result.get('score'):.4f}")
                 print(f"      ID: {result.get('id')}")
-                payload = result.get('payload', {})
+                payload = result.get("payload", {})
                 print(f"      Text: {payload.get('text')}")
                 print(f"      Category: {payload.get('category')}")
 
 
-def example_06_search_with_threshold(host='localhost', port=50062):
+def example_06_search_with_threshold(host="localhost", port=50062):
     """
     Example 6: Search with Score Threshold
 
@@ -230,8 +225,8 @@ def example_06_search_with_threshold(host='localhost', port=50062):
     print("Example 6: Search with Score Threshold")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         query_vector = [random.random() for _ in range(vector_size)]
@@ -242,19 +237,19 @@ def example_06_search_with_threshold(host='localhost', port=50062):
             query_vector,
             limit=10,
             score_threshold=0.5,  # Only results with score >= 0.5
-            with_payload=True
+            with_payload=True,
         )
 
-        print(f"✅ Results with score >= 0.5:")
+        print("✅ Results with score >= 0.5:")
         if results:
             for result in results:
-                payload = result.get('payload', {})
+                payload = result.get("payload", {})
                 print(f"   • {payload.get('text')} (score: {result.get('score'):.4f})")
         else:
             print("   No results above threshold")
 
 
-def example_07_upsert_string_ids(host='localhost', port=50062):
+def example_07_upsert_string_ids(host="localhost", port=50062):
     """
     Example 7: Upsert Points with String IDs
 
@@ -264,22 +259,21 @@ def example_07_upsert_string_ids(host='localhost', port=50062):
     print("Example 7: Upsert with String IDs")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         # Add points with string IDs
         points = []
         for i in range(3):
             vector = [random.random() for _ in range(vector_size)]
-            points.append({
-                'id': f'doc_{i+100}',  # String ID
-                'vector': vector,
-                'payload': {
-                    'text': f'Document {i+100}',
-                    'source': 'string_id_batch'
+            points.append(
+                {
+                    "id": f"doc_{i+100}",  # String ID
+                    "vector": vector,
+                    "payload": {"text": f"Document {i+100}", "source": "string_id_batch"},
                 }
-            })
+            )
 
         operation_id = client.upsert_points(collection_name, points)
 
@@ -290,7 +284,7 @@ def example_07_upsert_string_ids(host='localhost', port=50062):
         print(f"\n✅ Total points now: {count}")
 
 
-def example_08_delete_points(host='localhost', port=50062):
+def example_08_delete_points(host="localhost", port=50062):
     """
     Example 8: Delete Points
 
@@ -300,8 +294,8 @@ def example_08_delete_points(host='localhost', port=50062):
     print("Example 8: Delete Points")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Delete numeric IDs
         ids_to_delete = [1, 2]
@@ -311,7 +305,7 @@ def example_08_delete_points(host='localhost', port=50062):
             print(f"✅ Deleted {len(ids_to_delete)} points with numeric IDs")
 
         # Delete string IDs
-        string_ids = ['doc_100', 'doc_101']
+        string_ids = ["doc_100", "doc_101"]
         operation_id = client.delete_points(collection_name, string_ids)
 
         if operation_id:
@@ -321,7 +315,7 @@ def example_08_delete_points(host='localhost', port=50062):
         print(f"\n✅ Remaining points: {count}")
 
 
-def example_09_filtered_search(host='localhost', port=50062):
+def example_09_filtered_search(host="localhost", port=50062):
     """
     Example 9: Filtered Vector Search
 
@@ -331,34 +325,27 @@ def example_09_filtered_search(host='localhost', port=50062):
     print("Example 9: Filtered Vector Search")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
         vector_size = 128
 
         query_vector = [random.random() for _ in range(vector_size)]
 
         # Search only in 'ai' category
-        filter_conditions = {
-            'must': [
-                {'field': 'category', 'match': {'keyword': 'ai'}}
-            ]
-        }
+        filter_conditions = {"must": [{"field": "category", "match": {"keyword": "ai"}}]}
 
         results = client.search_with_filter(
-            collection_name,
-            query_vector,
-            filter_conditions=filter_conditions,
-            limit=5
+            collection_name, query_vector, filter_conditions=filter_conditions, limit=5
         )
 
         if results:
             print(f"✅ Found {len(results)} AI documents:")
             for result in results:
-                payload = result.get('payload', {})
+                payload = result.get("payload", {})
                 print(f"   • {payload.get('text')} (category: {payload.get('category')})")
 
 
-def example_10_scroll_pagination(host='localhost', port=50062):
+def example_10_scroll_pagination(host="localhost", port=50062):
     """
     Example 10: Scroll Through Collection
 
@@ -368,32 +355,29 @@ def example_10_scroll_pagination(host='localhost', port=50062):
     print("Example 10: Scroll/Pagination")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # First page
         result = client.scroll(collection_name, limit=3, with_payload=True)
 
         if result:
             print(f"✅ Page 1: {len(result['points'])} points")
-            for point in result['points']:
-                payload = point.get('payload', {})
+            for point in result["points"]:
+                payload = point.get("payload", {})
                 print(f"   • ID {point['id']}: {payload.get('text')}")
 
             # Second page if available
-            if result.get('next_offset'):
-                print(f"\n✅ Fetching next page...")
+            if result.get("next_offset"):
+                print("\n✅ Fetching next page...")
                 next_result = client.scroll(
-                    collection_name,
-                    limit=3,
-                    offset_id=result['next_offset'],
-                    with_payload=True
+                    collection_name, limit=3, offset_id=result["next_offset"], with_payload=True
                 )
                 if next_result:
                     print(f"✅ Page 2: {len(next_result['points'])} points")
 
 
-def example_11_recommendations(host='localhost', port=50062):
+def example_11_recommendations(host="localhost", port=50062):
     """
     Example 11: Recommendation Engine
 
@@ -403,25 +387,20 @@ def example_11_recommendations(host='localhost', port=50062):
     print("Example 11: Recommendation Engine")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Recommend based on liking IDs 3,4,5 but not liking 1
-        results = client.recommend(
-            collection_name,
-            positive=[3, 4, 5],
-            negative=[],
-            limit=3
-        )
+        results = client.recommend(collection_name, positive=[3, 4, 5], negative=[], limit=3)
 
         if results:
             print(f"✅ Top {len(results)} recommendations:")
             for i, result in enumerate(results, 1):
-                payload = result.get('payload', {})
+                payload = result.get("payload", {})
                 print(f"   {i}. {payload.get('text')} (score: {result.get('score'):.4f})")
 
 
-def example_12_payload_update(host='localhost', port=50062):
+def example_12_payload_update(host="localhost", port=50062):
     """
     Example 12: Update Payload
 
@@ -431,22 +410,20 @@ def example_12_payload_update(host='localhost', port=50062):
     print("Example 12: Payload Update")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Update payload for specific IDs
         operation_id = client.update_payload(
-            collection_name,
-            ids=[3, 4],
-            payload={'status': 'reviewed', 'priority': 'high'}
+            collection_name, ids=[3, 4], payload={"status": "reviewed", "priority": "high"}
         )
 
         if operation_id:
-            print(f"✅ Updated payload for 2 points")
+            print("✅ Updated payload for 2 points")
             print(f"   Operation ID: {operation_id}")
 
 
-def example_13_delete_payload_fields(host='localhost', port=50062):
+def example_13_delete_payload_fields(host="localhost", port=50062):
     """
     Example 13: Delete Payload Fields
 
@@ -456,21 +433,17 @@ def example_13_delete_payload_fields(host='localhost', port=50062):
     print("Example 13: Delete Payload Fields")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Delete 'priority' field from specific points
-        operation_id = client.delete_payload_fields(
-            collection_name,
-            ids=[3],
-            keys=['priority']
-        )
+        operation_id = client.delete_payload_fields(collection_name, ids=[3], keys=["priority"])
 
         if operation_id:
-            print(f"✅ Deleted 'priority' field from point 3")
+            print("✅ Deleted 'priority' field from point 3")
 
 
-def example_14_field_indexes(host='localhost', port=50062):
+def example_14_field_indexes(host="localhost", port=50062):
     """
     Example 14: Field Indexes
 
@@ -480,22 +453,18 @@ def example_14_field_indexes(host='localhost', port=50062):
     print("Example 14: Field Indexes")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Create index on 'category' field
-        operation_id = client.create_field_index(
-            collection_name,
-            'category',
-            'keyword'
-        )
+        operation_id = client.create_field_index(collection_name, "category", "keyword")
 
         if operation_id:
-            print(f"✅ Created keyword index on 'category' field")
-            print(f"   This speeds up filtered searches!")
+            print("✅ Created keyword index on 'category' field")
+            print("   This speeds up filtered searches!")
 
 
-def example_15_snapshots(host='localhost', port=50062):
+def example_15_snapshots(host="localhost", port=50062):
     """
     Example 15: Snapshots
 
@@ -505,8 +474,8 @@ def example_15_snapshots(host='localhost', port=50062):
     print("Example 15: Snapshots")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         # Create snapshot
         snapshot_name = client.create_snapshot(collection_name)
@@ -522,7 +491,7 @@ def example_15_snapshots(host='localhost', port=50062):
                 print(f"   • {snap['name']} ({snap['size_bytes']} bytes)")
 
 
-def example_16_cleanup(host='localhost', port=50062):
+def example_16_cleanup(host="localhost", port=50062):
     """
     Example 16: Cleanup
 
@@ -532,8 +501,8 @@ def example_16_cleanup(host='localhost', port=50062):
     print("Example 16: Cleanup")
     print("=" * 80)
 
-    with QdrantClient(host=host, port=port, user_id='example-user') as client:
-        collection_name = 'example_embeddings'
+    with QdrantClient(host=host, port=port, user_id="example-user") as client:
+        collection_name = "example_embeddings"
 
         result = client.delete_collection(collection_name)
 
@@ -546,9 +515,9 @@ def example_16_cleanup(host='localhost', port=50062):
 
 def main():
     """Run all examples"""
-    parser = argparse.ArgumentParser(description='Qdrant Client Usage Examples')
-    parser.add_argument('--host', default='localhost', help='Qdrant gRPC service host')
-    parser.add_argument('--port', type=int, default=50062, help='Qdrant gRPC service port')
+    parser = argparse.ArgumentParser(description="Qdrant Client Usage Examples")
+    parser.add_argument("--host", default="localhost", help="Qdrant gRPC service host")
+    parser.add_argument("--port", type=int, default=50062, help="Qdrant gRPC service port")
     args = parser.parse_args()
 
     print("\n" + "=" * 80)
@@ -581,9 +550,10 @@ def main():
     except Exception as e:
         print(f"\n❌ Error running examples: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

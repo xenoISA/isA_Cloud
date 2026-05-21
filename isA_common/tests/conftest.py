@@ -3,16 +3,18 @@ isa_common Test Configuration
 
 Shared fixtures and configuration for all tests.
 """
-import pytest
+
 import asyncio
-import socket
 import os
+import socket
 from typing import Generator
 
+import pytest
 
 # ============================================================================
 # Async Event Loop Configuration
 # ============================================================================
+
 
 @pytest.fixture(scope="session")
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
@@ -25,6 +27,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 # ============================================================================
 # Infrastructure Ports
 # ============================================================================
+
 
 class InfraConfig:
     """Infrastructure configuration for tests."""
@@ -54,55 +57,31 @@ def infra_config() -> InfraConfig:
 # Skip Markers
 # ============================================================================
 
+
 def pytest_configure(config):
     """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "component: Component tests with mocked dependencies"
-    )
-    config.addinivalue_line(
-        "markers", "integration: Integration tests with real infrastructure"
-    )
-    config.addinivalue_line(
-        "markers", "golden: Golden tests capturing current behavior"
-    )
-    config.addinivalue_line(
-        "markers", "tdd: TDD tests defining expected behavior"
-    )
+    config.addinivalue_line("markers", "component: Component tests with mocked dependencies")
+    config.addinivalue_line("markers", "integration: Integration tests with real infrastructure")
+    config.addinivalue_line("markers", "golden: Golden tests capturing current behavior")
+    config.addinivalue_line("markers", "tdd: TDD tests defining expected behavior")
     config.addinivalue_line(
         "markers", "requires_infrastructure: Tests requiring gRPC infrastructure"
     )
-    config.addinivalue_line(
-        "markers", "requires_redis: Tests requiring Redis connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_postgres: Tests requiring PostgreSQL connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_neo4j: Tests requiring Neo4j connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_nats: Tests requiring NATS connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_minio: Tests requiring MinIO/S3 connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_qdrant: Tests requiring Qdrant connection"
-    )
-    config.addinivalue_line(
-        "markers", "requires_mqtt: Tests requiring MQTT broker"
-    )
-    config.addinivalue_line(
-        "markers", "requires_duckdb: Tests requiring DuckDB"
-    )
-    config.addinivalue_line(
-        "markers", "requires_consul: Tests requiring Consul connection"
-    )
+    config.addinivalue_line("markers", "requires_redis: Tests requiring Redis connection")
+    config.addinivalue_line("markers", "requires_postgres: Tests requiring PostgreSQL connection")
+    config.addinivalue_line("markers", "requires_neo4j: Tests requiring Neo4j connection")
+    config.addinivalue_line("markers", "requires_nats: Tests requiring NATS connection")
+    config.addinivalue_line("markers", "requires_minio: Tests requiring MinIO/S3 connection")
+    config.addinivalue_line("markers", "requires_qdrant: Tests requiring Qdrant connection")
+    config.addinivalue_line("markers", "requires_mqtt: Tests requiring MQTT broker")
+    config.addinivalue_line("markers", "requires_duckdb: Tests requiring DuckDB")
+    config.addinivalue_line("markers", "requires_consul: Tests requiring Consul connection")
 
 
 # ============================================================================
 # Infrastructure Availability Checks
 # ============================================================================
+
 
 def _check_port(host: str, port: int, timeout: float = 1.0) -> bool:
     """Check if a port is open on a host."""
@@ -151,12 +130,15 @@ def pytest_runtest_setup(item):
                 _availability_cache[service] = _is_service_available(service)
 
             if not _availability_cache[service]:
-                pytest.skip(f"{service} is not available (use {INFRASTRUCTURE_SERVICES.get(service, {}).get('env', 'HOST')} env var to configure)")
+                pytest.skip(
+                    f"{service} is not available (use {INFRASTRUCTURE_SERVICES.get(service, {}).get('env', 'HOST')} env var to configure)"
+                )
 
 
 # ============================================================================
 # Infrastructure Fixtures (for tests that need connections)
 # ============================================================================
+
 
 @pytest.fixture
 def redis_available() -> bool:

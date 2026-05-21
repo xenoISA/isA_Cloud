@@ -54,12 +54,18 @@ repos:
   # ============================================
   # Python - Formatting
   # ============================================
+  # All three tools are pointed at isA_common/pyproject.toml so pre-commit
+  # and the CI lint job (which runs from inside isA_common/) use an identical
+  # configuration — same line-length, same rule set. Python lives under
+  # isA_common/, so without an explicit --config the hooks would fall back
+  # to tool defaults and diverge from CI.
   - repo: https://github.com/psf/black
     rev: 26.5.1
     hooks:
       - id: black
         name: Format Python code with Black
         language_version: python3
+        args: ["--config", "isA_common/pyproject.toml"]
         files: \.py$
 
   - repo: https://github.com/pycqa/isort
@@ -67,7 +73,7 @@ repos:
     hooks:
       - id: isort
         name: Sort Python imports
-        args: ["--profile", "black"]
+        args: ["--settings-path", "isA_common/pyproject.toml"]
         files: \.py$
 
   # ============================================
@@ -78,7 +84,7 @@ repos:
     hooks:
       - id: ruff
         name: Lint Python code with Ruff
-        args: ["--fix"]
+        args: ["--fix", "--config", "isA_common/pyproject.toml"]
         files: \.py$
 
 # ============================================

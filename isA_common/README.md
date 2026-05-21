@@ -83,10 +83,3 @@ See [tests/contract_coverage.md](tests/contract_coverage.md) for the mapping bet
 ## License
 
 Copyright © 2024 isA Platform
-
-
-
-
-
-
-

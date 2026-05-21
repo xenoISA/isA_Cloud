@@ -25,14 +25,13 @@ Environment Variables:
     USER_ID - User ID for multi-tenant isolation (default: test_user)
 """
 
+import asyncio
 import os
 import sys
-import asyncio
 import time
-import io
 
 # Add parent path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from isa_common import AsyncMinIOClient
 
@@ -40,36 +39,49 @@ from isa_common import AsyncMinIOClient
 # Contract Mapping — see tests/contracts/minio/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':                [],
-    'test_create_bucket':               ['EC-002'],
-    'test_bucket_exists':               [],
-    'test_list_buckets':                [],
-    'test_get_bucket_info':             [],
-    'test_upload_object':               ['BR-004'],
-    'test_get_object':                  [],
-    'test_get_object_metadata':         ['BR-004'],
-    'test_list_objects':                ['BR-005'],
-    'test_copy_object':                 [],
-    'test_object_tags':                 [],
-    'test_presigned_url':               ['BR-003'],
-    'test_presigned_put_url':           ['BR-003'],
-    'test_bucket_tags':                 [],
-    'test_concurrent_upload':           [],
-    'test_upload_many_concurrent':      [],
-    'test_download_many_concurrent':    [],
-    'test_delete_object':               [],
-    'test_delete_objects':              [],
+    "test_health_check": [],
+    "test_create_bucket": ["EC-002"],
+    "test_bucket_exists": [],
+    "test_list_buckets": [],
+    "test_get_bucket_info": [],
+    "test_upload_object": ["BR-004"],
+    "test_get_object": [],
+    "test_get_object_metadata": ["BR-004"],
+    "test_list_objects": ["BR-005"],
+    "test_copy_object": [],
+    "test_object_tags": [],
+    "test_presigned_url": ["BR-003"],
+    "test_presigned_put_url": ["BR-003"],
+    "test_bucket_tags": [],
+    "test_concurrent_upload": [],
+    "test_upload_many_concurrent": [],
+    "test_download_many_concurrent": [],
+    "test_delete_object": [],
+    "test_delete_objects": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-001', 'BR-002', 'BR-006', 'BR-007', 'EC-001', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-001",
+    "BR-002",
+    "BR-006",
+    "BR-007",
+    "EC-001",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "EC-008",
+    "ER-001",
+]
 
 # Configuration - Native S3 client (aioboto3)
-HOST = os.environ.get('MINIO_HOST', 'localhost')
-PORT = int(os.environ.get('MINIO_PORT', '9000'))  # S3 API port (not gRPC)
-ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', 'minioadmin')
-SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', 'minioadmin')
-USER_ID = os.environ.get('USER_ID', 'test_user')
-TEST_BUCKET = 'async-test-bucket'
+HOST = os.environ.get("MINIO_HOST", "localhost")
+PORT = int(os.environ.get("MINIO_PORT", "9000"))  # S3 API port (not gRPC)
+ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+USER_ID = os.environ.get("USER_ID", "test_user")
+TEST_BUCKET = "async-test-bucket"
 
 # Test results
 PASSED = 0
@@ -96,7 +108,7 @@ async def test_health_check(client: AsyncMinIOClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, "Health check")
         return success
     except Exception as e:
@@ -115,7 +127,7 @@ async def test_create_bucket(client: AsyncMinIOClient):
             test_result(False, "Create bucket - returned None")
             return
 
-        if not result.get('success'):
+        if not result.get("success"):
             # Bucket might already exist
             test_result(True, "Create bucket (may already exist)")
             return
@@ -179,19 +191,19 @@ async def test_upload_object(client: AsyncMinIOClient):
     Validates: BR-004 (Object Metadata)
     """
     try:
-        data = b'Hello from async MinIO client! This is test content.'
+        data = b"Hello from async MinIO client! This is test content."
         result = await client.upload_object(
             TEST_BUCKET,
-            'test/hello.txt',
+            "test/hello.txt",
             data,
-            content_type='text/plain',
-            metadata={'author': 'test', 'version': '1.0'}
+            content_type="text/plain",
+            metadata={"author": "test", "version": "1.0"},
         )
         if result is None:
             test_result(False, "Upload object - returned None")
             return
 
-        if not result.get('success'):
+        if not result.get("success"):
             test_result(False, f"Upload object - failed: {result}")
             return
 
@@ -206,13 +218,13 @@ async def test_get_object(client: AsyncMinIOClient):
     Validates: (additional coverage)
     """
     try:
-        data = await client.get_object(TEST_BUCKET, 'test/hello.txt')
+        data = await client.get_object(TEST_BUCKET, "test/hello.txt")
         if data is None:
             test_result(False, "Get object - returned None")
             return
 
-        if b'Hello from async' not in data:
-            test_result(False, f"Get object - content mismatch")
+        if b"Hello from async" not in data:
+            test_result(False, "Get object - content mismatch")
             return
 
         test_result(True, f"Get object ({len(data)} bytes)")
@@ -226,12 +238,12 @@ async def test_get_object_metadata(client: AsyncMinIOClient):
     Validates: BR-004 (Object Metadata)
     """
     try:
-        metadata = await client.get_object_metadata(TEST_BUCKET, 'test/hello.txt')
+        metadata = await client.get_object_metadata(TEST_BUCKET, "test/hello.txt")
         if metadata is None:
             test_result(False, "Get object metadata - returned None")
             return
 
-        if metadata.get('size') is None:
+        if metadata.get("size") is None:
             test_result(False, "Get object metadata - no size")
             return
 
@@ -246,7 +258,7 @@ async def test_list_objects(client: AsyncMinIOClient):
     Validates: BR-005 (Object Listing with Pagination)
     """
     try:
-        objects = await client.list_objects(TEST_BUCKET, prefix='test/')
+        objects = await client.list_objects(TEST_BUCKET, prefix="test/")
         if objects is None:
             test_result(False, "List objects - returned None")
             return
@@ -268,16 +280,16 @@ async def test_copy_object(client: AsyncMinIOClient):
     try:
         success = await client.copy_object(
             dest_bucket=TEST_BUCKET,
-            dest_key='test/hello_copy.txt',
+            dest_key="test/hello_copy.txt",
             source_bucket=TEST_BUCKET,
-            source_key='test/hello.txt'
+            source_key="test/hello.txt",
         )
         if not success:
             test_result(False, "Copy object - failed")
             return
 
         # Verify copy exists
-        exists_data = await client.get_object(TEST_BUCKET, 'test/hello_copy.txt')
+        exists_data = await client.get_object(TEST_BUCKET, "test/hello_copy.txt")
         if exists_data is None:
             test_result(False, "Copy object - copy not found")
             return
@@ -295,16 +307,14 @@ async def test_object_tags(client: AsyncMinIOClient):
     try:
         # Set tags
         success = await client.set_object_tags(
-            TEST_BUCKET,
-            'test/hello.txt',
-            {'environment': 'test', 'project': 'async-tests'}
+            TEST_BUCKET, "test/hello.txt", {"environment": "test", "project": "async-tests"}
         )
         if not success:
             test_result(False, "Set object tags - failed")
             return
 
         # Get tags
-        tags = await client.get_object_tags(TEST_BUCKET, 'test/hello.txt')
+        tags = await client.get_object_tags(TEST_BUCKET, "test/hello.txt")
         if tags is None:
             test_result(False, "Get object tags - returned None")
             return
@@ -320,16 +330,12 @@ async def test_presigned_url(client: AsyncMinIOClient):
     Validates: BR-003 (Presigned URL Generation)
     """
     try:
-        url = await client.get_presigned_url(
-            TEST_BUCKET,
-            'test/hello.txt',
-            expiry_seconds=3600
-        )
+        url = await client.get_presigned_url(TEST_BUCKET, "test/hello.txt", expiry_seconds=3600)
         if url is None:
             test_result(False, "Get presigned URL - returned None")
             return
 
-        if not url.startswith('http'):
+        if not url.startswith("http"):
             test_result(False, f"Get presigned URL - invalid: {url[:50]}...")
             return
 
@@ -345,10 +351,7 @@ async def test_presigned_put_url(client: AsyncMinIOClient):
     """
     try:
         url = await client.get_presigned_put_url(
-            TEST_BUCKET,
-            'test/upload_target.txt',
-            expiry_seconds=3600,
-            content_type='text/plain'
+            TEST_BUCKET, "test/upload_target.txt", expiry_seconds=3600, content_type="text/plain"
         )
         if url is None:
             test_result(False, "Get presigned PUT URL - returned None")
@@ -367,8 +370,7 @@ async def test_bucket_tags(client: AsyncMinIOClient):
     try:
         # Set bucket tags
         success = await client.set_bucket_tags(
-            TEST_BUCKET,
-            {'environment': 'test', 'team': 'platform'}
+            TEST_BUCKET, {"environment": "test", "team": "platform"}
         )
         if not success:
             test_result(False, "Set bucket tags - failed")
@@ -394,19 +396,21 @@ async def test_concurrent_upload(client: AsyncMinIOClient):
         start = time.time()
 
         # Upload 5 objects concurrently
-        results = await asyncio.gather(*[
-            client.upload_object(
-                TEST_BUCKET,
-                f'test/concurrent_{i}.txt',
-                f'Content for file {i}'.encode(),
-                content_type='text/plain'
-            )
-            for i in range(5)
-        ])
+        results = await asyncio.gather(
+            *[
+                client.upload_object(
+                    TEST_BUCKET,
+                    f"test/concurrent_{i}.txt",
+                    f"Content for file {i}".encode(),
+                    content_type="text/plain",
+                )
+                for i in range(5)
+            ]
+        )
 
         elapsed = time.time() - start
 
-        success_count = sum(1 for r in results if r and r.get('success'))
+        success_count = sum(1 for r in results if r and r.get("success"))
         if success_count != 5:
             test_result(False, f"Concurrent upload - {success_count}/5 succeeded")
             return
@@ -423,7 +427,7 @@ async def test_upload_many_concurrent(client: AsyncMinIOClient):
     """
     try:
         uploads = [
-            {'bucket': TEST_BUCKET, 'key': f'test/batch_{i}.txt', 'data': f'Batch {i}'.encode()}
+            {"bucket": TEST_BUCKET, "key": f"test/batch_{i}.txt", "data": f"Batch {i}".encode()}
             for i in range(3)
         ]
 
@@ -431,7 +435,7 @@ async def test_upload_many_concurrent(client: AsyncMinIOClient):
         results = await client.upload_many_concurrent(uploads)
         elapsed = time.time() - start
 
-        success_count = sum(1 for r in results if r and r.get('success'))
+        success_count = sum(1 for r in results if r and r.get("success"))
         if success_count != 3:
             test_result(False, f"upload_many_concurrent - {success_count}/3 succeeded")
             return
@@ -447,10 +451,7 @@ async def test_download_many_concurrent(client: AsyncMinIOClient):
     Validates: (additional coverage)
     """
     try:
-        downloads = [
-            {'bucket': TEST_BUCKET, 'key': f'test/batch_{i}.txt'}
-            for i in range(3)
-        ]
+        downloads = [{"bucket": TEST_BUCKET, "key": f"test/batch_{i}.txt"} for i in range(3)]
 
         start = time.time()
         results = await client.download_many_concurrent(downloads)
@@ -472,7 +473,7 @@ async def test_delete_object(client: AsyncMinIOClient):
     Validates: (additional coverage)
     """
     try:
-        success = await client.delete_object(TEST_BUCKET, 'test/hello_copy.txt')
+        success = await client.delete_object(TEST_BUCKET, "test/hello_copy.txt")
         if not success:
             test_result(False, "Delete object - failed")
             return
@@ -488,8 +489,8 @@ async def test_delete_objects(client: AsyncMinIOClient):
     Validates: (additional coverage)
     """
     try:
-        keys = [f'test/concurrent_{i}.txt' for i in range(5)]
-        keys.extend([f'test/batch_{i}.txt' for i in range(3)])
+        keys = [f"test/concurrent_{i}.txt" for i in range(5)]
+        keys.extend([f"test/batch_{i}.txt" for i in range(3)])
 
         success = await client.delete_objects(TEST_BUCKET, keys)
         if not success:
@@ -506,9 +507,9 @@ async def cleanup(client: AsyncMinIOClient):
     print("\nCleaning up test resources...")
     try:
         # Delete all test objects
-        objects = await client.list_objects(TEST_BUCKET, prefix='test/')
+        objects = await client.list_objects(TEST_BUCKET, prefix="test/")
         if objects:
-            keys = [obj.get('key') for obj in objects if obj.get('key')]
+            keys = [obj.get("key") for obj in objects if obj.get("key")]
             if keys:
                 await client.delete_objects(TEST_BUCKET, keys)
 
@@ -524,7 +525,7 @@ async def main():
     print("     ASYNC MINIO CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("            (Native aioboto3 S3 Protocol)")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT} (S3 API)")
     print(f"  Access Key: {ACCESS_KEY[:4]}****")
@@ -533,11 +534,7 @@ async def main():
     print()
 
     async with AsyncMinIOClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID,
-        access_key=ACCESS_KEY,
-        secret_key=SECRET_KEY
+        host=HOST, port=PORT, user_id=USER_ID, access_key=ACCESS_KEY, secret_key=SECRET_KEY
     ) as client:
         # Initial cleanup
         await cleanup(client)
@@ -613,6 +610,6 @@ async def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)

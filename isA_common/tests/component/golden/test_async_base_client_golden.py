@@ -15,28 +15,24 @@ GOTCHA FOUND (BR-002 violation):
 Usage:
     pytest tests/component/golden/test_async_base_client_golden.py -v
 """
-import pytest
-import pytest_asyncio
-import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
-import grpc
+
+import os
 
 # Import from contracts - add tests directory to path
 import sys
-import os
+
+import pytest
+import pytest_asyncio
+
 _tests_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _tests_dir not in sys.path:
     sys.path.insert(0, _tests_dir)
 
 from contracts.grpc_client import (
-    ChannelState,
     HEALTHY_STATES,
-    UNHEALTHY_STATES,
+    ChannelState,
     MockChannelFactory,
-    MockPoolFactory,
-    GRPCTestDataFactory,
     MockGRPCClient,
-    CHANNEL_HEALTH_SCENARIOS,
 )
 
 pytestmark = [pytest.mark.component, pytest.mark.golden, pytest.mark.asyncio]
@@ -45,6 +41,7 @@ pytestmark = [pytest.mark.component, pytest.mark.golden, pytest.mark.asyncio]
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest_asyncio.fixture
 async def mock_client():
@@ -62,6 +59,7 @@ async def mock_client():
 # Golden Tests: Document CURRENT Behavior
 # ============================================================================
 
+
 class TestEnsureConnectedCurrentBehavior:
     """
     Golden tests documenting CURRENT _ensure_connected behavior.
@@ -70,9 +68,7 @@ class TestEnsureConnectedCurrentBehavior:
     They document the bug for regression detection.
     """
 
-    async def test_ensure_connected_creates_channel_when_not_connected(
-        self, mock_client
-    ):
+    async def test_ensure_connected_creates_channel_when_not_connected(self, mock_client):
         """
         Golden: First call creates channel and stub.
 
@@ -93,9 +89,7 @@ class TestEnsureConnectedCurrentBehavior:
         assert mock_client.stub is not None
         assert mock_client.get_channel_count == 1
 
-    async def test_ensure_connected_reuses_channel_when_connected(
-        self, mock_client
-    ):
+    async def test_ensure_connected_reuses_channel_when_connected(self, mock_client):
         """
         Golden: Subsequent calls reuse existing channel.
 
@@ -114,9 +108,7 @@ class TestEnsureConnectedCurrentBehavior:
         assert mock_client.channel is original_channel
         assert mock_client.get_channel_count == 1  # Only one get_channel call
 
-    async def test_ensure_connected_does_not_check_channel_state(
-        self, mock_client
-    ):
+    async def test_ensure_connected_does_not_check_channel_state(self, mock_client):
         """
         Golden: GOTCHA - Current implementation does NOT check channel state!
 
@@ -141,9 +133,7 @@ class TestEnsureConnectedCurrentBehavior:
         assert mock_client.channel.get_state() == ChannelState.SHUTDOWN.value
         assert mock_client.reconnect_count == 0  # No reconnect happened!
 
-    async def test_ensure_connected_ignores_transient_failure(
-        self, mock_client
-    ):
+    async def test_ensure_connected_ignores_transient_failure(self, mock_client):
         """
         Golden: GOTCHA - Current implementation ignores TRANSIENT_FAILURE!
 
@@ -222,9 +212,7 @@ class TestIsChannelHealthyCurrentBehavior:
     """Golden tests for is_channel_healthy() method"""
 
     @pytest.mark.parametrize("state", list(ChannelState))
-    async def test_is_channel_healthy_checks_channel_state(
-        self, mock_client, state: ChannelState
-    ):
+    async def test_is_channel_healthy_checks_channel_state(self, mock_client, state: ChannelState):
         """
         Golden: is_channel_healthy returns correct value for each state.
 
@@ -244,9 +232,7 @@ class TestIsChannelHealthyCurrentBehavior:
         else:
             assert is_healthy is False, f"State {state} should be unhealthy"
 
-    async def test_is_channel_healthy_returns_false_when_no_channel(
-        self, mock_client
-    ):
+    async def test_is_channel_healthy_returns_false_when_no_channel(self, mock_client):
         """
         Golden: is_channel_healthy returns False when channel is None.
         """

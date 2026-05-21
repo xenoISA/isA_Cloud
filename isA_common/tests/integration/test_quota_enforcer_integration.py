@@ -20,11 +20,11 @@ import pytest
 import pytest_asyncio
 
 from isa_common.quota_enforcer import (
+    UNLIMITED,
     QuotaEnforcer,
+    QuotaExceededError,
     QuotaType,
     TierQuota,
-    QuotaExceededError,
-    UNLIMITED,
 )
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

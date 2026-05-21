@@ -4,16 +4,17 @@
 用于接收 MQTT webhook 回调
 """
 
-from flask import Flask, request, jsonify
-import json
 from datetime import datetime, timezone
+
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
 # 存储接收到的 webhook 消息
 webhook_messages = []
 
-@app.route('/webhook/mqtt', methods=['POST'])
+
+@app.route("/webhook/mqtt", methods=["POST"])
 def handle_mqtt_webhook():
     """接收 MQTT webhook 回调"""
     try:
@@ -28,14 +29,14 @@ def handle_mqtt_webhook():
 
         # 保存消息
         webhook_message = {
-            'received_at': received_at,
-            'headers': {
-                'webhook_id': headers.get('X-Webhook-Id'),
-                'timestamp': headers.get('X-Timestamp'),
-                'signature': headers.get('X-Webhook-Signature'),
-                'user_agent': headers.get('User-Agent'),
+            "received_at": received_at,
+            "headers": {
+                "webhook_id": headers.get("X-Webhook-Id"),
+                "timestamp": headers.get("X-Timestamp"),
+                "signature": headers.get("X-Webhook-Signature"),
+                "user_agent": headers.get("User-Agent"),
             },
-            'data': data
+            "data": data,
         }
         webhook_messages.append(webhook_message)
 
@@ -52,48 +53,40 @@ def handle_mqtt_webhook():
         print(f"{'='*60}\n")
 
         # 返回成功响应
-        return jsonify({
-            'success': True,
-            'message': 'Webhook received',
-            'received_at': received_at
-        }), 200
+        return (
+            jsonify({"success": True, "message": "Webhook received", "received_at": received_at}),
+            200,
+        )
 
     except Exception as e:
         print(f"❌ 处理 webhook 错误: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
+        return jsonify({"success": False, "error": str(e)}), 400
 
 
-@app.route('/webhook/stats', methods=['GET'])
+@app.route("/webhook/stats", methods=["GET"])
 def get_stats():
     """获取 webhook 统计"""
-    return jsonify({
-        'total_messages': len(webhook_messages),
-        'messages': webhook_messages[-10:]  # 最近 10 条
-    })
+    return jsonify(
+        {"total_messages": len(webhook_messages), "messages": webhook_messages[-10:]}  # 最近 10 条
+    )
 
 
-@app.route('/webhook/clear', methods=['POST'])
+@app.route("/webhook/clear", methods=["POST"])
 def clear_messages():
     """清空消息"""
     global webhook_messages
     count = len(webhook_messages)
     webhook_messages = []
-    return jsonify({
-        'success': True,
-        'cleared': count
-    })
+    return jsonify({"success": True, "cleared": count})
 
 
-if __name__ == '__main__':
-    print("\n" + "="*60)
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
     print("MQTT Webhook 测试服务器")
-    print("="*60)
+    print("=" * 60)
     print("\n监听地址: http://localhost:8999/webhook/mqtt")
     print("统计接口: http://localhost:8999/webhook/stats")
     print("清空接口: http://localhost:8999/webhook/clear")
     print("\n按 Ctrl+C 停止服务器\n")
 
-    app.run(host='0.0.0.0', port=8999, debug=True)
+    app.run(host="0.0.0.0", port=8999, debug=True)

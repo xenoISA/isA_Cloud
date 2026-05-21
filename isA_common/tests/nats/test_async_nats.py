@@ -17,14 +17,14 @@ Usage:
     HOST=nats-service PORT=50056 python test_async_nats.py
 """
 
+import asyncio
+import json
 import os
 import sys
-import asyncio
 import time
-import json
 
 # Add parent path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from isa_common import AsyncNATSClient
 
@@ -32,29 +32,40 @@ from isa_common import AsyncNATSClient
 # Contract Mapping — see tests/contracts/nats/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':              [],
-    'test_publish':                   ['BR-001'],
-    'test_publish_with_headers':      ['BR-001'],
-    'test_publish_batch':             [],
-    'test_request_reply':             ['BR-006'],
-    'test_create_stream':             ['BR-003'],
-    'test_list_streams':              [],
-    'test_publish_to_stream':         ['BR-003'],
-    'test_create_consumer':           ['BR-004'],
-    'test_pull_messages':             ['BR-004'],
-    'test_kv_operations':             ['BR-005'],
-    'test_object_store_operations':   [],
-    'test_concurrent_publish':        [],
-    'test_publish_many_concurrent':   [],
-    'test_statistics':                [],
+    "test_health_check": [],
+    "test_publish": ["BR-001"],
+    "test_publish_with_headers": ["BR-001"],
+    "test_publish_batch": [],
+    "test_request_reply": ["BR-006"],
+    "test_create_stream": ["BR-003"],
+    "test_list_streams": [],
+    "test_publish_to_stream": ["BR-003"],
+    "test_create_consumer": ["BR-004"],
+    "test_pull_messages": ["BR-004"],
+    "test_kv_operations": ["BR-005"],
+    "test_object_store_operations": [],
+    "test_concurrent_publish": [],
+    "test_publish_many_concurrent": [],
+    "test_statistics": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-002', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-002",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "EC-008",
+    "ER-001",
+]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '4222'))
-USER_ID = os.environ.get('USER_ID', 'test-user')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "4222"))
+USER_ID = os.environ.get("USER_ID", "test-user")
 
 # Test results
 PASSED = 0
@@ -83,14 +94,14 @@ async def test_health_check(client: AsyncNATSClient) -> bool:
         # The standard health_check() uses Ping which has a bug in the Go service
         # (FlushWithContext returns error even when connection is working).
         # Use a functional test instead: try to publish a message.
-        result = await client.publish('health.check.test', b'ping')
-        if result is not None and result.get('success'):
+        result = await client.publish("health.check.test", b"ping")
+        if result is not None and result.get("success"):
             test_result(True, "Health check (functional - publish works)")
             return True
 
         # Fall back to standard health check
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, "Health check")
         return success
     except Exception as e:
@@ -104,11 +115,8 @@ async def test_publish(client: AsyncNATSClient):
     Validates: BR-001 (Subject-Based Publish/Subscribe)
     """
     try:
-        result = await client.publish(
-            'async.test.subject',
-            b'Hello from async client!'
-        )
-        if result is None or not result.get('success'):
+        result = await client.publish("async.test.subject", b"Hello from async client!")
+        if result is None or not result.get("success"):
             test_result(False, "Publish - failed")
             return
 
@@ -124,11 +132,11 @@ async def test_publish_with_headers(client: AsyncNATSClient):
     """
     try:
         result = await client.publish(
-            'async.test.headers',
-            b'Message with headers',
-            headers={'X-Custom-Header': 'test-value', 'X-Priority': 'high'}
+            "async.test.headers",
+            b"Message with headers",
+            headers={"X-Custom-Header": "test-value", "X-Priority": "high"},
         )
-        if result is None or not result.get('success'):
+        if result is None or not result.get("success"):
             test_result(False, "Publish with headers - failed")
             return
 
@@ -144,17 +152,17 @@ async def test_publish_batch(client: AsyncNATSClient):
     """
     try:
         messages = [
-            {'subject': 'async.test.batch.1', 'data': b'message 1'},
-            {'subject': 'async.test.batch.2', 'data': b'message 2'},
-            {'subject': 'async.test.batch.3', 'data': b'message 3'},
+            {"subject": "async.test.batch.1", "data": b"message 1"},
+            {"subject": "async.test.batch.2", "data": b"message 2"},
+            {"subject": "async.test.batch.3", "data": b"message 3"},
         ]
 
         result = await client.publish_batch(messages)
-        if result is None or not result.get('success'):
+        if result is None or not result.get("success"):
             test_result(False, "Batch publish - failed")
             return
 
-        if result.get('published_count') != 3:
+        if result.get("published_count") != 3:
             test_result(False, f"Batch publish - count {result.get('published_count')}")
             return
 
@@ -170,11 +178,7 @@ async def test_request_reply(client: AsyncNATSClient):
     """
     try:
         # Note: This requires a responder - may timeout without one
-        result = await client.request(
-            'async.test.request',
-            b'ping',
-            timeout_seconds=2
-        )
+        result = await client.request("async.test.request", b"ping", timeout_seconds=2)
         # Request might fail without responder, but if we get here without exception, it's ok
         if result is not None:
             test_result(True, "Request-reply (got response)")
@@ -182,7 +186,7 @@ async def test_request_reply(client: AsyncNATSClient):
             test_result(True, "Request-reply (no responder - expected)")
     except Exception as e:
         # Timeout or no responders is expected
-        if 'timeout' in str(e).lower() or 'no responder' in str(e).lower():
+        if "timeout" in str(e).lower() or "no responder" in str(e).lower():
             test_result(True, "Request-reply (timeout - expected without responder)")
         else:
             test_result(False, f"Request-reply - {e}")
@@ -194,16 +198,12 @@ async def test_create_stream(client: AsyncNATSClient):
     Validates: BR-003 (JetStream Persistence)
     """
     try:
-        result = await client.create_stream(
-            'ASYNC_TEST_STREAM',
-            ['async.stream.>'],
-            max_msgs=1000
-        )
+        result = await client.create_stream("ASYNC_TEST_STREAM", ["async.stream.>"], max_msgs=1000)
         if result is None:
             test_result(False, "Create stream - returned None")
             return
 
-        if not result.get('success'):
+        if not result.get("success"):
             # Stream might already exist
             test_result(True, "Create stream (may already exist)")
             return
@@ -236,15 +236,15 @@ async def test_publish_to_stream(client: AsyncNATSClient):
     """
     try:
         result = await client.publish_to_stream(
-            'ASYNC_TEST_STREAM',
-            'async.stream.events',
-            json.dumps({'event': 'test', 'timestamp': time.time()}).encode()
+            "ASYNC_TEST_STREAM",
+            "async.stream.events",
+            json.dumps({"event": "test", "timestamp": time.time()}).encode(),
         )
         if result is None:
             test_result(False, "Publish to stream - returned None")
             return
 
-        if not result.get('success'):
+        if not result.get("success"):
             test_result(False, "Publish to stream - failed")
             return
 
@@ -260,15 +260,13 @@ async def test_create_consumer(client: AsyncNATSClient):
     """
     try:
         result = await client.create_consumer(
-            'ASYNC_TEST_STREAM',
-            'async-test-consumer',
-            filter_subject='async.stream.events'
+            "ASYNC_TEST_STREAM", "async-test-consumer", filter_subject="async.stream.events"
         )
         if result is None:
             test_result(False, "Create consumer - returned None")
             return
 
-        if not result.get('success'):
+        if not result.get("success"):
             # Consumer might already exist
             test_result(True, "Create consumer (may already exist)")
             return
@@ -285,9 +283,7 @@ async def test_pull_messages(client: AsyncNATSClient):
     """
     try:
         messages = await client.pull_messages(
-            'ASYNC_TEST_STREAM',
-            'async-test-consumer',
-            batch_size=10
+            "ASYNC_TEST_STREAM", "async-test-consumer", batch_size=10
         )
         if messages is None:
             test_result(False, "Pull messages - returned None")
@@ -305,29 +301,29 @@ async def test_kv_operations(client: AsyncNATSClient):
     """
     try:
         # Put
-        result = await client.kv_put('async-test-bucket', 'test-key', b'test-value')
-        if result is None or not result.get('success'):
+        result = await client.kv_put("async-test-bucket", "test-key", b"test-value")
+        if result is None or not result.get("success"):
             test_result(False, "KV put - failed")
             return
 
         # Get
-        result = await client.kv_get('async-test-bucket', 'test-key')
-        if result is None or not result.get('found'):
+        result = await client.kv_get("async-test-bucket", "test-key")
+        if result is None or not result.get("found"):
             test_result(False, "KV get - not found")
             return
 
-        if result.get('value') != b'test-value':
-            test_result(False, f"KV get - value mismatch")
+        if result.get("value") != b"test-value":
+            test_result(False, "KV get - value mismatch")
             return
 
         # Keys
-        keys = await client.kv_keys('async-test-bucket')
+        keys = await client.kv_keys("async-test-bucket")
         if not isinstance(keys, list):
             test_result(False, "KV keys - invalid response")
             return
 
         # Delete
-        result = await client.kv_delete('async-test-bucket', 'test-key')
+        result = await client.kv_delete("async-test-bucket", "test-key")
 
         test_result(True, "KV Store operations (PUT/GET/KEYS/DELETE)")
     except Exception as e:
@@ -342,28 +338,26 @@ async def test_object_store_operations(client: AsyncNATSClient):
     try:
         # Put object
         result = await client.object_put(
-            'async-test-objects',
-            'test-object.txt',
-            b'This is test object content'
+            "async-test-objects", "test-object.txt", b"This is test object content"
         )
-        if result is None or not result.get('success'):
+        if result is None or not result.get("success"):
             test_result(False, "Object put - failed")
             return
 
         # Get object
-        result = await client.object_get('async-test-objects', 'test-object.txt')
-        if result is None or not result.get('found'):
+        result = await client.object_get("async-test-objects", "test-object.txt")
+        if result is None or not result.get("found"):
             test_result(False, "Object get - not found")
             return
 
         # List objects
-        objects = await client.object_list('async-test-objects')
+        objects = await client.object_list("async-test-objects")
         if not isinstance(objects, list):
             test_result(False, "Object list - invalid response")
             return
 
         # Delete object
-        result = await client.object_delete('async-test-objects', 'test-object.txt')
+        result = await client.object_delete("async-test-objects", "test-object.txt")
 
         test_result(True, "Object Store operations (PUT/GET/LIST/DELETE)")
     except Exception as e:
@@ -379,14 +373,16 @@ async def test_concurrent_publish(client: AsyncNATSClient):
         start = time.time()
 
         # Publish 10 messages concurrently
-        results = await asyncio.gather(*[
-            client.publish(f'async.test.concurrent.{i}', f'message {i}'.encode())
-            for i in range(10)
-        ])
+        results = await asyncio.gather(
+            *[
+                client.publish(f"async.test.concurrent.{i}", f"message {i}".encode())
+                for i in range(10)
+            ]
+        )
 
         elapsed = time.time() - start
 
-        success_count = sum(1 for r in results if r and r.get('success'))
+        success_count = sum(1 for r in results if r and r.get("success"))
         if success_count != 10:
             test_result(False, f"Concurrent publish - {success_count}/10 succeeded")
             return
@@ -403,8 +399,7 @@ async def test_publish_many_concurrent(client: AsyncNATSClient):
     """
     try:
         messages = [
-            {'subject': f'async.test.helper.{i}', 'data': f'msg {i}'.encode()}
-            for i in range(5)
+            {"subject": f"async.test.helper.{i}", "data": f"msg {i}".encode()} for i in range(5)
         ]
 
         start = time.time()
@@ -440,7 +435,7 @@ async def cleanup(client: AsyncNATSClient):
     """Cleanup test resources."""
     print("\nCleaning up test resources...")
     try:
-        await client.delete_stream('ASYNC_TEST_STREAM')
+        await client.delete_stream("ASYNC_TEST_STREAM")
     except Exception:
         pass
 
@@ -450,17 +445,14 @@ async def main():
     print("=" * 70)
     print("     ASYNC NATS CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  User: {USER_ID}")
     print()
 
     async with AsyncNATSClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID,
-        organization_id='test-org'
+        host=HOST, port=PORT, user_id=USER_ID, organization_id="test-org"
     ) as client:
         # Health check (required)
         print("\n--- Health Check ---")
@@ -523,6 +515,6 @@ async def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)

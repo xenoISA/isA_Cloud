@@ -11,12 +11,11 @@ Provides reusable event subscription infrastructure with:
 - Monitoring hooks
 """
 
-import logging
 import asyncio
-from typing import Optional, Callable, Dict, Any, List
-from datetime import datetime, timezone
+import logging
 from abc import ABC, abstractmethod
-from decimal import Decimal
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from ..nats_client import NATSClient
 from .billing_events import BaseModel
@@ -148,14 +147,18 @@ class IdempotencyChecker:
             self._memory_cache[event_id] = datetime.now(timezone.utc)
         elif self.storage == "redis":
             import json
+
             key = f"{self.REDIS_KEY_PREFIX}{event_id}"
-            value = json.dumps({
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "result": str(result) if result else None,
-            })
+            value = json.dumps(
+                {
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "result": str(result) if result else None,
+                }
+            )
             await self._redis.set(key, value, ex=self._ttl_seconds)
         elif self.storage == "postgres":
             import json
+
             await self._ensure_pg_table()
             result_json = json.dumps(result) if result else None
             await self._postgres.execute(
@@ -178,7 +181,7 @@ class RetryPolicy:
         max_retries: int = 3,
         initial_delay: int = 1,
         max_delay: int = 60,
-        exponential_backoff: bool = True
+        exponential_backoff: bool = True,
     ):
         """
         Initialize retry policy.
@@ -205,7 +208,7 @@ class RetryPolicy:
             Delay in seconds
         """
         if self.exponential_backoff:
-            delay = self.initial_delay * (2 ** attempt)
+            delay = self.initial_delay * (2**attempt)
         else:
             delay = self.initial_delay
 
@@ -271,7 +274,7 @@ class BaseEventSubscriber:
             "events_processed": 0,
             "events_failed": 0,
             "events_skipped_duplicate": 0,
-            "total_processing_time": 0.0
+            "total_processing_time": 0.0,
         }
 
         # Active subscriptions
@@ -292,10 +295,7 @@ class BaseEventSubscriber:
         logger.info(f"[{self.service_name}] Registered handler for {event_type}")
 
     async def subscribe(
-        self,
-        subject: str,
-        queue: Optional[str] = None,
-        durable: Optional[str] = None
+        self, subject: str, queue: Optional[str] = None, durable: Optional[str] = None
     ):
         """
         Subscribe to a NATS subject using JetStream pull consumer.
@@ -310,21 +310,24 @@ class BaseEventSubscriber:
         # Determine stream name from subject
         # Convention: subject "usage.recorded.*" -> stream "USAGE_EVENTS"
         stream_name = self._get_stream_name_from_subject(subject)
-        consumer_name = durable or f"{self.service_name}-{subject.replace('*', 'all').replace('.', '-')}"
+        consumer_name = (
+            durable or f"{self.service_name}-{subject.replace('*', 'all').replace('.', '-')}"
+        )
 
         # Ensure JetStream stream exists (create if needed)
         try:
             # Get stream subjects pattern from subject
             stream_subjects = self._get_stream_subjects(subject)
 
-            logger.info(f"[{self.service_name}] Creating stream {stream_name} with subjects: {stream_subjects}")
-
-            stream_result = self.nats_client.create_stream(
-                name=stream_name,
-                subjects=stream_subjects
+            logger.info(
+                f"[{self.service_name}] Creating stream {stream_name} with subjects: {stream_subjects}"
             )
 
-            if stream_result and stream_result.get('success'):
+            stream_result = self.nats_client.create_stream(
+                name=stream_name, subjects=stream_subjects
+            )
+
+            if stream_result and stream_result.get("success"):
                 logger.info(f"[{self.service_name}] Created JetStream stream: {stream_name}")
             else:
                 logger.warning(f"[{self.service_name}] Stream creation failed, might already exist")
@@ -335,32 +338,30 @@ class BaseEventSubscriber:
         # Create JetStream consumer
         try:
             result = self.nats_client.create_consumer(
-                stream_name=stream_name,
-                consumer_name=consumer_name,
-                filter_subject=subject
+                stream_name=stream_name, consumer_name=consumer_name, filter_subject=subject
             )
 
-            if result and result.get('success'):
-                logger.info(f"[{self.service_name}] Created JetStream consumer: {stream_name}/{consumer_name}")
+            if result and result.get("success"):
+                logger.info(
+                    f"[{self.service_name}] Created JetStream consumer: {stream_name}/{consumer_name}"
+                )
             else:
                 # Consumer might already exist, that's OK
-                logger.info(f"[{self.service_name}] Using existing consumer: {stream_name}/{consumer_name}")
+                logger.info(
+                    f"[{self.service_name}] Using existing consumer: {stream_name}/{consumer_name}"
+                )
         except Exception as e:
             logger.warning(f"[{self.service_name}] Consumer creation warning: {e}")
 
         # Store subscription info
-        self.subscriptions.append({
-            'subject': subject,
-            'stream': stream_name,
-            'consumer': consumer_name,
-            'queue': queue
-        })
+        self.subscriptions.append(
+            {"subject": subject, "stream": stream_name, "consumer": consumer_name, "queue": queue}
+        )
 
         # Start background task to pull and process messages
         import asyncio
-        task = asyncio.create_task(
-            self._pull_and_process_loop(stream_name, consumer_name, subject)
-        )
+
+        task = asyncio.create_task(self._pull_and_process_loop(stream_name, consumer_name, subject))
         self._background_tasks.append(task)
 
         logger.info(f"[{self.service_name}] Subscription active: {subject}")
@@ -376,25 +377,25 @@ class BaseEventSubscriber:
         - *.file.> -> FILE_EVENTS (wildcard prefix uses second part)
         - *.user.> -> USER_EVENTS
         """
-        if subject.startswith('usage.'):
-            return 'USAGE_EVENTS'
-        elif subject.startswith('billing.'):
-            return 'BILLING_EVENTS'
-        elif subject.startswith('wallet.'):
-            return 'WALLET_EVENTS'
+        if subject.startswith("usage."):
+            return "USAGE_EVENTS"
+        elif subject.startswith("billing."):
+            return "BILLING_EVENTS"
+        elif subject.startswith("wallet."):
+            return "WALLET_EVENTS"
         else:
             # Handle wildcard-prefixed subjects (e.g., *.file.>, *.user.>)
-            parts = subject.split('.')
-            if parts[0] in ('*', '>'):
+            parts = subject.split(".")
+            if parts[0] in ("*", ">"):
                 # Use second part as stream name base
-                if len(parts) > 1 and parts[1] not in ('*', '>'):
-                    return f'{parts[1].upper()}_EVENTS'
+                if len(parts) > 1 and parts[1] not in ("*", ">"):
+                    return f"{parts[1].upper()}_EVENTS"
                 else:
                     # Fallback to generic events stream
-                    return 'EVENTS'
+                    return "EVENTS"
             # Default: uppercase first part + _EVENTS
             first_part = parts[0].upper()
-            return f'{first_part}_EVENTS'
+            return f"{first_part}_EVENTS"
 
     def _get_stream_subjects(self, subject: str) -> list:
         """
@@ -406,46 +407,45 @@ class BaseEventSubscriber:
         Returns:
             List of subjects for the stream (e.g., ["usage.>"])
         """
-        if subject.startswith('usage.'):
-            return ['usage.>']
-        elif subject.startswith('billing.'):
-            return ['billing.>']
-        elif subject.startswith('wallet.'):
-            return ['wallet.>']
+        if subject.startswith("usage."):
+            return ["usage.>"]
+        elif subject.startswith("billing."):
+            return ["billing.>"]
+        elif subject.startswith("wallet."):
+            return ["wallet.>"]
         else:
-            parts = subject.split('.')
+            parts = subject.split(".")
             # Handle wildcard-prefixed subjects (e.g., *.file.>, *.user.>)
-            if parts[0] in ('*', '>'):
+            if parts[0] in ("*", ">"):
                 # Use second part as stream subject base
-                if len(parts) > 1 and parts[1] not in ('*', '>'):
-                    return [f'*.{parts[1]}.>']
+                if len(parts) > 1 and parts[1] not in ("*", ">"):
+                    return [f"*.{parts[1]}.>"]
                 else:
                     # Fallback to catch-all
-                    return ['>']
+                    return [">"]
             # Default: first part with wildcard
-            return [f'{parts[0]}.>']
+            return [f"{parts[0]}.>"]
 
     async def _pull_and_process_loop(self, stream_name: str, consumer_name: str, subject: str):
         """
         Background loop to pull messages from JetStream and process them.
         """
-        logger.info(f"[{self.service_name}] Starting message pull loop for {stream_name}/{consumer_name}")
+        logger.info(
+            f"[{self.service_name}] Starting message pull loop for {stream_name}/{consumer_name}"
+        )
 
         while True:
             try:
                 # Pull batch of messages (non-blocking)
                 messages = self.nats_client.pull_messages(
-                    stream_name=stream_name,
-                    consumer_name=consumer_name,
-                    batch_size=10
+                    stream_name=stream_name, consumer_name=consumer_name, batch_size=10
                 )
 
                 for msg in messages:
                     try:
                         # Process the message
                         success = await self.process_event(
-                            event_data=msg['data'],
-                            subject=msg['subject']
+                            event_data=msg["data"], subject=msg["subject"]
                         )
 
                         # Acknowledge if processed successfully
@@ -453,22 +453,26 @@ class BaseEventSubscriber:
                             self.nats_client.ack_message(
                                 stream_name=stream_name,
                                 consumer_name=consumer_name,
-                                sequence=msg['sequence']
+                                sequence=msg["sequence"],
                             )
                     except Exception as e:
                         logger.error(
                             f"[{self.service_name}] Error processing message seq={msg.get('sequence')}: {e}",
-                            exc_info=True
+                            exc_info=True,
                         )
                         # Don't ack failed messages - they'll be redelivered
 
                 # Sleep briefly before next pull
                 import asyncio
-                await asyncio.sleep(0.1 if messages else 1.0)  # Faster polling if messages available
+
+                await asyncio.sleep(
+                    0.1 if messages else 1.0
+                )  # Faster polling if messages available
 
             except Exception as e:
                 logger.error(f"[{self.service_name}] Error in pull loop: {e}", exc_info=True)
                 import asyncio
+
                 await asyncio.sleep(5.0)  # Back off on errors
 
     async def process_event(self, event_data: bytes, subject: str) -> bool:
@@ -510,18 +514,14 @@ class BaseEventSubscriber:
 
             # 2. Check idempotency
             if event_id and await self.idempotency.is_processed(event_id):
-                logger.info(
-                    f"[{self.service_name}] Event {event_id} already processed, skipping"
-                )
+                logger.info(f"[{self.service_name}] Event {event_id} already processed, skipping")
                 self.metrics["events_skipped_duplicate"] += 1
                 return True
 
             # 3. Find handler
             handler = self.handlers.get(event_type)
             if not handler:
-                logger.warning(
-                    f"[{self.service_name}] No handler found for {event_type}"
-                )
+                logger.warning(f"[{self.service_name}] No handler found for {event_type}")
                 return False
 
             # 4. Execute handler with retries
@@ -539,8 +539,7 @@ class BaseEventSubscriber:
                 self.metrics["total_processing_time"] += elapsed
 
                 logger.info(
-                    f"[{self.service_name}] Successfully processed {event_id} "
-                    f"in {elapsed:.3f}s"
+                    f"[{self.service_name}] Successfully processed {event_id} " f"in {elapsed:.3f}s"
                 )
                 return True
             else:
@@ -556,17 +555,12 @@ class BaseEventSubscriber:
 
         except Exception as e:
             logger.error(
-                f"[{self.service_name}] Unexpected error processing event: {e}",
-                exc_info=True
+                f"[{self.service_name}] Unexpected error processing event: {e}", exc_info=True
             )
             self.metrics["events_failed"] += 1
             return False
 
-    async def _execute_with_retry(
-        self,
-        handler: EventHandler,
-        event: BaseModel
-    ) -> bool:
+    async def _execute_with_retry(self, handler: EventHandler, event: BaseModel) -> bool:
         """
         Execute handler with retry logic.
 
@@ -595,7 +589,7 @@ class BaseEventSubscriber:
             except Exception as e:
                 logger.error(
                     f"[{self.service_name}] Handler error (attempt {attempt + 1}): {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
 
                 if attempt < self.retry_policy.max_retries:
@@ -616,16 +610,17 @@ class BaseEventSubscriber:
         """
         try:
             import json
-            data = json.loads(event_data.decode('utf-8'))
+
+            data = json.loads(event_data.decode("utf-8"))
             event_type = data.get("event_type")
 
             # Import event classes
             from .billing_events import (
-                UsageEvent,
                 BillingCalculatedEvent,
+                BillingErrorEvent,
                 TokensDeductedEvent,
                 TokensInsufficientEvent,
-                BillingErrorEvent
+                UsageEvent,
             )
 
             # Map event types to classes
@@ -635,7 +630,7 @@ class BaseEventSubscriber:
                 "billing.calculated": BillingCalculatedEvent,
                 "wallet.tokens.deducted": TokensDeductedEvent,
                 "wallet.tokens.insufficient": TokensInsufficientEvent,
-                "billing.failed": BillingErrorEvent
+                "billing.failed": BillingErrorEvent,
             }
 
             event_class = event_classes.get(event_type)
@@ -649,12 +644,7 @@ class BaseEventSubscriber:
             logger.error(f"Error deserializing event: {e}")
             return None
 
-    async def _move_to_dlq(
-        self,
-        event: BaseModel,
-        original_subject: str,
-        reason: str
-    ):
+    async def _move_to_dlq(self, event: BaseModel, original_subject: str, reason: str):
         """
         Move failed event to dead letter queue.
 
@@ -666,22 +656,21 @@ class BaseEventSubscriber:
         try:
             dlq_subject = f"dlq.{original_subject}"
             dlq_data = {
-                "original_event": event.model_dump() if hasattr(event, 'model_dump') else {},
+                "original_event": event.model_dump() if hasattr(event, "model_dump") else {},
                 "original_subject": original_subject,
                 "failure_reason": reason,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
-                "service": self.service_name
+                "service": self.service_name,
             }
 
             import json
-            dlq_bytes = json.dumps(dlq_data).encode('utf-8')
+
+            dlq_bytes = json.dumps(dlq_data).encode("utf-8")
 
             # Publish to DLQ
             self.nats_client.publish(dlq_subject, dlq_bytes)
 
-            logger.warning(
-                f"[{self.service_name}] Moved event to DLQ: {dlq_subject}"
-            )
+            logger.warning(f"[{self.service_name}] Moved event to DLQ: {dlq_subject}")
 
         except Exception as e:
             logger.error(f"Error moving event to DLQ: {e}")
@@ -696,14 +685,13 @@ class BaseEventSubscriber:
         avg_processing_time = 0.0
         if self.metrics["events_processed"] > 0:
             avg_processing_time = (
-                self.metrics["total_processing_time"] /
-                self.metrics["events_processed"]
+                self.metrics["total_processing_time"] / self.metrics["events_processed"]
             )
 
         return {
             **self.metrics,
             "avg_processing_time_seconds": round(avg_processing_time, 3),
-            "subscriptions": self.subscriptions
+            "subscriptions": self.subscriptions,
         }
 
     async def health_check(self) -> Dict[str, Any]:
@@ -717,5 +705,5 @@ class BaseEventSubscriber:
             "service": self.service_name,
             "status": "healthy" if self.nats_client else "unhealthy",
             "subscriptions": len(self.subscriptions),
-            "metrics": self.get_metrics()
+            "metrics": self.get_metrics(),
         }

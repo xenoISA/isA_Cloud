@@ -210,14 +210,12 @@ Services auto-register to Consul with tags:
 ```yaml
 ssl:
   - sni: "api.isa.io"
+    # Paste the PEM-encoded certificate and private key here.
+    # Do NOT commit real key material — load it from a secret store.
     cert: |
-      -----BEGIN CERTIFICATE-----
-      ...
-      -----END CERTIFICATE-----
+      <PEM-encoded certificate chain>
     key: |
-      -----BEGIN RSA PRIVATE KEY-----
-      ...
-      -----END RSA PRIVATE KEY-----
+      <PEM-encoded private key>
 ```
 
 ## Monitoring

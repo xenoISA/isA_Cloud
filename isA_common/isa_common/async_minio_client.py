@@ -13,9 +13,7 @@ providing full support for all object storage features including:
 """
 
 import os
-from typing import List, Dict, Optional, AsyncIterator, Callable, Any
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from typing import AsyncIterator, Callable, Dict, List, Optional
 
 # aioboto3 for async S3 operations
 import aioboto3
@@ -51,9 +49,9 @@ class AsyncMinIOClient(AsyncBaseClient):
         endpoint_url: Optional[str] = None,
         access_key: Optional[str] = None,
         secret_key: Optional[str] = None,
-        region: str = 'us-east-1',
+        region: str = "us-east-1",
         secure: bool = False,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize async MinIO client with native S3 driver.
@@ -72,12 +70,12 @@ class AsyncMinIOClient(AsyncBaseClient):
         if endpoint_url:
             self._endpoint_url = endpoint_url
         else:
-            protocol = 'https' if secure else 'http'
+            protocol = "https" if secure else "http"
             self._endpoint_url = f"{protocol}://{self._host}:{self._port}"
 
         # Get credentials from env or parameters
-        self._access_key = access_key or os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
-        self._secret_key = secret_key or os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+        self._access_key = access_key or os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        self._secret_key = secret_key or os.getenv("MINIO_SECRET_KEY", "minioadmin")
         self._region = region
 
         # aioboto3 session and client state
@@ -87,13 +85,10 @@ class AsyncMinIOClient(AsyncBaseClient):
 
         # boto config with retry
         self._config = Config(
-            signature_version='s3v4',
-            retries={
-                'max_attempts': 3,
-                'mode': 'standard'
-            },
+            signature_version="s3v4",
+            retries={"max_attempts": 3, "mode": "standard"},
             connect_timeout=10,
-            read_timeout=30
+            read_timeout=30,
         )
 
     async def _connect(self) -> None:
@@ -119,49 +114,49 @@ class AsyncMinIOClient(AsyncBaseClient):
         """
         if self.user_id:
             # Sanitize user_id: replace underscores and special chars with hyphens
-            safe_user_id = self.user_id.lower().replace('_', '-').replace('|', '-')
+            safe_user_id = self.user_id.lower().replace("_", "-").replace("|", "-")
             # Remove consecutive hyphens
-            while '--' in safe_user_id:
-                safe_user_id = safe_user_id.replace('--', '-')
+            while "--" in safe_user_id:
+                safe_user_id = safe_user_id.replace("--", "-")
             # Strip leading/trailing hyphens
-            safe_user_id = safe_user_id.strip('-')
+            safe_user_id = safe_user_id.strip("-")
 
             # Sanitize bucket_name similarly
-            safe_bucket = bucket_name.lower().replace('_', '-')
-            while '--' in safe_bucket:
-                safe_bucket = safe_bucket.replace('--', '-')
-            safe_bucket = safe_bucket.strip('-')
+            safe_bucket = bucket_name.lower().replace("_", "-")
+            while "--" in safe_bucket:
+                safe_bucket = safe_bucket.replace("--", "-")
+            safe_bucket = safe_bucket.strip("-")
 
             return f"user-{safe_user_id}-{safe_bucket}"
 
         # Sanitize bucket name even without user prefix
-        safe_bucket = bucket_name.lower().replace('_', '-')
-        while '--' in safe_bucket:
-            safe_bucket = safe_bucket.replace('--', '-')
-        return safe_bucket.strip('-')
+        safe_bucket = bucket_name.lower().replace("_", "-")
+        while "--" in safe_bucket:
+            safe_bucket = safe_bucket.replace("--", "-")
+        return safe_bucket.strip("-")
 
     async def _get_client(self):
         """Get or create S3 client context manager."""
         await self._ensure_connected()
         return self._session.client(
-            's3',
+            "s3",
             endpoint_url=self._endpoint_url,
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
             region_name=self._region,
-            config=self._config
+            config=self._config,
         )
 
     async def _get_resource(self):
         """Get or create S3 resource context manager."""
         await self._ensure_connected()
         return self._session.resource(
-            's3',
+            "s3",
             endpoint_url=self._endpoint_url,
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
             region_name=self._region,
-            config=self._config
+            config=self._config,
         )
 
     # ============================================
@@ -173,16 +168,20 @@ class AsyncMinIOClient(AsyncBaseClient):
         try:
             async with await self._get_client() as client:
                 response = await client.list_buckets()
-                bucket_count = len(response.get('Buckets', []))
+                bucket_count = len(response.get("Buckets", []))
 
                 return {
-                    'status': 'healthy',
-                    'healthy': True,
-                    'details': {
-                        'endpoint': self._endpoint_url,
-                        'bucket_count': bucket_count,
-                        'owner': response.get('Owner', {}).get('DisplayName', 'unknown')
-                    } if detailed else {}
+                    "status": "healthy",
+                    "healthy": True,
+                    "details": (
+                        {
+                            "endpoint": self._endpoint_url,
+                            "bucket_count": bucket_count,
+                            "owner": response.get("Owner", {}).get("DisplayName", "unknown"),
+                        }
+                        if detailed
+                        else {}
+                    ),
                 }
 
         except Exception as e:
@@ -193,10 +192,7 @@ class AsyncMinIOClient(AsyncBaseClient):
     # ============================================
 
     async def create_bucket(
-        self,
-        bucket_name: str,
-        organization_id: str = 'default-org',
-        region: str = 'us-east-1'
+        self, bucket_name: str, organization_id: str = "default-org", region: str = "us-east-1"
     ) -> Optional[Dict]:
         """Create a new bucket."""
         try:
@@ -204,28 +200,28 @@ class AsyncMinIOClient(AsyncBaseClient):
 
             async with await self._get_client() as client:
                 # MinIO ignores LocationConstraint for us-east-1
-                if region == 'us-east-1':
+                if region == "us-east-1":
                     await client.create_bucket(Bucket=prefixed_name)
                 else:
                     await client.create_bucket(
                         Bucket=prefixed_name,
-                        CreateBucketConfiguration={'LocationConstraint': region}
+                        CreateBucketConfiguration={"LocationConstraint": region},
                     )
 
                 self._logger.info(f"Created bucket: {prefixed_name}")
                 return {
-                    'success': True,
-                    'bucket': prefixed_name,
-                    'message': f'Bucket {prefixed_name} created successfully'
+                    "success": True,
+                    "bucket": prefixed_name,
+                    "message": f"Bucket {prefixed_name} created successfully",
                 }
 
         except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'BucketAlreadyOwnedByYou':
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "BucketAlreadyOwnedByYou":
                 return {
-                    'success': True,
-                    'bucket': self._get_prefixed_bucket_name(bucket_name),
-                    'message': 'Bucket already exists'
+                    "success": True,
+                    "bucket": self._get_prefixed_bucket_name(bucket_name),
+                    "message": "Bucket already exists",
                 }
             return self.handle_error(e, "create bucket")
         except Exception as e:
@@ -251,34 +247,33 @@ class AsyncMinIOClient(AsyncBaseClient):
     async def _empty_bucket(self, client, bucket_name: str):
         """Delete all objects in a bucket."""
         try:
-            paginator = client.get_paginator('list_objects_v2')
+            paginator = client.get_paginator("list_objects_v2")
             async for page in paginator.paginate(Bucket=bucket_name):
-                objects = page.get('Contents', [])
+                objects = page.get("Contents", [])
                 if objects:
-                    delete_objects = [{'Key': obj['Key']} for obj in objects]
+                    delete_objects = [{"Key": obj["Key"]} for obj in objects]
                     await client.delete_objects(
-                        Bucket=bucket_name,
-                        Delete={'Objects': delete_objects}
+                        Bucket=bucket_name, Delete={"Objects": delete_objects}
                     )
         except Exception as e:
             self._logger.warning(f"Error emptying bucket {bucket_name}: {e}")
 
-    async def list_buckets(self, organization_id: str = 'default-org') -> List[str]:
+    async def list_buckets(self, organization_id: str = "default-org") -> List[str]:
         """List all accessible buckets."""
         try:
             async with await self._get_client() as client:
                 response = await client.list_buckets()
-                buckets = response.get('Buckets', [])
+                buckets = response.get("Buckets", [])
 
                 # Filter by user prefix if user_id is set
                 if self.user_id:
                     prefix = f"user-{self.user_id}-"
                     return [
-                        b['Name'].replace(prefix, '', 1)
+                        b["Name"].replace(prefix, "", 1)
                         for b in buckets
-                        if b['Name'].startswith(prefix)
+                        if b["Name"].startswith(prefix)
                     ]
-                return [b['Name'] for b in buckets]
+                return [b["Name"] for b in buckets]
 
         except Exception as e:
             return self.handle_error(e, "list buckets") or []
@@ -293,8 +288,8 @@ class AsyncMinIOClient(AsyncBaseClient):
                 return True
 
         except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code in ('404', 'NoSuchBucket'):
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in ("404", "NoSuchBucket"):
                 return False
             self.handle_error(e, "bucket_exists")
             return False
@@ -313,24 +308,24 @@ class AsyncMinIOClient(AsyncBaseClient):
 
                 # Get bucket location
                 location = await client.get_bucket_location(Bucket=prefixed_name)
-                region = location.get('LocationConstraint') or 'us-east-1'
+                region = location.get("LocationConstraint") or "us-east-1"
 
                 # Count objects and calculate size
                 total_size = 0
                 object_count = 0
-                paginator = client.get_paginator('list_objects_v2')
+                paginator = client.get_paginator("list_objects_v2")
                 async for page in paginator.paginate(Bucket=prefixed_name):
-                    for obj in page.get('Contents', []):
-                        total_size += obj.get('Size', 0)
+                    for obj in page.get("Contents", []):
+                        total_size += obj.get("Size", 0)
                         object_count += 1
 
                 return {
-                    'name': bucket_name,
-                    'owner_id': self.user_id,
-                    'organization_id': 'default-org',
-                    'region': region,
-                    'size_bytes': total_size,
-                    'object_count': object_count
+                    "name": bucket_name,
+                    "owner_id": self.user_id,
+                    "organization_id": "default-org",
+                    "region": region,
+                    "size_bytes": total_size,
+                    "object_count": object_count,
                 }
 
         except Exception as e:
@@ -345,9 +340,9 @@ class AsyncMinIOClient(AsyncBaseClient):
         bucket_name: str,
         object_key: str,
         data: bytes,
-        content_type: str = 'application/octet-stream',
+        content_type: str = "application/octet-stream",
         metadata: Optional[Dict[str, str]] = None,
-        auto_create_bucket: bool = True
+        auto_create_bucket: bool = True,
     ) -> Optional[Dict]:
         """Upload object to MinIO."""
         try:
@@ -356,31 +351,28 @@ class AsyncMinIOClient(AsyncBaseClient):
             # Auto-create bucket if needed
             if auto_create_bucket and not await self.bucket_exists(bucket_name):
                 create_result = await self.create_bucket(bucket_name)
-                if not create_result or not create_result.get('success'):
-                    return {
-                        'success': False,
-                        'error': f"Failed to create bucket '{bucket_name}'"
-                    }
+                if not create_result or not create_result.get("success"):
+                    return {"success": False, "error": f"Failed to create bucket '{bucket_name}'"}
 
             async with await self._get_client() as client:
                 put_args = {
-                    'Bucket': prefixed_name,
-                    'Key': object_key,
-                    'Body': data,
-                    'ContentType': content_type
+                    "Bucket": prefixed_name,
+                    "Key": object_key,
+                    "Body": data,
+                    "ContentType": content_type,
                 }
 
                 if metadata:
                     # S3 metadata keys must be strings
-                    put_args['Metadata'] = {k: str(v) for k, v in metadata.items()}
+                    put_args["Metadata"] = {k: str(v) for k, v in metadata.items()}
 
                 response = await client.put_object(**put_args)
 
                 return {
-                    'success': True,
-                    'object_key': object_key,
-                    'size': len(data),
-                    'etag': response.get('ETag', '').strip('"')
+                    "success": True,
+                    "object_key": object_key,
+                    "size": len(data),
+                    "etag": response.get("ETag", "").strip('"'),
                 }
 
         except Exception as e:
@@ -392,9 +384,9 @@ class AsyncMinIOClient(AsyncBaseClient):
         object_key: str,
         file_obj,
         file_size: int = None,
-        content_type: str = 'application/octet-stream',
+        content_type: str = "application/octet-stream",
         chunk_size: int = 5 * 1024 * 1024,  # 5MB
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> bool:
         """Upload large file using multipart upload with progress support."""
         try:
@@ -408,11 +400,9 @@ class AsyncMinIOClient(AsyncBaseClient):
             async with await self._get_client() as client:
                 # Start multipart upload
                 mpu = await client.create_multipart_upload(
-                    Bucket=prefixed_name,
-                    Key=object_key,
-                    ContentType=content_type
+                    Bucket=prefixed_name, Key=object_key, ContentType=content_type
                 )
-                upload_id = mpu['UploadId']
+                upload_id = mpu["UploadId"]
 
                 parts = []
                 part_number = 1
@@ -429,13 +419,10 @@ class AsyncMinIOClient(AsyncBaseClient):
                             Key=object_key,
                             UploadId=upload_id,
                             PartNumber=part_number,
-                            Body=chunk
+                            Body=chunk,
                         )
 
-                        parts.append({
-                            'PartNumber': part_number,
-                            'ETag': response['ETag']
-                        })
+                        parts.append({"PartNumber": part_number, "ETag": response["ETag"]})
 
                         bytes_sent += len(chunk)
                         if progress_callback and file_size:
@@ -448,16 +435,14 @@ class AsyncMinIOClient(AsyncBaseClient):
                         Bucket=prefixed_name,
                         Key=object_key,
                         UploadId=upload_id,
-                        MultipartUpload={'Parts': parts}
+                        MultipartUpload={"Parts": parts},
                     )
                     return True
 
                 except Exception as e:
                     # Abort on failure
                     await client.abort_multipart_upload(
-                        Bucket=prefixed_name,
-                        Key=object_key,
-                        UploadId=upload_id
+                        Bucket=prefixed_name, Key=object_key, UploadId=upload_id
                     )
                     raise e
 
@@ -474,13 +459,10 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                response = await client.get_object(
-                    Bucket=prefixed_name,
-                    Key=object_key
-                )
+                response = await client.get_object(Bucket=prefixed_name, Key=object_key)
 
                 # Read the streaming body
-                async with response['Body'] as stream:
+                async with response["Body"] as stream:
                     data = await stream.read()
                 return data
 
@@ -493,12 +475,9 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                response = await client.get_object(
-                    Bucket=prefixed_name,
-                    Key=object_key
-                )
+                response = await client.get_object(Bucket=prefixed_name, Key=object_key)
 
-                async with response['Body'] as stream:
+                async with response["Body"] as stream:
                     while True:
                         chunk = await stream.read(DEFAULT_CHUNK_SIZE)
                         if not chunk:
@@ -513,7 +492,7 @@ class AsyncMinIOClient(AsyncBaseClient):
         bucket_name: str,
         object_key: str,
         file_path: str,
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> bool:
         """Download object directly to file with progress support."""
         try:
@@ -521,10 +500,10 @@ class AsyncMinIOClient(AsyncBaseClient):
 
             # Get size first for progress reporting
             metadata = await self.get_object_metadata(bucket_name, object_key)
-            total_size = metadata.get('size', 0) if metadata else 0
+            total_size = metadata.get("size", 0) if metadata else 0
 
             bytes_received = 0
-            async with aiofiles.open(file_path, 'wb') as f:
+            async with aiofiles.open(file_path, "wb") as f:
                 async for chunk in self.download_stream(bucket_name, object_key):
                     await f.write(chunk)
                     bytes_received += len(chunk)
@@ -538,10 +517,10 @@ class AsyncMinIOClient(AsyncBaseClient):
             # Fallback to sync write if aiofiles not available
             try:
                 metadata = await self.get_object_metadata(bucket_name, object_key)
-                total_size = metadata.get('size', 0) if metadata else 0
+                total_size = metadata.get("size", 0) if metadata else 0
 
                 bytes_received = 0
-                with open(file_path, 'wb') as f:
+                with open(file_path, "wb") as f:
                     async for chunk in self.download_stream(bucket_name, object_key):
                         f.write(chunk)
                         bytes_received += len(chunk)
@@ -562,10 +541,7 @@ class AsyncMinIOClient(AsyncBaseClient):
     # ============================================
 
     async def list_objects(
-        self,
-        bucket_name: str,
-        prefix: str = '',
-        max_keys: int = 1000
+        self, bucket_name: str, prefix: str = "", max_keys: int = 1000
     ) -> List[Dict]:
         """List objects in bucket."""
         try:
@@ -573,21 +549,21 @@ class AsyncMinIOClient(AsyncBaseClient):
 
             async with await self._get_client() as client:
                 response = await client.list_objects_v2(
-                    Bucket=prefixed_name,
-                    Prefix=prefix,
-                    MaxKeys=max_keys
+                    Bucket=prefixed_name, Prefix=prefix, MaxKeys=max_keys
                 )
 
                 objects = []
-                for obj in response.get('Contents', []):
-                    objects.append({
-                        'name': obj['Key'],
-                        'key': obj['Key'],
-                        'size': obj['Size'],
-                        'content_type': '',  # Not returned by list
-                        'etag': obj.get('ETag', '').strip('"'),
-                        'last_modified': obj.get('LastModified')
-                    })
+                for obj in response.get("Contents", []):
+                    objects.append(
+                        {
+                            "name": obj["Key"],
+                            "key": obj["Key"],
+                            "size": obj["Size"],
+                            "content_type": "",  # Not returned by list
+                            "etag": obj.get("ETag", "").strip('"'),
+                            "last_modified": obj.get("LastModified"),
+                        }
+                    )
                 return objects
 
         except Exception as e:
@@ -599,10 +575,7 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                await client.delete_object(
-                    Bucket=prefixed_name,
-                    Key=object_key
-                )
+                await client.delete_object(Bucket=prefixed_name, Key=object_key)
                 return True
 
         except Exception as e:
@@ -614,10 +587,9 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                delete_objects = [{'Key': key} for key in object_keys]
+                delete_objects = [{"Key": key} for key in object_keys]
                 await client.delete_objects(
-                    Bucket=prefixed_name,
-                    Delete={'Objects': delete_objects}
+                    Bucket=prefixed_name, Delete={"Objects": delete_objects}
                 )
                 return True
 
@@ -625,11 +597,7 @@ class AsyncMinIOClient(AsyncBaseClient):
             return self.handle_error(e, "delete objects")
 
     async def copy_object(
-        self,
-        dest_bucket: str,
-        dest_key: str,
-        source_bucket: str,
-        source_key: str
+        self, dest_bucket: str, dest_key: str, source_bucket: str, source_key: str
     ) -> bool:
         """Copy object between buckets or within bucket."""
         try:
@@ -640,7 +608,7 @@ class AsyncMinIOClient(AsyncBaseClient):
                 await client.copy_object(
                     Bucket=dest_prefixed,
                     Key=dest_key,
-                    CopySource={'Bucket': source_prefixed, 'Key': source_key}
+                    CopySource={"Bucket": source_prefixed, "Key": source_key},
                 )
                 return True
 
@@ -653,22 +621,19 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                response = await client.head_object(
-                    Bucket=prefixed_name,
-                    Key=object_key
-                )
+                response = await client.head_object(Bucket=prefixed_name, Key=object_key)
 
-                last_modified = response.get('LastModified')
+                last_modified = response.get("LastModified")
                 if last_modified:
                     last_modified = last_modified.isoformat()
 
                 return {
-                    'key': object_key,
-                    'size': response.get('ContentLength', 0),
-                    'etag': response.get('ETag', '').strip('"'),
-                    'content_type': response.get('ContentType', ''),
-                    'last_modified': last_modified,
-                    'metadata': response.get('Metadata', {})
+                    "key": object_key,
+                    "size": response.get("ContentLength", 0),
+                    "etag": response.get("ETag", "").strip('"'),
+                    "content_type": response.get("ContentType", ""),
+                    "last_modified": last_modified,
+                    "metadata": response.get("Metadata", {}),
                 }
 
         except Exception as e:
@@ -679,10 +644,7 @@ class AsyncMinIOClient(AsyncBaseClient):
     # ============================================
 
     async def get_presigned_url(
-        self,
-        bucket_name: str,
-        object_key: str,
-        expiry_seconds: int = DEFAULT_PRESIGN_EXPIRY
+        self, bucket_name: str, object_key: str, expiry_seconds: int = DEFAULT_PRESIGN_EXPIRY
     ) -> Optional[str]:
         """Generate presigned URL for download (GET)."""
         try:
@@ -691,12 +653,9 @@ class AsyncMinIOClient(AsyncBaseClient):
 
             async with await self._get_client() as client:
                 url = await client.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': prefixed_name,
-                        'Key': object_key
-                    },
-                    ExpiresIn=expiry_seconds
+                    "get_object",
+                    Params={"Bucket": prefixed_name, "Key": object_key},
+                    ExpiresIn=expiry_seconds,
                 )
                 return url
 
@@ -708,7 +667,7 @@ class AsyncMinIOClient(AsyncBaseClient):
         bucket_name: str,
         object_key: str,
         expiry_seconds: int = DEFAULT_PRESIGN_EXPIRY,
-        content_type: str = 'application/octet-stream'
+        content_type: str = "application/octet-stream",
     ) -> Optional[str]:
         """Generate presigned URL for upload (PUT)."""
         try:
@@ -717,13 +676,13 @@ class AsyncMinIOClient(AsyncBaseClient):
 
             async with await self._get_client() as client:
                 url = await client.generate_presigned_url(
-                    'put_object',
+                    "put_object",
                     Params={
-                        'Bucket': prefixed_name,
-                        'Key': object_key,
-                        'ContentType': content_type
+                        "Bucket": prefixed_name,
+                        "Key": object_key,
+                        "ContentType": content_type,
                     },
-                    ExpiresIn=expiry_seconds
+                    ExpiresIn=expiry_seconds,
                 )
                 return url
 
@@ -742,9 +701,7 @@ class AsyncMinIOClient(AsyncBaseClient):
             async with await self._get_client() as client:
                 await client.put_bucket_versioning(
                     Bucket=prefixed_name,
-                    VersioningConfiguration={
-                        'Status': 'Enabled' if enabled else 'Suspended'
-                    }
+                    VersioningConfiguration={"Status": "Enabled" if enabled else "Suspended"},
                 )
                 return True
 
@@ -757,11 +714,8 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                tag_set = [{'Key': k, 'Value': v} for k, v in tags.items()]
-                await client.put_bucket_tagging(
-                    Bucket=prefixed_name,
-                    Tagging={'TagSet': tag_set}
-                )
+                tag_set = [{"Key": k, "Value": v} for k, v in tags.items()]
+                await client.put_bucket_tagging(Bucket=prefixed_name, Tagging={"TagSet": tag_set})
                 return True
 
         except Exception as e:
@@ -775,13 +729,13 @@ class AsyncMinIOClient(AsyncBaseClient):
             async with await self._get_client() as client:
                 response = await client.get_bucket_tagging(Bucket=prefixed_name)
                 tags = {}
-                for tag in response.get('TagSet', []):
-                    tags[tag['Key']] = tag['Value']
+                for tag in response.get("TagSet", []):
+                    tags[tag["Key"]] = tag["Value"]
                 return tags
 
         except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', '')
-            if error_code == 'NoSuchTagSet':
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NoSuchTagSet":
                 return {}
             return self.handle_error(e, "get bucket tags")
         except Exception as e:
@@ -791,17 +745,17 @@ class AsyncMinIOClient(AsyncBaseClient):
     # Object Tags
     # ============================================
 
-    async def set_object_tags(self, bucket_name: str, object_key: str, tags: Dict[str, str]) -> bool:
+    async def set_object_tags(
+        self, bucket_name: str, object_key: str, tags: Dict[str, str]
+    ) -> bool:
         """Set object tags."""
         try:
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                tag_set = [{'Key': k, 'Value': v} for k, v in tags.items()]
+                tag_set = [{"Key": k, "Value": v} for k, v in tags.items()]
                 await client.put_object_tagging(
-                    Bucket=prefixed_name,
-                    Key=object_key,
-                    Tagging={'TagSet': tag_set}
+                    Bucket=prefixed_name, Key=object_key, Tagging={"TagSet": tag_set}
                 )
                 return True
 
@@ -814,13 +768,10 @@ class AsyncMinIOClient(AsyncBaseClient):
             prefixed_name = self._get_prefixed_bucket_name(bucket_name)
 
             async with await self._get_client() as client:
-                response = await client.get_object_tagging(
-                    Bucket=prefixed_name,
-                    Key=object_key
-                )
+                response = await client.get_object_tagging(Bucket=prefixed_name, Key=object_key)
                 tags = {}
-                for tag in response.get('TagSet', []):
-                    tags[tag['Key']] = tag['Value']
+                for tag in response.get("TagSet", []):
+                    tags[tag["Key"]] = tag["Value"]
                 return tags
 
         except Exception as e:
@@ -844,11 +795,11 @@ class AsyncMinIOClient(AsyncBaseClient):
 
         async def upload_single(u: Dict) -> Optional[Dict]:
             return await self.upload_object(
-                bucket_name=u['bucket'],
-                object_key=u['key'],
-                data=u['data'],
-                content_type=u.get('content_type', 'application/octet-stream'),
-                metadata=u.get('metadata')
+                bucket_name=u["bucket"],
+                object_key=u["key"],
+                data=u["data"],
+                content_type=u.get("content_type", "application/octet-stream"),
+                metadata=u.get("metadata"),
             )
 
         return await asyncio.gather(*[upload_single(u) for u in uploads])
@@ -866,10 +817,7 @@ class AsyncMinIOClient(AsyncBaseClient):
         import asyncio
 
         async def download_single(d: Dict) -> Optional[bytes]:
-            return await self.get_object(
-                bucket_name=d['bucket'],
-                object_key=d['key']
-            )
+            return await self.get_object(bucket_name=d["bucket"], object_key=d["key"])
 
         return await asyncio.gather(*[download_single(d) for d in downloads])
 
@@ -886,54 +834,48 @@ class AsyncMinIOClient(AsyncBaseClient):
         import asyncio
 
         async def delete_single(d: Dict) -> bool:
-            return await self.delete_object(
-                bucket_name=d['bucket'],
-                object_key=d['key']
-            )
+            return await self.delete_object(bucket_name=d["bucket"], object_key=d["key"])
 
         return await asyncio.gather(*[delete_single(d) for d in deletes])
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
     import asyncio
 
     async def main():
         # Using environment variables for credentials
-        async with AsyncMinIOClient(
-            host='localhost',
-            port=9000,
-            user_id='test-user'
-        ) as client:
+        async with AsyncMinIOClient(host="localhost", port=9000, user_id="test-user") as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Create bucket
-            result = await client.create_bucket('async-test-bucket')
+            result = await client.create_bucket("async-test-bucket")
             print(f"Create bucket: {result}")
 
             # Upload objects concurrently
             uploads = [
-                {'bucket': 'async-test-bucket', 'key': f'file{i}.txt', 'data': f'content{i}'.encode()}
+                {
+                    "bucket": "async-test-bucket",
+                    "key": f"file{i}.txt",
+                    "data": f"content{i}".encode(),
+                }
                 for i in range(5)
             ]
             results = await client.upload_many_concurrent(uploads)
             print(f"Uploaded: {results}")
 
             # List objects
-            objects = await client.list_objects('async-test-bucket')
+            objects = await client.list_objects("async-test-bucket")
             print(f"Objects: {objects}")
 
             # Generate presigned URL
-            url = await client.get_presigned_url('async-test-bucket', 'file0.txt')
+            url = await client.get_presigned_url("async-test-bucket", "file0.txt")
             print(f"Presigned URL: {url}")
 
             # Download concurrently
-            downloads = [
-                {'bucket': 'async-test-bucket', 'key': f'file{i}.txt'}
-                for i in range(5)
-            ]
+            downloads = [{"bucket": "async-test-bucket", "key": f"file{i}.txt"} for i in range(5)]
             data = await client.download_many_concurrent(downloads)
             print(f"Downloaded: {[d.decode() if d else None for d in data]}")
 
