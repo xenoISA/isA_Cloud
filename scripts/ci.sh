@@ -8,7 +8,7 @@
 # failing org-wide). Tracking: xenoISA/isA_Cloud#287 (epic #284).
 #
 # WHAT IT RUNS
-#   1. Lint   — black --check + flake8 on the isa_common Python library.
+#   1. Lint   — black --check + ruff on the isa_common Python library.
 #               By default lint is scoped to files changed vs origin/main so
 #               the gate does not retroactively fail on the repo's pre-existing
 #               lint backlog. Pass --all to lint the whole library.
@@ -86,15 +86,15 @@ printf '%s isA_Cloud local CI gate %s\n' "${BOLD}" "${RESET}"
 printf 'repo: %s\n' "${REPO_ROOT}"
 
 # ---------------------------------------------------------------------------
-# 1. Lint  (black --check + flake8)
+# 1. Lint  (black --check + ruff)
 # ---------------------------------------------------------------------------
-# black config: line-length=100 (isA_common/pyproject.toml [tool.black]).
-# flake8 args mirror .pre-commit-config.yaml: max-line-length=120, ignore
-# E501/W503/E203.
+# black and ruff both read their config from isA_common/pyproject.toml
+# ([tool.black], [tool.ruff]) — the same config the pinned pre-commit hooks
+# use, so this gate and pre-commit/CI agree.
 if [ "${RUN_LINT}" -eq 1 ]; then
-  step "Lint (black --check + flake8)"
+  step "Lint (black --check + ruff)"
 
-  # LINT_FILES holds repo-root-relative paths. black/flake8 are invoked with
+  # LINT_FILES holds repo-root-relative paths. black/ruff are invoked with
   # the repo root as cwd so relative paths resolve cleanly on all platforms.
   LINT_FILES=()
   if [ "${LINT_SCOPE}" = "all" ]; then
@@ -132,10 +132,10 @@ if [ "${RUN_LINT}" -eq 1 ]; then
       fail "black --check — run: ${PYTHON} -m black --line-length=100 <files>"
     fi
 
-    if ( cd "${REPO_ROOT}" && "${PYTHON}" -m flake8 --max-line-length=120 --extend-ignore=E501,W503,E203 "${LINT_FILES[@]}" ); then
-      pass "flake8"
+    if ( cd "${REPO_ROOT}" && "${PYTHON}" -m ruff check "${LINT_FILES[@]}" ); then
+      pass "ruff check"
     else
-      fail "flake8 — fix the violations listed above"
+      fail "ruff check — fix the violations above (or: ${PYTHON} -m ruff check --fix <files>)"
     fi
   fi
 else
