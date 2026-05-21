@@ -10,14 +10,15 @@ This is the SINGLE SOURCE OF TRUTH for gRPC client test data.
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
-import grpc
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock
 
+import grpc
 
 # ============================================================================
 # Channel State Definitions (from gRPC)
 # ============================================================================
+
 
 class ChannelState(Enum):
     """
@@ -25,6 +26,7 @@ class ChannelState(Enum):
 
     Maps to grpc.ChannelConnectivity enum values.
     """
+
     IDLE = grpc.ChannelConnectivity.IDLE
     CONNECTING = grpc.ChannelConnectivity.CONNECTING
     READY = grpc.ChannelConnectivity.READY
@@ -33,21 +35,26 @@ class ChannelState(Enum):
 
 
 # Define healthy vs unhealthy states per logic contract
-HEALTHY_STATES = frozenset([
-    ChannelState.IDLE,
-    ChannelState.READY,
-    ChannelState.CONNECTING,
-])
+HEALTHY_STATES = frozenset(
+    [
+        ChannelState.IDLE,
+        ChannelState.READY,
+        ChannelState.CONNECTING,
+    ]
+)
 
-UNHEALTHY_STATES = frozenset([
-    ChannelState.SHUTDOWN,
-    ChannelState.TRANSIENT_FAILURE,
-])
+UNHEALTHY_STATES = frozenset(
+    [
+        ChannelState.SHUTDOWN,
+        ChannelState.TRANSIENT_FAILURE,
+    ]
+)
 
 
 # ============================================================================
 # Test Scenarios
 # ============================================================================
+
 
 @dataclass
 class ChannelHealthScenario:
@@ -56,6 +63,7 @@ class ChannelHealthScenario:
 
     Defines initial state, expected behavior, and assertions.
     """
+
     name: str
     description: str
     initial_state: ChannelState
@@ -87,7 +95,6 @@ CHANNEL_HEALTH_SCENARIOS = [
         initial_state=ChannelState.CONNECTING,
         should_reconnect=False,
     ),
-
     # Unhealthy states - MUST reconnect
     ChannelHealthScenario(
         name="shutdown_channel",
@@ -109,6 +116,7 @@ CHANNEL_HEALTH_SCENARIOS = [
 # ============================================================================
 # Mock Factories
 # ============================================================================
+
 
 class MockChannelFactory:
     """
@@ -260,13 +268,13 @@ class GRPCTestDataFactory:
         Based on production AsyncGlobalChannelPool settings.
         """
         return [
-            ('grpc.max_receive_message_length', 100 * 1024 * 1024),
-            ('grpc.max_send_message_length', 100 * 1024 * 1024),
-            ('grpc.keepalive_time_ms', 60000),
-            ('grpc.keepalive_timeout_ms', 20000),
-            ('grpc.http2.min_time_between_pings_ms', 60000),
-            ('grpc.http2.max_pings_without_data', 2),
-            ('grpc.keepalive_permit_without_calls', 0),
+            ("grpc.max_receive_message_length", 100 * 1024 * 1024),
+            ("grpc.max_send_message_length", 100 * 1024 * 1024),
+            ("grpc.keepalive_time_ms", 60000),
+            ("grpc.keepalive_timeout_ms", 20000),
+            ("grpc.http2.min_time_between_pings_ms", 60000),
+            ("grpc.http2.max_pings_without_data", 2),
+            ("grpc.keepalive_permit_without_calls", 0),
         ]
 
     @staticmethod
@@ -288,6 +296,7 @@ class GRPCTestDataFactory:
 # ============================================================================
 # Mock Client for Testing
 # ============================================================================
+
 
 class MockGRPCClient:
     """
@@ -393,16 +402,13 @@ __all__ = [
     "ChannelState",
     "HEALTHY_STATES",
     "UNHEALTHY_STATES",
-
     # Scenarios
     "ChannelHealthScenario",
     "CHANNEL_HEALTH_SCENARIOS",
-
     # Factories
     "MockChannelFactory",
     "MockPoolFactory",
     "GRPCTestDataFactory",
-
     # Mock Client
     "MockGRPCClient",
 ]

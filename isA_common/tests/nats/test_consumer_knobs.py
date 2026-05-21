@@ -74,9 +74,7 @@ class TestCreateConsumerKnobs:
 # ---------------------------------------------------------------------------
 
 
-def _fake_msg(
-    subject: str = "s.x", data: bytes = b"hi", seq: int = 1, delivered: int = 1
-):
+def _fake_msg(subject: str = "s.x", data: bytes = b"hi", seq: int = 1, delivered: int = 1):
     msg = MagicMock()
     msg.subject = subject
     msg.data = data

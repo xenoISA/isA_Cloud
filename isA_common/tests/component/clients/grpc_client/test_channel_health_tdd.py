@@ -13,29 +13,29 @@ Root Cause: _ensure_connected() only checks _connected flag, not channel health
 Usage:
     pytest tests/component/clients/grpc_client/test_channel_health_tdd.py -v
 """
-import pytest
-import pytest_asyncio
+
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
-import grpc
+import os
 
 # Import from contracts - add tests directory to path
 import sys
-import os
-_tests_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import pytest
+import pytest_asyncio
+
+_tests_dir = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 if _tests_dir not in sys.path:
     sys.path.insert(0, _tests_dir)
 
 from contracts.grpc_client import (
-    ChannelState,
-    HEALTHY_STATES,
-    UNHEALTHY_STATES,
-    MockChannelFactory,
-    MockPoolFactory,
-    GRPCTestDataFactory,
-    MockGRPCClient,
     CHANNEL_HEALTH_SCENARIOS,
     ChannelHealthScenario,
+    ChannelState,
+    GRPCTestDataFactory,
+    MockChannelFactory,
+    MockGRPCClient,
 )
 
 pytestmark = [pytest.mark.component, pytest.mark.tdd, pytest.mark.asyncio]
@@ -44,6 +44,7 @@ pytestmark = [pytest.mark.component, pytest.mark.tdd, pytest.mark.asyncio]
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest_asyncio.fixture
 async def mock_client():
@@ -60,6 +61,7 @@ async def mock_client():
 # ============================================================================
 # TDD Tests: Define EXPECTED Behavior (BR-002)
 # ============================================================================
+
 
 class TestEnsureConnectedHealthCheck:
     """
@@ -92,8 +94,9 @@ class TestEnsureConnectedHealthCheck:
         await mock_client._ensure_connected_fixed()
 
         # Then: No reconnection (channel is healthy)
-        assert mock_client.reconnect_count == 0, \
-            f"Channel in {state.name} should NOT trigger reconnection"
+        assert (
+            mock_client.reconnect_count == 0
+        ), f"Channel in {state.name} should NOT trigger reconnection"
 
     @pytest.mark.parametrize("state", GRPCTestDataFactory.get_unhealthy_states())
     async def test_ensure_connected_reconnects_when_channel_unhealthy(
@@ -116,16 +119,16 @@ class TestEnsureConnectedHealthCheck:
         await mock_client._ensure_connected_fixed()
 
         # Then: Reconnection triggered
-        assert mock_client.reconnect_count == 1, \
-            f"Channel in {state.name} MUST trigger reconnection"
+        assert (
+            mock_client.reconnect_count == 1
+        ), f"Channel in {state.name} MUST trigger reconnection"
 
         # And: New channel is healthy
-        assert mock_client.is_channel_healthy() is True, \
-            "After reconnection, channel should be healthy"
+        assert (
+            mock_client.is_channel_healthy() is True
+        ), "After reconnection, channel should be healthy"
 
-    async def test_ensure_connected_reconnects_shutdown_channel(
-        self, mock_client
-    ):
+    async def test_ensure_connected_reconnects_shutdown_channel(self, mock_client):
         """
         TDD: SHUTDOWN channel MUST trigger reconnection.
 
@@ -145,9 +148,7 @@ class TestEnsureConnectedHealthCheck:
         assert mock_client.reconnect_count == 1
         assert mock_client.is_channel_healthy() is True
 
-    async def test_ensure_connected_reconnects_transient_failure_channel(
-        self, mock_client
-    ):
+    async def test_ensure_connected_reconnects_transient_failure_channel(self, mock_client):
         """
         TDD: TRANSIENT_FAILURE channel MUST trigger reconnection.
         """
@@ -172,9 +173,7 @@ class TestEnsureConnectedScenarios:
     """
 
     @pytest.mark.parametrize("scenario", CHANNEL_HEALTH_SCENARIOS)
-    async def test_channel_health_scenario(
-        self, mock_client, scenario: ChannelHealthScenario
-    ):
+    async def test_channel_health_scenario(self, mock_client, scenario: ChannelHealthScenario):
         """
         TDD: Test each channel health scenario from data contract.
         """
@@ -188,13 +187,16 @@ class TestEnsureConnectedScenarios:
 
         # Then: Behavior matches expected
         if scenario.should_reconnect:
-            assert mock_client.reconnect_count == 1, \
-                f"{scenario}: Expected reconnection for {scenario.initial_state.name}"
-            assert mock_client.is_channel_healthy() is True, \
-                f"{scenario}: Channel should be healthy after reconnection"
+            assert (
+                mock_client.reconnect_count == 1
+            ), f"{scenario}: Expected reconnection for {scenario.initial_state.name}"
+            assert (
+                mock_client.is_channel_healthy() is True
+            ), f"{scenario}: Channel should be healthy after reconnection"
         else:
-            assert mock_client.reconnect_count == 0, \
-                f"{scenario}: Should NOT reconnect for {scenario.initial_state.name}"
+            assert (
+                mock_client.reconnect_count == 0
+            ), f"{scenario}: Should NOT reconnect for {scenario.initial_state.name}"
 
 
 class TestConcurrentReconnection:
@@ -202,9 +204,7 @@ class TestConcurrentReconnection:
     TDD tests for concurrent reconnection safety (EC-002).
     """
 
-    async def test_concurrent_ensure_connected_only_reconnects_once(
-        self, mock_client
-    ):
+    async def test_concurrent_ensure_connected_only_reconnects_once(self, mock_client):
         """
         TDD: Multiple concurrent _ensure_connected calls should only reconnect once.
 
@@ -219,17 +219,13 @@ class TestConcurrentReconnection:
         mock_client.reconnect_count = 0
 
         # When: Multiple concurrent _ensure_connected calls
-        tasks = [
-            asyncio.create_task(mock_client._ensure_connected_fixed())
-            for _ in range(5)
-        ]
+        tasks = [asyncio.create_task(mock_client._ensure_connected_fixed()) for _ in range(5)]
         await asyncio.gather(*tasks)
 
         # Then: Only one reconnection (lock prevents race)
         # Note: With current mock implementation, each call may reconnect
         # The real implementation uses _connect_lock to prevent this
-        assert mock_client.reconnect_count >= 1, \
-            "At least one reconnection should happen"
+        assert mock_client.reconnect_count >= 1, "At least one reconnection should happen"
 
 
 class TestIsChannelHealthyMethod:
@@ -237,9 +233,7 @@ class TestIsChannelHealthyMethod:
     TDD tests for is_channel_healthy() proactive health checking.
     """
 
-    async def test_is_channel_healthy_available_before_operation(
-        self, mock_client
-    ):
+    async def test_is_channel_healthy_available_before_operation(self, mock_client):
         """
         TDD: Callers can check channel health proactively.
 

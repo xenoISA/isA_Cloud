@@ -4,38 +4,34 @@ MQTT 设备消息流测试
 测试新增的 SubscribeDeviceMessages 和 Webhook 功能
 """
 
-import time
-import json
 import threading
+import time
+
 from isa_common import MQTTClient
 
 # 测试配置
-MQTT_HOST = 'localhost'
+MQTT_HOST = "localhost"
 MQTT_PORT = 50053
-USER_ID = 'test_user_001'
-ORG_ID = 'test_org'
+USER_ID = "test_user_001"
+ORG_ID = "test_org"
+
 
 def test_device_message_stream():
     """
     测试 1: 订阅设备消息流（gRPC Streaming）
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 1: 设备消息流订阅 (gRPC Stream)")
-    print("="*60)
+    print("=" * 60)
 
-    client = MQTTClient(
-        host=MQTT_HOST,
-        port=MQTT_PORT,
-        user_id=USER_ID,
-        organization_id=ORG_ID
-    )
+    client = MQTTClient(host=MQTT_HOST, port=MQTT_PORT, user_id=USER_ID, organization_id=ORG_ID)
 
     # 消息计数器
-    message_count = {'count': 0}
+    message_count = {"count": 0}
 
     def handle_device_message(device_id, message_type, topic, payload, timestamp, metadata):
         """处理接收到的设备消息"""
-        message_count['count'] += 1
+        message_count["count"] += 1
         print(f"\n📩 收到设备消息 #{message_count['count']}")
         print(f"   设备 ID: {device_id}")
         print(f"   消息类型: {message_type}")
@@ -53,10 +49,10 @@ def test_device_message_stream():
         subscribe_thread = threading.Thread(
             target=client.subscribe_device_messages,
             kwargs={
-                'message_types': [1, 2],  # TELEMETRY and STATUS
-                'callback': handle_device_message
+                "message_types": [1, 2],  # TELEMETRY and STATUS
+                "callback": handle_device_message,
             },
-            daemon=True
+            daemon=True,
         )
         subscribe_thread.start()
 
@@ -81,16 +77,11 @@ def test_webhook_registration():
     """
     测试 2: Webhook 注册和管理
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 2: Webhook 注册和管理")
-    print("="*60)
+    print("=" * 60)
 
-    client = MQTTClient(
-        host=MQTT_HOST,
-        port=MQTT_PORT,
-        user_id=USER_ID,
-        organization_id=ORG_ID
-    )
+    client = MQTTClient(host=MQTT_HOST, port=MQTT_PORT, user_id=USER_ID, organization_id=ORG_ID)
 
     try:
         # 1. 注册 webhook
@@ -100,12 +91,12 @@ def test_webhook_registration():
             message_types=[1, 2],  # TELEMETRY and STATUS
             topic_patterns=["devices/+/telemetry", "devices/+/status"],
             headers={"Authorization": "Bearer test-token"},
-            secret="my-secret-key"
+            secret="my-secret-key",
         )
 
         if webhook_result:
-            webhook_id = webhook_result['webhook_id']
-            print(f"✅ Webhook 注册成功!")
+            webhook_id = webhook_result["webhook_id"]
+            print("✅ Webhook 注册成功!")
             print(f"   Webhook ID: {webhook_id}")
             print(f"   URL: {webhook_result['webhook']['url']}")
         else:
@@ -130,8 +121,8 @@ def test_webhook_registration():
         print("\n📊 查看 Webhook 统计...")
         webhooks = client.list_webhooks()
         for wh in webhooks:
-            if wh['webhook_id'] == webhook_id:
-                print(f"✅ Webhook 统计:")
+            if wh["webhook_id"] == webhook_id:
+                print("✅ Webhook 统计:")
                 print(f"   成功回调: {wh['success_count']}")
                 print(f"   失败回调: {wh['failure_count']}")
 
@@ -145,6 +136,7 @@ def test_webhook_registration():
     except Exception as e:
         print(f"\n❌ 测试失败: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         client.close()
@@ -154,27 +146,22 @@ def test_simulated_device():
     """
     测试 3: 模拟设备发送消息
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 3: 模拟设备发送消息")
-    print("="*60)
+    print("=" * 60)
 
-    client = MQTTClient(
-        host=MQTT_HOST,
-        port=MQTT_PORT,
-        user_id=USER_ID,
-        organization_id=ORG_ID
-    )
+    client = MQTTClient(host=MQTT_HOST, port=MQTT_PORT, user_id=USER_ID, organization_id=ORG_ID)
 
     try:
         # 连接
         print("\n🔌 连接到 MQTT 服务...")
-        conn = client.connect('test-device-simulator')
+        conn = client.connect("test-device-simulator")
 
         if not conn:
             print("❌ 连接失败")
             return
 
-        session_id = conn['session_id']
+        session_id = conn["session_id"]
         print(f"✅ 连接成功! Session ID: {session_id}")
 
         # 发送遥测数据
@@ -183,14 +170,14 @@ def test_simulated_device():
             "device_id": "test-device-001",
             "temperature": 25.5,
             "humidity": 60.2,
-            "timestamp": int(time.time())
+            "timestamp": int(time.time()),
         }
 
         client.publish_json(
             session_id=session_id,
             topic="devices/test-device-001/telemetry",
             data=telemetry_data,
-            qos=1
+            qos=1,
         )
         print("✅ 遥测数据已发送")
 
@@ -200,14 +187,11 @@ def test_simulated_device():
             "device_id": "test-device-001",
             "status": "online",
             "battery": 85,
-            "timestamp": int(time.time())
+            "timestamp": int(time.time()),
         }
 
         client.publish_json(
-            session_id=session_id,
-            topic="devices/test-device-001/status",
-            data=status_data,
-            qos=1
+            session_id=session_id, topic="devices/test-device-001/status", data=status_data, qos=1
         )
         print("✅ 状态数据已发送")
 
@@ -222,15 +206,16 @@ def test_simulated_device():
     except Exception as e:
         print(f"\n❌ 测试失败: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         client.close()
 
 
-if __name__ == '__main__':
-    print("\n" + "="*60)
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
     print("MQTT 设备消息流端到端测试")
-    print("="*60)
+    print("=" * 60)
     print("\n测试目标:")
     print("  1. gRPC Stream - 订阅设备消息")
     print("  2. Webhook - 注册和管理")

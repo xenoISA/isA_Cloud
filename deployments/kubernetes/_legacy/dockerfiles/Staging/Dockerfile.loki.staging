@@ -35,10 +35,10 @@ LOKI_PID=$!
 if [ "${CONSUL_ENABLED}" = "true" ]; then
     echo "Waiting for Loki to be ready..."
     sleep 5
-    
+
     echo "Registering service to Consul..."
     HOSTNAME=$(hostname)
-    
+
     curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
         \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
         \"Name\": \"${SERVICE_NAME}\",
@@ -51,7 +51,7 @@ if [ "${CONSUL_ENABLED}" = "true" ]; then
             \"Timeout\": \"5s\"
         }
     }" || echo "Failed to register with Consul (will retry)"
-    
+
     echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
 fi
 
@@ -66,6 +66,3 @@ USER loki
 EXPOSE 3100
 
 ENTRYPOINT ["/usr/local/bin/start-loki.sh"]
-
-
-

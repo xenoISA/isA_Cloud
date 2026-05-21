@@ -46,6 +46,3 @@ duckdb:
     - httpfs
     - parquet
     - json
-
-
-

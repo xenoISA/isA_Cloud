@@ -47,10 +47,9 @@ Features Demonstrated:
 Note: All operations include proper error handling and demonstrate production-ready patterns.
 """
 
-import sys
 import argparse
+import sys
 import time
-import json
 from datetime import datetime
 
 # Import the ConsulRegistry from isa_common
@@ -68,7 +67,7 @@ except ImportError:
     sys.exit(1)
 
 
-def example_01_connectivity_check(consul_host='localhost', consul_port=8500):
+def example_01_connectivity_check(consul_host="localhost", consul_port=8500):
     """
     Example 1: Consul Connectivity Check
 
@@ -81,6 +80,7 @@ def example_01_connectivity_check(consul_host='localhost', consul_port=8500):
 
     try:
         import consul
+
         client = consul.Consul(host=consul_host, port=consul_port)
         services = client.catalog.services()
 
@@ -95,7 +95,7 @@ def example_01_connectivity_check(consul_host='localhost', consul_port=8500):
         print(f"   Make sure Consul is running on {consul_host}:{consul_port}")
 
 
-def example_02_service_registration_ttl(consul_host='localhost', consul_port=8500):
+def example_02_service_registration_ttl(consul_host="localhost", consul_port=8500):
     """
     Example 2: Service Registration with TTL Health Check
 
@@ -107,16 +107,16 @@ def example_02_service_registration_ttl(consul_host='localhost', consul_port=850
     print("=" * 80)
 
     registry = ConsulRegistry(
-        service_name='example-api-service',
+        service_name="example-api-service",
         service_port=8080,
         consul_host=consul_host,
         consul_port=consul_port,
-        tags=['api', 'v1.0.0', 'production'],
-        health_check_type='ttl'
+        tags=["api", "v1.0.0", "production"],
+        health_check_type="ttl",
     )
 
     if registry.register():
-        print(f"✅ Service registered successfully!")
+        print("✅ Service registered successfully!")
         print(f"   Service ID: {registry.service_id}")
         print(f"   Service Name: {registry.service_name}")
         print(f"   Service Address: {registry.service_host}:{registry.service_port}")
@@ -126,12 +126,12 @@ def example_02_service_registration_ttl(consul_host='localhost', consul_port=850
         # Cleanup
         time.sleep(2)
         registry.deregister()
-        print(f"\n🗑️  Service deregistered (cleanup)")
+        print("\n🗑️  Service deregistered (cleanup)")
     else:
         print("❌ Service registration failed")
 
 
-def example_03_service_registration_http(consul_host='localhost', consul_port=8500):
+def example_03_service_registration_http(consul_host="localhost", consul_port=8500):
     """
     Example 3: Service Registration with HTTP Health Check
 
@@ -143,18 +143,18 @@ def example_03_service_registration_http(consul_host='localhost', consul_port=85
     print("=" * 80)
 
     registry = ConsulRegistry(
-        service_name='example-web-service',
+        service_name="example-web-service",
         service_port=8000,
         consul_host=consul_host,
         consul_port=consul_port,
-        tags=['web', 'frontend', 'v2.0.0'],
-        health_check_type='http'
+        tags=["web", "frontend", "v2.0.0"],
+        health_check_type="http",
     )
 
     if registry.register():
-        print(f"✅ Service registered successfully!")
+        print("✅ Service registered successfully!")
         print(f"   Service ID: {registry.service_id}")
-        print(f"   Health Check: HTTP")
+        print("   Health Check: HTTP")
         print(f"   Health Check URL: http://{registry.service_host}:{registry.service_port}/health")
         print(f"   Check Interval: {registry.check_interval}")
         print(f"   Deregister After: {registry.deregister_after}")
@@ -162,12 +162,12 @@ def example_03_service_registration_http(consul_host='localhost', consul_port=85
         # Cleanup
         time.sleep(2)
         registry.deregister()
-        print(f"\n🗑️  Service deregistered (cleanup)")
+        print("\n🗑️  Service deregistered (cleanup)")
     else:
         print("❌ Service registration failed")
 
 
-def example_04_service_discovery_single(consul_host='localhost', consul_port=8500):
+def example_04_service_discovery_single(consul_host="localhost", consul_port=8500):
     """
     Example 4: Discover Single Service Instance
 
@@ -180,17 +180,17 @@ def example_04_service_discovery_single(consul_host='localhost', consul_port=850
 
     # First register a service
     registry = ConsulRegistry(
-        service_name='discovery-test',
+        service_name="discovery-test",
         service_port=9000,
         consul_host=consul_host,
         consul_port=consul_port,
-        tags=['test', 'discoverable'],
-        health_check_type='ttl'
+        tags=["test", "discoverable"],
+        health_check_type="ttl",
     )
     registry.register()
 
     # Discover the service
-    instances = registry.discover_service('discovery-test')
+    instances = registry.discover_service("discovery-test")
 
     if instances:
         print(f"✅ Discovered {len(instances)} instance(s):")
@@ -207,7 +207,7 @@ def example_04_service_discovery_single(consul_host='localhost', consul_port=850
     registry.deregister()
 
 
-def example_05_service_endpoint_retrieval(consul_host='localhost', consul_port=8500):
+def example_05_service_endpoint_retrieval(consul_host="localhost", consul_port=8500):
     """
     Example 5: Get Service Endpoint URL
 
@@ -220,22 +220,22 @@ def example_05_service_endpoint_retrieval(consul_host='localhost', consul_port=8
 
     # Register a service
     registry = ConsulRegistry(
-        service_name='endpoint-test',
+        service_name="endpoint-test",
         service_port=7000,
         consul_host=consul_host,
         consul_port=consul_port,
-        health_check_type='ttl'
+        health_check_type="ttl",
     )
     registry.register()
 
     # Get endpoint URL
-    endpoint = registry.get_service_endpoint('endpoint-test')
+    endpoint = registry.get_service_endpoint("endpoint-test")
 
     if endpoint:
-        print(f"✅ Retrieved service endpoint:")
+        print("✅ Retrieved service endpoint:")
         print(f"   URL: {endpoint}")
-        print(f"\n💡 Use this URL to connect to the service:")
-        print(f"   import requests")
+        print("\n💡 Use this URL to connect to the service:")
+        print("   import requests")
         print(f"   response = requests.get('{endpoint}/api/v1/resource')")
     else:
         print("❌ Could not retrieve endpoint")
@@ -244,7 +244,7 @@ def example_05_service_endpoint_retrieval(consul_host='localhost', consul_port=8
     registry.deregister()
 
 
-def example_06_load_balancing_strategies(consul_host='localhost', consul_port=8500):
+def example_06_load_balancing_strategies(consul_host="localhost", consul_port=8500):
     """
     Example 6: Load Balancing Strategies
 
@@ -259,20 +259,20 @@ def example_06_load_balancing_strategies(consul_host='localhost', consul_port=85
     registries = []
     for i in range(1, 4):
         reg = ConsulRegistry(
-            service_name='lb-demo',
+            service_name="lb-demo",
             service_port=6000 + i,
             consul_host=consul_host,
             consul_port=consul_port,
-            tags=['lb-test', f'instance-{i}', 'preferred' if i == 1 else 'standard'],
-            health_check_type='ttl'
+            tags=["lb-test", f"instance-{i}", "preferred" if i == 1 else "standard"],
+            health_check_type="ttl",
         )
         reg.register()
         registries.append(reg)
 
-    print(f"✅ Registered 3 service instances on ports 6001, 6002, 6003\n")
+    print("✅ Registered 3 service instances on ports 6001, 6002, 6003\n")
 
     # Test different strategies
-    strategies = ['health_weighted', 'random', 'round_robin', 'least_connections']
+    strategies = ["health_weighted", "random", "round_robin", "least_connections"]
 
     for strategy in strategies:
         endpoints = []
@@ -280,7 +280,7 @@ def example_06_load_balancing_strategies(consul_host='localhost', consul_port=85
 
         # Get 5 endpoints to see the pattern
         for _ in range(5):
-            endpoint = registries[0].get_service_endpoint('lb-demo', strategy=strategy)
+            endpoint = registries[0].get_service_endpoint("lb-demo", strategy=strategy)
             endpoints.append(endpoint)
 
         # Show distribution
@@ -296,7 +296,7 @@ def example_06_load_balancing_strategies(consul_host='localhost', consul_port=85
         reg.deregister()
 
 
-def example_07_config_management(consul_host='localhost', consul_port=8500):
+def example_07_config_management(consul_host="localhost", consul_port=8500):
     """
     Example 7: Configuration Management (KV Store)
 
@@ -308,22 +308,22 @@ def example_07_config_management(consul_host='localhost', consul_port=8500):
     print("=" * 80)
 
     registry = ConsulRegistry(
-        service_name='config-demo',
+        service_name="config-demo",
         service_port=5000,
         consul_host=consul_host,
         consul_port=consul_port,
-        health_check_type='ttl'
+        health_check_type="ttl",
     )
     registry.register()
 
     # Set configuration values
     config_data = {
-        'database/url': 'postgresql://localhost:5432/mydb',
-        'database/pool_size': 20,
-        'cache/ttl': 3600,
-        'features/new_ui': True,
-        'features/beta_mode': False,
-        'api/rate_limit': 1000
+        "database/url": "postgresql://localhost:5432/mydb",
+        "database/pool_size": 20,
+        "cache/ttl": 3600,
+        "features/new_ui": True,
+        "features/beta_mode": False,
+        "api/rate_limit": 1000,
     }
 
     print("📝 Setting configuration values:")
@@ -333,10 +333,10 @@ def example_07_config_management(consul_host='localhost', consul_port=8500):
 
     # Retrieve individual config
     print("\n📖 Retrieving individual config:")
-    db_url = registry.get_config('database/url')
+    db_url = registry.get_config("database/url")
     print(f"   database/url = {db_url}")
 
-    rate_limit = registry.get_config('api/rate_limit')
+    rate_limit = registry.get_config("api/rate_limit")
     print(f"   api/rate_limit = {rate_limit}")
 
     # Retrieve all config
@@ -347,11 +347,11 @@ def example_07_config_management(consul_host='localhost', consul_port=8500):
         print(f"   - {key}: {value}")
 
     # Cleanup
-    registry.consul.kv.delete(f'{registry.service_name}/', recurse=True)
+    registry.consul.kv.delete(f"{registry.service_name}/", recurse=True)
     registry.deregister()
 
 
-def example_08_ttl_health_check_update(consul_host='localhost', consul_port=8500):
+def example_08_ttl_health_check_update(consul_host="localhost", consul_port=8500):
     """
     Example 8: TTL Health Check Manual Update
 
@@ -363,37 +363,37 @@ def example_08_ttl_health_check_update(consul_host='localhost', consul_port=8500
     print("=" * 80)
 
     registry = ConsulRegistry(
-        service_name='ttl-demo',
+        service_name="ttl-demo",
         service_port=4000,
         consul_host=consul_host,
         consul_port=consul_port,
-        health_check_type='ttl'
+        health_check_type="ttl",
     )
     registry.register()
 
-    print(f"✅ Service registered with TTL health check")
+    print("✅ Service registered with TTL health check")
     print(f"   TTL Interval: {registry.ttl_interval}s")
-    print(f"\n⏱️  Manually updating TTL health check...")
+    print("\n⏱️  Manually updating TTL health check...")
 
     # Manually pass health check
     for i in range(3):
         try:
             registry.consul.agent.check.ttl_pass(
                 f"service:{registry.service_id}",
-                f"Manual health check update #{i+1} at {datetime.now()}"
+                f"Manual health check update #{i+1} at {datetime.now()}",
             )
             print(f"   ✅ Update #{i+1} successful")
             time.sleep(1)
         except Exception as e:
             print(f"   ❌ Update #{i+1} failed: {e}")
 
-    print(f"\n💡 In production, use maintain_registration() for automatic updates")
+    print("\n💡 In production, use maintain_registration() for automatic updates")
 
     # Cleanup
     registry.deregister()
 
 
-def example_09_infrastructure_service_discovery(consul_host='localhost', consul_port=8500):
+def example_09_infrastructure_service_discovery(consul_host="localhost", consul_port=8500):
     """
     Example 9: Infrastructure Service Discovery Pattern
 
@@ -405,12 +405,7 @@ def example_09_infrastructure_service_discovery(consul_host='localhost', consul_
     print("=" * 80)
 
     # Register mock infrastructure services
-    infra_services = {
-        'nats': 4222,
-        'redis': 6379,
-        'loki': 3100,
-        'minio': 9000
-    }
+    infra_services = {"nats": 4222, "redis": 6379, "loki": 3100, "minio": 9000}
 
     registries = []
     print("📋 Registering infrastructure services:")
@@ -420,8 +415,8 @@ def example_09_infrastructure_service_discovery(consul_host='localhost', consul_
             service_port=port,
             consul_host=consul_host,
             consul_port=consul_port,
-            tags=['infrastructure', 'core'],
-            health_check_type='ttl'
+            tags=["infrastructure", "core"],
+            health_check_type="ttl",
         )
         reg.register()
         registries.append(reg)
@@ -460,7 +455,7 @@ def example_09_infrastructure_service_discovery(consul_host='localhost', consul_
         reg.deregister()
 
 
-def example_10_fallback_mechanism(consul_host='localhost', consul_port=8500):
+def example_10_fallback_mechanism(consul_host="localhost", consul_port=8500):
     """
     Example 10: Service Discovery with Fallback
 
@@ -472,25 +467,27 @@ def example_10_fallback_mechanism(consul_host='localhost', consul_port=8500):
     print("=" * 80)
 
     registry = ConsulRegistry(
-        service_name='fallback-test',
+        service_name="fallback-test",
         service_port=3000,
         consul_host=consul_host,
         consul_port=consul_port,
-        health_check_type='ttl'
+        health_check_type="ttl",
     )
     registry.register()
 
     # Test 1: Discover existing service
     print("🔍 Test 1: Discovering existing service...")
-    url1 = registry.get_service_address('fallback-test', fallback_url='http://localhost:3000')
+    url1 = registry.get_service_address("fallback-test", fallback_url="http://localhost:3000")
     print(f"   Result: {url1}")
-    print(f"   ✅ Found in Consul")
+    print("   ✅ Found in Consul")
 
     # Test 2: Discover non-existent service with fallback
     print("\n🔍 Test 2: Discovering non-existent service with fallback...")
-    url2 = registry.get_service_address('non-existent-service', fallback_url='http://localhost:9999')
+    url2 = registry.get_service_address(
+        "non-existent-service", fallback_url="http://localhost:9999"
+    )
     print(f"   Result: {url2}")
-    print(f"   ✅ Used fallback URL")
+    print("   ✅ Used fallback URL")
 
     print("\n💡 This pattern ensures your application works even when Consul is unavailable")
 
@@ -498,7 +495,7 @@ def example_10_fallback_mechanism(consul_host='localhost', consul_port=8500):
     registry.deregister()
 
 
-def example_11_multi_instance_management(consul_host='localhost', consul_port=8500):
+def example_11_multi_instance_management(consul_host="localhost", consul_port=8500):
     """
     Example 11: Multi-Instance Service Management
 
@@ -515,12 +512,12 @@ def example_11_multi_instance_management(consul_host='localhost', consul_port=85
 
     for i in range(1, 6):
         reg = ConsulRegistry(
-            service_name='multi-api-service',
+            service_name="multi-api-service",
             service_port=8000 + i,
             consul_host=consul_host,
             consul_port=consul_port,
-            tags=['api', f'instance-{i}', 'zone-a' if i <= 3 else 'zone-b'],
-            health_check_type='ttl'
+            tags=["api", f"instance-{i}", "zone-a" if i <= 3 else "zone-b"],
+            health_check_type="ttl",
         )
         reg.register()
         registries.append(reg)
@@ -528,21 +525,21 @@ def example_11_multi_instance_management(consul_host='localhost', consul_port=85
 
     # Discover all instances
     print("\n🔍 Discovering all instances:")
-    instances = registries[0].discover_service('multi-api-service')
+    instances = registries[0].discover_service("multi-api-service")
     print(f"   Total instances: {len(instances)}")
 
     # Group by zone
-    zone_a = [inst for inst in instances if 'zone-a' in inst['tags']]
-    zone_b = [inst for inst in instances if 'zone-b' in inst['tags']]
+    zone_a = [inst for inst in instances if "zone-a" in inst["tags"]]
+    zone_b = [inst for inst in instances if "zone-b" in inst["tags"]]
 
-    print(f"\n📊 Distribution:")
+    print("\n📊 Distribution:")
     print(f"   Zone A: {len(zone_a)} instances")
     print(f"   Zone B: {len(zone_b)} instances")
 
     # Test load balancing across instances
     print("\n⚖️  Testing round-robin load balancing:")
     for i in range(5):
-        endpoint = registries[0].get_service_endpoint('multi-api-service', strategy='round_robin')
+        endpoint = registries[0].get_service_endpoint("multi-api-service", strategy="round_robin")
         print(f"   Request {i+1} → {endpoint}")
 
     # Cleanup
@@ -550,7 +547,7 @@ def example_11_multi_instance_management(consul_host='localhost', consul_port=85
         reg.deregister()
 
 
-def example_12_best_practices(consul_host='localhost', consul_port=8500):
+def example_12_best_practices(consul_host="localhost", consul_port=8500):
     """
     Example 12: Best Practices for Production Use
 
@@ -562,18 +559,18 @@ def example_12_best_practices(consul_host='localhost', consul_port=8500):
 
     print("\n✅ Best Practice 1: Use meaningful service tags")
     registry = ConsulRegistry(
-        service_name='production-api',
+        service_name="production-api",
         service_port=8080,
         consul_host=consul_host,
         consul_port=consul_port,
         tags=[
-            'version:1.2.3',
-            'environment:production',
-            'team:platform',
-            'region:us-west-2',
-            'datacenter:dc1'
+            "version:1.2.3",
+            "environment:production",
+            "team:platform",
+            "region:us-west-2",
+            "datacenter:dc1",
         ],
-        health_check_type='ttl'
+        health_check_type="ttl",
     )
     registry.register()
     print(f"   Service registered with tags: {registry.tags}")
@@ -582,21 +579,19 @@ def example_12_best_practices(consul_host='localhost', consul_port=8500):
     print(f"   TTL interval: {registry.ttl_interval}s (recommended: 10-60s)")
 
     print("\n✅ Best Practice 3: Appropriate deregister timeout")
-    deregister_seconds = int(registry.deregister_after.rstrip('s'))
+    deregister_seconds = int(registry.deregister_after.rstrip("s"))
     print(f"   Deregister after: {deregister_seconds}s (recommended: 60-120s)")
 
     print("\n✅ Best Practice 4: Use service discovery with fallback")
     url = registry.get_service_address(
-        'production-api',
-        fallback_url='http://localhost:8080',
-        max_retries=3
+        "production-api", fallback_url="http://localhost:8080", max_retries=3
     )
     print(f"   Discovered URL with fallback: {url}")
 
     print("\n✅ Best Practice 5: Store configuration in Consul KV")
-    registry.set_config('database/url', 'postgresql://prod-db:5432/app')
-    registry.set_config('cache/enabled', True)
-    print(f"   Configuration stored in Consul KV")
+    registry.set_config("database/url", "postgresql://prod-db:5432/app")
+    registry.set_config("cache/enabled", True)
+    print("   Configuration stored in Consul KV")
 
     print("\n💡 Production Checklist:")
     print("   ✓ Use descriptive service names")
@@ -609,28 +604,28 @@ def example_12_best_practices(consul_host='localhost', consul_port=8500):
     print("   ✓ Clean up on shutdown (deregister)")
 
     # Cleanup
-    registry.consul.kv.delete(f'{registry.service_name}/', recurse=True)
+    registry.consul.kv.delete(f"{registry.service_name}/", recurse=True)
     registry.deregister()
 
 
 # Main execution
 def main():
     parser = argparse.ArgumentParser(
-        description='Consul Client Examples - Comprehensive demonstration of ConsulRegistry features'
+        description="Consul Client Examples - Comprehensive demonstration of ConsulRegistry features"
     )
-    parser.add_argument('--host', default='localhost', help='Consul host (default: localhost)')
-    parser.add_argument('--port', type=int, default=8500, help='Consul port (default: 8500)')
-    parser.add_argument('--example', type=int, help='Run specific example (1-12)')
+    parser.add_argument("--host", default="localhost", help="Consul host (default: localhost)")
+    parser.add_argument("--port", type=int, default=8500, help="Consul port (default: 8500)")
+    parser.add_argument("--example", type=int, help="Run specific example (1-12)")
 
     args = parser.parse_args()
 
     print("=" * 80)
     print("         Consul Service Registry Client - Usage Examples")
     print("=" * 80)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Consul Host: {args.host}")
     print(f"  Consul Port: {args.port}")
-    print(f"\n💡 Based on 13 comprehensive functional tests (100% pass rate)")
+    print("\n💡 Based on 13 comprehensive functional tests (100% pass rate)")
 
     examples = {
         1: example_01_connectivity_check,
@@ -662,6 +657,7 @@ def main():
             except Exception as e:
                 print(f"\n❌ Example {example_num} failed: {e}")
                 import traceback
+
                 traceback.print_exc()
 
     print("\n" + "=" * 80)
@@ -679,5 +675,5 @@ def main():
     print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

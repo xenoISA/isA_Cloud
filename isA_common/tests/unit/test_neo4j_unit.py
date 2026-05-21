@@ -1,5 +1,5 @@
 """AsyncNeo4jClient unit tests — mocked neo4j driver, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -63,12 +63,12 @@ class TestNeo4jHealthCheck:
     async def test_health_check_success(self, neo4j_client):
         mock_record = MagicMock()
         mock_record.__getitem__ = lambda self, key: {
-            "name": "Neo4j", "versions": ["5.0"], "edition": "community"
+            "name": "Neo4j",
+            "versions": ["5.0"],
+            "edition": "community",
         }[key]
 
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult([mock_record])
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult([mock_record]))
 
         result = await neo4j_client.health_check()
 
@@ -76,9 +76,7 @@ class TestNeo4jHealthCheck:
         assert result.get("healthy") is True
 
     async def test_health_check_error_returns_none(self, neo4j_client):
-        neo4j_client._session.run = AsyncMock(
-            side_effect=Exception("connection refused")
-        )
+        neo4j_client._session.run = AsyncMock(side_effect=Exception("connection refused"))
 
         result = await neo4j_client.health_check()
 
@@ -88,9 +86,7 @@ class TestNeo4jHealthCheck:
 class TestNeo4jCypher:
     async def test_run_cypher_returns_records(self, neo4j_client):
         records = [{"n.name": "Alice"}, {"n.name": "Bob"}]
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult(records)
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult(records))
 
         result = await neo4j_client.run_cypher("MATCH (n) RETURN n.name")
 
@@ -99,13 +95,10 @@ class TestNeo4jCypher:
 
     async def test_run_cypher_with_params(self, neo4j_client):
         records = [{"n.name": "Alice"}]
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult(records)
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult(records))
 
         result = await neo4j_client.run_cypher(
-            "MATCH (n:User {id: $id}) RETURN n.name",
-            params={"id": "user_123"}
+            "MATCH (n:User {id: $id}) RETURN n.name", params={"id": "user_123"}
         )
 
         assert result is not None
@@ -124,13 +117,9 @@ class TestNeo4jNodeOps:
         mock_record = MagicMock()
         mock_record.__getitem__ = lambda self, key: {"id": "4:abc:42", "node_id": 42}[key]
 
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult([mock_record])
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult([mock_record]))
 
-        result = await neo4j_client.create_node(
-            labels=["User"], properties={"name": "Alice"}
-        )
+        result = await neo4j_client.create_node(labels=["User"], properties={"name": "Alice"})
 
         assert result is not None
         neo4j_client._session.run.assert_awaited_once()
@@ -144,18 +133,14 @@ class TestNeo4jNodeOps:
         mock_record = MagicMock()
         mock_record.__getitem__ = MagicMock(return_value=mock_node)
 
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult([mock_record])
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult([mock_record]))
 
         result = await neo4j_client.get_node(42)
 
         assert result is not None
 
     async def test_delete_node_returns_bool(self, neo4j_client):
-        neo4j_client._session.run = AsyncMock(
-            return_value=MockAsyncResult([MagicMock()])
-        )
+        neo4j_client._session.run = AsyncMock(return_value=MockAsyncResult([MagicMock()]))
 
         result = await neo4j_client.delete_node(42, detach=True)
 
@@ -166,9 +151,7 @@ class TestNeo4jErrorHandling:
     async def test_create_node_error_returns_none(self, neo4j_client):
         neo4j_client._session.run = AsyncMock(side_effect=Exception("constraint violation"))
 
-        result = await neo4j_client.create_node(
-            labels=["User"], properties={"name": "Alice"}
-        )
+        result = await neo4j_client.create_node(labels=["User"], properties={"name": "Alice"})
 
         assert result is None
 

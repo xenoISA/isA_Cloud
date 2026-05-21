@@ -1,11 +1,12 @@
 """OpenTelemetry tracing client unit tests — no infrastructure required."""
-import pytest
+
 from unittest.mock import MagicMock, patch
 
 
 def _has_otel():
     try:
         import opentelemetry  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -51,14 +52,14 @@ class TestNoOpSpan:
 
 class TestNoOpTracer:
     def test_start_as_current_span_returns_noop(self):
-        from isa_common.tracing import _NoOpTracer, _NoOpSpan
+        from isa_common.tracing import _NoOpSpan, _NoOpTracer
 
         tracer = _NoOpTracer()
         span = tracer.start_as_current_span("op")
         assert isinstance(span, _NoOpSpan)
 
     def test_start_span_returns_noop(self):
-        from isa_common.tracing import _NoOpTracer, _NoOpSpan
+        from isa_common.tracing import _NoOpSpan, _NoOpTracer
 
         tracer = _NoOpTracer()
         span = tracer.start_span("op")
@@ -72,10 +73,9 @@ class TestNoOpTracer:
 
 class TestGetTracer:
     def test_returns_noop_by_default(self):
-        from isa_common.tracing import _NoOpTracer
-
         # Reset module state to simulate fresh import
         import isa_common.tracing as mod
+        from isa_common.tracing import _NoOpTracer
 
         original = mod._tracer
         try:
@@ -176,5 +176,3 @@ class TestAutoInstrumentation:
 
         result = _instrument_httpx()
         assert isinstance(result, bool)
-
-

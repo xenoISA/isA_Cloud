@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================
-# Loki Service - Comprehensive Functional Tests  
+# Loki Service - Comprehensive Functional Tests
 # ============================================
 # Tests ALL 20 Loki operations including:
 # - Log Pushing (PushLog, PushLogBatch, PushLogStream, PushSimpleLog)
@@ -94,13 +94,13 @@ try:
     client = LokiClient(host='${HOST}', port=${PORT}, user_id='${USER_ID}')
     with client:
         # Push single log with labels
-        result1 = client.push_log('Test log message', 
+        result1 = client.push_log('Test log message',
                                   labels={'app': 'test', 'level': 'info'})
         if not result1 or not result1.get('success'):
             print("FAIL: PushLog failed")
         else:
             # Push simple log
-            result2 = client.push_simple_log('Simple log message', 
+            result2 = client.push_simple_log('Simple log message',
                                              service='test-service', level='INFO')
             if not result2 or not result2.get('success'):
                 print("FAIL: PushSimpleLog failed")
@@ -140,7 +140,7 @@ try:
     with client:
         # Push test logs first
         client.push_simple_log('Query test log', service='query-test', level='INFO')
-        
+
         # Query logs
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=1)
@@ -176,9 +176,9 @@ try:
     client = LokiClient(host='${HOST}', port=${PORT}, user_id='${USER_ID}')
     with client:
         # Push logs with labels
-        client.push_log('Test with labels', 
+        client.push_log('Test with labels',
                        labels={'app': 'label-test', 'env': 'staging', 'component': 'api'})
-        
+
         # Get available labels
         labels = client.get_labels()
         if labels is None:
@@ -219,7 +219,7 @@ try:
     with client:
         levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR']
         for level in levels:
-            result = client.push_simple_log(f'{level} message', 
+            result = client.push_simple_log(f'{level} message',
                                            service='level-test', level=level)
             if not result or not result.get('success'):
                 print(f"FAIL: {level} push failed")
@@ -249,7 +249,7 @@ try:
     with client:
         # Push logs to create streams
         client.push_simple_log('Stream test log', service='stream-test', level='INFO')
-        
+
         # List streams
         streams = client.list_streams(page=1, page_size=50)
         if not streams or 'streams' not in streams:

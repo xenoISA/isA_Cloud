@@ -139,9 +139,14 @@ def hms_pod() -> str:
     """Returns the name of the first ready hive-metastore Pod, or skips."""
     try:
         out = _kubectl(
-            "-n", NAMESPACE, "get", "pod",
-            "-l", "app=hive-metastore",
-            "-o", "jsonpath={.items[0].metadata.name}",
+            "-n",
+            NAMESPACE,
+            "get",
+            "pod",
+            "-l",
+            "app=hive-metastore",
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
             capture=True,
         ).stdout.strip()
     except subprocess.CalledProcessError:
@@ -156,9 +161,14 @@ def flink_jm_pod() -> str:
     """Returns the name of the first ready Flink JM Pod, or skips."""
     try:
         out = _kubectl(
-            "-n", NAMESPACE, "get", "pod",
-            "-l", "app=flink-session,component=jobmanager",
-            "-o", "jsonpath={.items[0].metadata.name}",
+            "-n",
+            NAMESPACE,
+            "get",
+            "pod",
+            "-l",
+            "app=flink-session,component=jobmanager",
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
             capture=True,
         ).stdout.strip()
     except subprocess.CalledProcessError:

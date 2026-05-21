@@ -22,7 +22,7 @@ spec:
         - name: consul-agent
           image: hashicorp/consul:latest
           imagePullPolicy: IfNotPresent
-          
+
           command:
             - "consul"
             - "agent"
@@ -30,7 +30,7 @@ spec:
             - "-config-file=/consul/config/grpc-services.json"
             - "-client=0.0.0.0"
             - "-bind=0.0.0.0"
-          
+
           ports:
             - name: http
               containerPort: 8500
@@ -50,14 +50,14 @@ spec:
             - name: serf-wan
               containerPort: 8302
               protocol: TCP
-          
+
           volumeMounts:
             - name: config
               mountPath: /consul/config
               readOnly: true
             - name: data
               mountPath: /consul/data
-          
+
           livenessProbe:
             exec:
               command:
@@ -67,7 +67,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-          
+
           readinessProbe:
             exec:
               command:
@@ -77,7 +77,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
-          
+
           resources:
             requests:
               cpu: 100m
@@ -85,7 +85,7 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-      
+
       volumes:
         - name: config
           configMap:

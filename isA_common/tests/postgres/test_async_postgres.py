@@ -17,13 +17,13 @@ Usage:
     HOST=postgres-service PORT=50061 python test_async_postgres.py
 """
 
+import asyncio
 import os
 import sys
-import asyncio
 import time
 
 # Add parent path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from isa_common import AsyncPostgresClient
 
@@ -31,32 +31,43 @@ from isa_common import AsyncPostgresClient
 # Contract Mapping — see tests/contracts/postgres/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':          [],
-    'test_simple_query':          ['BR-003'],
-    'test_query_with_params':     ['BR-001'],
-    'test_query_row':             ['BR-003'],
-    'test_list_tables':           [],
-    'test_table_exists':          ['EC-005'],
-    'test_execute_ddl':           [],
-    'test_execute_insert':        ['BR-004'],
-    'test_execute_update':        ['BR-004'],
-    'test_select_from_table':     ['BR-003', 'EC-005'],
-    'test_execute_delete':        ['BR-004'],
-    'test_execute_batch':         [],
-    'test_concurrent_queries':    [],
-    'test_query_many_concurrent': [],
-    'test_get_stats':             [],
+    "test_health_check": [],
+    "test_simple_query": ["BR-003"],
+    "test_query_with_params": ["BR-001"],
+    "test_query_row": ["BR-003"],
+    "test_list_tables": [],
+    "test_table_exists": ["EC-005"],
+    "test_execute_ddl": [],
+    "test_execute_insert": ["BR-004"],
+    "test_execute_update": ["BR-004"],
+    "test_select_from_table": ["BR-003", "EC-005"],
+    "test_execute_delete": ["BR-004"],
+    "test_execute_batch": [],
+    "test_concurrent_queries": [],
+    "test_query_many_concurrent": [],
+    "test_get_stats": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-002', 'BR-005', 'BR-006', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-006', 'EC-007', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-002",
+    "BR-005",
+    "BR-006",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-006",
+    "EC-007",
+    "ER-001",
+]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '5432'))
-DATABASE = os.environ.get('DATABASE', 'postgres')
-USERNAME = os.environ.get('USERNAME', 'postgres')
-PASSWORD = os.environ.get('PASSWORD', 'postgres')
-USER_ID = os.environ.get('USER_ID', 'test_user')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "5432"))
+DATABASE = os.environ.get("DATABASE", "postgres")
+USERNAME = os.environ.get("USERNAME", "postgres")
+PASSWORD = os.environ.get("PASSWORD", "postgres")
+USER_ID = os.environ.get("USER_ID", "test_user")
 
 # Test results
 PASSED = 0
@@ -83,7 +94,7 @@ async def test_health_check(client: AsyncPostgresClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, "Health check")
         return success
     except Exception as e:
@@ -102,7 +113,7 @@ async def test_simple_query(client: AsyncPostgresClient):
             test_result(False, "Simple query - no results")
             return
 
-        if result[0].get('num') != 1:
+        if result[0].get("num") != 1:
             test_result(False, f"Simple query - unexpected value: {result[0]}")
             return
 
@@ -117,15 +128,12 @@ async def test_query_with_params(client: AsyncPostgresClient):
     Validates: BR-001 (Query Execution with Parameter Binding)
     """
     try:
-        result = await client.query(
-            "SELECT $1::int as num, $2::text as msg",
-            params=[42, 'world']
-        )
+        result = await client.query("SELECT $1::int as num, $2::text as msg", params=[42, "world"])
         if result is None or len(result) == 0:
             test_result(False, "Query with params - no results")
             return
 
-        if result[0].get('num') != 42 or result[0].get('msg') != 'world':
+        if result[0].get("num") != 42 or result[0].get("msg") != "world":
             test_result(False, f"Query with params - unexpected: {result[0]}")
             return
 
@@ -145,7 +153,7 @@ async def test_query_row(client: AsyncPostgresClient):
             test_result(False, "Query row - no result")
             return
 
-        if result.get('id') != 1:
+        if result.get("id") != 1:
             test_result(False, f"Query row - unexpected: {result}")
             return
 
@@ -178,11 +186,11 @@ async def test_table_exists(client: AsyncPostgresClient):
     """
     try:
         # Check a common system table
-        exists = await client.table_exists('pg_catalog.pg_tables', schema='pg_catalog')
+        exists = await client.table_exists("pg_catalog.pg_tables", schema="pg_catalog")
         # Note: This might fail depending on how the proto is configured
         # Fall back to checking public schema
         if not exists:
-            exists = await client.table_exists('users', schema='public')
+            exists = await client.table_exists("users", schema="public")
 
         # Just verify we can call it without error
         test_result(True, "Table exists check")
@@ -207,7 +215,7 @@ async def test_execute_ddl(client: AsyncPostgresClient):
         """)
 
         # Verify table exists
-        exists = await client.table_exists('async_test_table')
+        exists = await client.table_exists("async_test_table")
         if not exists:
             test_result(False, "Create table - table not found after create")
             return
@@ -225,8 +233,7 @@ async def test_execute_insert(client: AsyncPostgresClient):
     try:
         # Insert data
         rows = await client.execute(
-            "INSERT INTO async_test_table (name, value) VALUES ($1, $2)",
-            params=['test_name', 100]
+            "INSERT INTO async_test_table (name, value) VALUES ($1, $2)", params=["test_name", 100]
         )
 
         test_result(True, "Execute INSERT")
@@ -241,8 +248,7 @@ async def test_execute_update(client: AsyncPostgresClient):
     """
     try:
         rows = await client.execute(
-            "UPDATE async_test_table SET value = $1 WHERE name = $2",
-            params=[200, 'test_name']
+            "UPDATE async_test_table SET value = $1 WHERE name = $2", params=[200, "test_name"]
         )
 
         test_result(True, "Execute UPDATE")
@@ -257,15 +263,14 @@ async def test_select_from_table(client: AsyncPostgresClient):
     """
     try:
         result = await client.query(
-            "SELECT * FROM async_test_table WHERE name = $1",
-            params=['test_name']
+            "SELECT * FROM async_test_table WHERE name = $1", params=["test_name"]
         )
 
         if result is None or len(result) == 0:
             test_result(False, "Select from table - no results")
             return
 
-        if result[0].get('value') != 200:  # Should be updated value
+        if result[0].get("value") != 200:  # Should be updated value
             test_result(False, f"Select from table - unexpected value: {result[0].get('value')}")
             return
 
@@ -281,8 +286,7 @@ async def test_execute_delete(client: AsyncPostgresClient):
     """
     try:
         rows = await client.execute(
-            "DELETE FROM async_test_table WHERE name = $1",
-            params=['test_name']
+            "DELETE FROM async_test_table WHERE name = $1", params=["test_name"]
         )
 
         test_result(True, "Execute DELETE")
@@ -297,9 +301,18 @@ async def test_execute_batch(client: AsyncPostgresClient):
     """
     try:
         operations = [
-            {'sql': "INSERT INTO async_test_table (name, value) VALUES ($1, $2)", 'params': ['batch1', 10]},
-            {'sql': "INSERT INTO async_test_table (name, value) VALUES ($1, $2)", 'params': ['batch2', 20]},
-            {'sql': "INSERT INTO async_test_table (name, value) VALUES ($1, $2)", 'params': ['batch3', 30]},
+            {
+                "sql": "INSERT INTO async_test_table (name, value) VALUES ($1, $2)",
+                "params": ["batch1", 10],
+            },
+            {
+                "sql": "INSERT INTO async_test_table (name, value) VALUES ($1, $2)",
+                "params": ["batch2", 20],
+            },
+            {
+                "sql": "INSERT INTO async_test_table (name, value) VALUES ($1, $2)",
+                "params": ["batch3", 30],
+            },
         ]
 
         result = await client.execute_batch(operations)
@@ -353,9 +366,9 @@ async def test_query_many_concurrent(client: AsyncPostgresClient):
     """
     try:
         queries = [
-            {'sql': "SELECT 1 as num"},
-            {'sql': "SELECT 2 as num"},
-            {'sql': "SELECT 3 as num"},
+            {"sql": "SELECT 1 as num"},
+            {"sql": "SELECT 2 as num"},
+            {"sql": "SELECT 3 as num"},
         ]
 
         start = time.time()
@@ -401,7 +414,7 @@ async def main():
     print("=" * 70)
     print("     ASYNC POSTGRESQL CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  Database: {DATABASE}")
@@ -415,7 +428,7 @@ async def main():
         database=DATABASE,
         username=USERNAME,
         password=PASSWORD,
-        user_id=USER_ID
+        user_id=USER_ID,
     ) as client:
         # Initial cleanup
         await cleanup(client)
@@ -481,6 +494,6 @@ async def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)

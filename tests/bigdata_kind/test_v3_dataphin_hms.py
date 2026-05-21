@@ -50,6 +50,4 @@ def test_v3_hms_schematool_info_succeeds(namespace: str, hms_pod: str) -> None:
     #   Metastore schema version:  4.0.0
     # We don't pin the version; just confirm it found a schema.
     body = out.stdout.lower()
-    assert "schema" in body, (
-        f"schematool -info ran but produced no schema info; got:\n{out.stdout}"
-    )
+    assert "schema" in body, f"schematool -info ran but produced no schema info; got:\n{out.stdout}"

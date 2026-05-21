@@ -1,6 +1,8 @@
 """AsyncFalkorClient unit tests — mocked falkordb driver, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 class TestFalkorConnection:
@@ -77,9 +79,7 @@ class TestFalkorQuery:
 
         rows = await falkor_client.query("MATCH (n:User) RETURN n")
 
-        assert rows == [
-            {"n": {"id": 1, "labels": ["User"], "properties": {"name": "alice"}}}
-        ]
+        assert rows == [{"n": {"id": 1, "labels": ["User"], "properties": {"name": "alice"}}}]
 
     async def test_query_returns_none_on_unrecoverable_error(self, falkor_client):
         falkor_client._graph.query = AsyncMock(side_effect=ValueError("syntax error"))

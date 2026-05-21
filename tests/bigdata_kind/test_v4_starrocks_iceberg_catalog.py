@@ -45,10 +45,10 @@ def test_v4_catalog_init_job_succeeded(namespace: str) -> None:
     except subprocess.CalledProcessError:
         pytest.skip("starrocks-catalog-init Job not present (chart values flag off?)")
 
-    succeeded = (out.stdout.strip() or "0")
-    assert succeeded == "1", (
-        f"starrocks-catalog-init Job not in succeeded=1 state (got {succeeded!r})"
-    )
+    succeeded = out.stdout.strip() or "0"
+    assert (
+        succeeded == "1"
+    ), f"starrocks-catalog-init Job not in succeeded=1 state (got {succeeded!r})"
 
 
 def test_v4_starrocks_fe_mysql_port_reachable(starrocks_fe_forward) -> None:
@@ -142,9 +142,7 @@ def test_v4_show_catalogs_lists_iceberg_hms(starrocks_fe_forward) -> None:
                 f"FE not ready yet:\nstderr={out.stderr}"
             )
         catalogs = {row.split("\t")[0] for row in out.stdout.strip().splitlines()}
-        assert "iceberg_hms" in catalogs, (
-            f"iceberg_hms catalog missing; got catalogs: {catalogs}"
-        )
+        assert "iceberg_hms" in catalogs, f"iceberg_hms catalog missing; got catalogs: {catalogs}"
     finally:
         proc.terminate()
         try:

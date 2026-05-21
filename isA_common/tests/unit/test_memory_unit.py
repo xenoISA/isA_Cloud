@@ -1,8 +1,6 @@
 """Unit tests for AsyncMemoryClient — #119."""
-import time
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
+import time
 
 # ============================================================================
 # L1 — Pure logic helpers
@@ -14,24 +12,28 @@ class TestIsExpired:
 
     def test_not_expired(self):
         from isa_common import AsyncMemoryClient
+
         client = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         client._expiry["key1"] = time.time() + 3600
         assert client._is_expired("key1") is False
 
     def test_expired(self):
         from isa_common import AsyncMemoryClient
+
         client = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         client._expiry["key1"] = time.time() - 1
         assert client._is_expired("key1") is True
 
     def test_no_expiry(self):
         from isa_common import AsyncMemoryClient
+
         client = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         client._expiry["key1"] = 0
         assert client._is_expired("key1") is False
 
     def test_missing_key(self):
         from isa_common import AsyncMemoryClient
+
         client = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         assert client._is_expired("nonexistent") is False
 
@@ -310,6 +312,7 @@ class TestMemoryClientGlobalVsInstance:
 
     def test_instance_store_isolation(self):
         from isa_common import AsyncMemoryClient
+
         c1 = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         c2 = AsyncMemoryClient(use_global_store=False, lazy_connect=True)
         c1._store["key"] = "val"

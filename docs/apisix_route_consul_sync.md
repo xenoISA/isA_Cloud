@@ -106,9 +106,9 @@ isA_Cloud/
 
 ### CronJob 配置
 
-**文件**:  
-- `deployments/kubernetes/local/manifests/consul-apisix-sync.yaml`  
-- `deployments/kubernetes/staging/manifests/consul-apisix-sync.yaml`  
+**文件**:
+- `deployments/kubernetes/local/manifests/consul-apisix-sync.yaml`
+- `deployments/kubernetes/staging/manifests/consul-apisix-sync.yaml`
 - `deployments/kubernetes/production/manifests/consul-apisix-sync.yaml`
 
 ```yaml
@@ -315,21 +315,21 @@ kubectl logs -n isa-cloud-staging <pod-name>
 ```
 /scripts/sync_routes.sh: line 142: syntax error: unexpected "(" (expecting "}")
 ```
-**原因**: 使用 `/bin/sh` 执行了 bash 脚本（数组等语法不兼容）  
+**原因**: 使用 `/bin/sh` 执行了 bash 脚本（数组等语法不兼容）
 **解决**: 已修复，脚本会先安装 bash 再执行
 
 #### Error 2: Bash 未找到
 ```
 /bin/sh: /bin/bash: not found
 ```
-**原因**: Alpine 镜像默认不包含 bash  
+**原因**: Alpine 镜像默认不包含 bash
 **解决**: 已修复，脚本会自动 `apk add bash`
 
 #### Error 3: HTTP 000 错误
 ```
 ✗ Failed to sync route: auth_service_route (HTTP 000)
 ```
-**原因**: 无法连接到 APISIX Admin API  
+**原因**: 无法连接到 APISIX Admin API
 **排查**:
 ```bash
 # 检查 APISIX Pod 状态
@@ -724,6 +724,6 @@ kubectl exec -n isa-cloud-staging deploy/apisix -- \
 
 ---
 
-**文档版本**: v1.0  
-**最后更新**: 2025-11-17  
+**文档版本**: v1.0
+**最后更新**: 2025-11-17
 **维护者**: isA Cloud Platform Team

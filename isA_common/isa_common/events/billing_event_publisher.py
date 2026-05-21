@@ -6,23 +6,21 @@ NATS Event Publisher for Billing System
 Provides helper functions to publish billing events to NATS message bus.
 """
 
-import json
-import logging
 import asyncio
+import logging
 import warnings
-from typing import Optional, Dict, Any, List
 from decimal import Decimal
-from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from ..nats_client import NATSClient
 from .billing_events import (
-    EventType,
-    UsageEvent,
     BillingCalculatedEvent,
+    BillingErrorEvent,
+    EventType,
     TokensDeductedEvent,
     TokensInsufficientEvent,
-    BillingErrorEvent,
-    get_nats_subject
+    UsageEvent,
+    get_nats_subject,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,7 +115,7 @@ class BillingEventPublisher:
         """
         # Use Pydantic's JSON serialization with custom encoders
         json_str = event.model_dump_json()
-        return json_str.encode('utf-8')
+        return json_str.encode("utf-8")
 
     async def publish_usage(
         self,
@@ -226,12 +224,10 @@ class BillingEventPublisher:
             data = self._serialize_event(event)
 
             result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers={"event_type": EventType.USAGE_RECORDED.value}
+                subject=subject, data=data, headers={"event_type": EventType.USAGE_RECORDED.value}
             )
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(
                     "Published billing usage event: product=%s user=%s payer=%s:%s subject=%s",
                     product_id,
@@ -262,7 +258,7 @@ class BillingEventPublisher:
         unit_price: Decimal,
         token_conversion_rate: Decimal,
         is_free_tier: bool = False,
-        is_included_in_subscription: bool = False
+        is_included_in_subscription: bool = False,
     ) -> bool:
         """
         Publish a billing calculated event.
@@ -297,19 +293,17 @@ class BillingEventPublisher:
                 unit_price=unit_price,
                 token_conversion_rate=token_conversion_rate,
                 is_free_tier=is_free_tier,
-                is_included_in_subscription=is_included_in_subscription
+                is_included_in_subscription=is_included_in_subscription,
             )
 
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
             result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers={"event_type": "billing.calculated"}
+                subject=subject, data=data, headers={"event_type": "billing.calculated"}
             )
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(f"Published billing calculated event: {billing_record_id}")
                 return True
             else:
@@ -330,7 +324,7 @@ class BillingEventPublisher:
         balance_after: Decimal,
         monthly_quota: Optional[Decimal] = None,
         monthly_used: Optional[Decimal] = None,
-        percentage_used: Optional[float] = None
+        percentage_used: Optional[float] = None,
     ) -> bool:
         """
         Publish a tokens deducted event.
@@ -359,19 +353,17 @@ class BillingEventPublisher:
                 balance_after=balance_after,
                 monthly_quota=monthly_quota,
                 monthly_used=monthly_used,
-                percentage_used=percentage_used
+                percentage_used=percentage_used,
             )
 
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
             result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers={"event_type": "wallet.tokens.deducted"}
+                subject=subject, data=data, headers={"event_type": "wallet.tokens.deducted"}
             )
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(f"Published tokens deducted event: {transaction_id}")
                 return True
             else:
@@ -388,7 +380,7 @@ class BillingEventPublisher:
         billing_record_id: str,
         tokens_required: Decimal,
         tokens_available: Decimal,
-        suggested_action: str = "upgrade_plan"
+        suggested_action: str = "upgrade_plan",
     ) -> bool:
         """
         Publish a tokens insufficient event.
@@ -412,19 +404,17 @@ class BillingEventPublisher:
                 tokens_required=tokens_required,
                 tokens_available=tokens_available,
                 tokens_deficit=tokens_deficit,
-                suggested_action=suggested_action
+                suggested_action=suggested_action,
             )
 
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
             result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers={"event_type": "wallet.tokens.insufficient"}
+                subject=subject, data=data, headers={"event_type": "wallet.tokens.insufficient"}
             )
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(f"Published tokens insufficient event for user {user_id}")
                 return True
             else:
@@ -442,7 +432,7 @@ class BillingEventPublisher:
         product_id: str,
         error_code: str,
         error_message: str,
-        retry_count: int = 0
+        retry_count: int = 0,
     ) -> bool:
         """
         Publish a billing error event.
@@ -465,19 +455,17 @@ class BillingEventPublisher:
                 product_id=product_id,
                 error_code=error_code,
                 error_message=error_message,
-                retry_count=retry_count
+                retry_count=retry_count,
             )
 
             subject = get_nats_subject(event)
             data = self._serialize_event(event)
 
             result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers={"event_type": "billing.failed"}
+                subject=subject, data=data, headers={"event_type": "billing.failed"}
             )
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.warning(f"Published billing error event: {error_code}")
                 return True
             else:
@@ -495,9 +483,9 @@ async def publish_usage_event(
     product_id: str,
     usage_amount: Decimal,
     unit_type: str,
-    nats_host: str = 'localhost',
+    nats_host: str = "localhost",
     nats_port: int = 4222,
-    **kwargs
+    **kwargs,
 ) -> bool:
     """
     Quick helper to publish a usage event.
@@ -514,14 +502,12 @@ async def publish_usage_event(
         )
     """
     async with BillingEventPublisher(
-        nats_host=nats_host,
-        nats_port=nats_port,
-        user_id=user_id
+        nats_host=nats_host, nats_port=nats_port, user_id=user_id
     ) as publisher:
         return await publisher.publish_usage(
             user_id=user_id,
             product_id=product_id,
             usage_amount=usage_amount,
             unit_type=unit_type,
-            **kwargs
+            **kwargs,
         )

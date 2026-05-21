@@ -6,9 +6,9 @@ MQTT Client Adapter 是 isA_Cloud 平台的**协议转换层**，实现了 **MQT
 
 ### 核心功能
 
-✅ **gRPC Stream 订阅** - 实时推送 MQTT 设备消息到 Python 微服务  
-✅ **Webhook 回调** - HTTP POST 回调机制，支持自定义认证和签名  
-✅ **设备消息分类** - 自动识别 telemetry、status、auth 等消息类型  
+✅ **gRPC Stream 订阅** - 实时推送 MQTT 设备消息到 Python 微服务
+✅ **Webhook 回调** - HTTP POST 回调机制，支持自定义认证和签名
+✅ **设备消息分类** - 自动识别 telemetry、status、auth 等消息类型
 ✅ **灵活过滤** - 支持按设备 ID、消息类型、topic 模式过滤
 
 ---
@@ -69,7 +69,7 @@ client = MQTTClient(host='localhost', port=50053, user_id='service_001', lazy_co
 def handle_device_message(device_id, message_type, topic, payload, timestamp, metadata):
     """
     处理接收到的设备消息
-    
+
     Args:
         device_id (str): 设备 ID
         message_type (int): 消息类型
@@ -173,17 +173,17 @@ def handle_mqtt_webhook():
     signature = request.headers.get('X-Webhook-Signature')
     payload = request.get_data()
     expected_sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
-    
+
     if signature != expected_sig:
         return jsonify({'error': 'Invalid signature'}), 403
-    
+
     # 2. 处理数据
     data = request.get_json()
     device_id = data['device_id']
     payload_data = data['payload']
-    
+
     print(f"收到设备 {device_id} 的消息: {payload_data}")
-    
+
     # 3. 返回成功（重要！）
     return jsonify({'success': True}), 200
 
@@ -300,5 +300,5 @@ return jsonify({'success': True}), 200
 
 ---
 
-**最后更新**：2025-11-07  
+**最后更新**：2025-11-07
 **测试状态**：✅ 全部测试通过

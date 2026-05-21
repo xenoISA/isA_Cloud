@@ -7,8 +7,9 @@ Generic event models that can be extended by business-specific implementations.
 """
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
 from decimal import Decimal
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -18,31 +19,20 @@ class EventMetadata(BaseModel):
 
     This provides consistent tracking across all event types.
     """
+
     event_id: str = Field(
         default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}",
-        description="Unique event identifier"
+        description="Unique event identifier",
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Event creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc), description="Event creation timestamp"
     )
-    source_service: Optional[str] = Field(
-        None,
-        description="Service that generated this event"
-    )
-    correlation_id: Optional[str] = Field(
-        None,
-        description="ID to correlate related events"
-    )
-    causation_id: Optional[str] = Field(
-        None,
-        description="ID of the event that caused this event"
-    )
+    source_service: Optional[str] = Field(None, description="Service that generated this event")
+    correlation_id: Optional[str] = Field(None, description="ID to correlate related events")
+    causation_id: Optional[str] = Field(None, description="ID of the event that caused this event")
 
     class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class BaseEvent(BaseModel):
@@ -62,6 +52,7 @@ class BaseEvent(BaseModel):
                     datetime: lambda v: v.isoformat()
                 }
     """
+
     event_type: str = Field(..., description="Type of event (e.g., 'user.created')")
     metadata: EventMetadata = Field(default_factory=EventMetadata)
 
@@ -72,15 +63,13 @@ class BaseEvent(BaseModel):
     request_id: Optional[str] = Field(None, description="Request trace ID")
 
     class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}
 
 
 def create_event_id() -> str:
     """Generate a unique event ID"""
     import uuid
+
     return f"evt_{uuid.uuid4().hex}"
 
 

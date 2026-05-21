@@ -1,6 +1,6 @@
 """AsyncDuckDBClient unit tests — mocked duckdb connection, no infrastructure required."""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import MagicMock
 
 
 class TestDuckDBConnection:
@@ -53,16 +53,12 @@ class TestDuckDBQuery:
         mock_result.description = [("id",)]
         duckdb_client._conn.execute = MagicMock(return_value=mock_result)
 
-        result = await duckdb_client.query(
-            "SELECT * FROM users WHERE id = ?", params=[42]
-        )
+        result = await duckdb_client.query("SELECT * FROM users WHERE id = ?", params=[42])
 
         assert result is not None
 
     async def test_query_error_returns_none(self, duckdb_client):
-        duckdb_client._conn.execute = MagicMock(
-            side_effect=Exception("syntax error")
-        )
+        duckdb_client._conn.execute = MagicMock(side_effect=Exception("syntax error"))
 
         result = await duckdb_client.query("INVALID SQL")
 
@@ -80,9 +76,7 @@ class TestDuckDBExecute:
         assert result is not None
 
     async def test_execute_error_returns_none(self, duckdb_client):
-        duckdb_client._conn.execute = MagicMock(
-            side_effect=Exception("table exists")
-        )
+        duckdb_client._conn.execute = MagicMock(side_effect=Exception("table exists"))
 
         result = await duckdb_client.execute("CREATE TABLE test (id INT)")
 
@@ -112,9 +106,7 @@ class TestDuckDBTableOps:
 
 class TestDuckDBErrorHandling:
     async def test_query_with_closed_connection(self, duckdb_client):
-        duckdb_client._conn.execute = MagicMock(
-            side_effect=Exception("connection closed")
-        )
+        duckdb_client._conn.execute = MagicMock(side_effect=Exception("connection closed"))
 
         result = await duckdb_client.query("SELECT 1")
 

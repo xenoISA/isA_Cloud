@@ -17,9 +17,8 @@ Note: DuckDB is an embedded database - no network connection required.
 import asyncio
 import os
 import sys
-import time
-import uuid
 import tempfile
+import time
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -30,28 +29,45 @@ from isa_common import AsyncDuckDBClient
 # Contract Mapping — see tests/contracts/duckdb/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':          [],
-    'test_simple_query':          ['BR-002'],
-    'test_query_with_params':     ['BR-002'],
-    'test_create_table':          [],
-    'test_list_tables':           [],
-    'test_get_table_schema':      [],
-    'test_execute_insert':        [],
-    'test_execute_batch_insert':  [],
-    'test_query_data':            ['BR-002'],
-    'test_aggregate_functions':   ['BR-002'],
-    'test_update':                [],
-    'test_delete':                [],
-    'test_sequential_queries':    [],
-    'test_csv_export':            ['BR-004'],
-    'test_drop_table':            [],
+    "test_health_check": [],
+    "test_simple_query": ["BR-002"],
+    "test_query_with_params": ["BR-002"],
+    "test_create_table": [],
+    "test_list_tables": [],
+    "test_get_table_schema": [],
+    "test_execute_insert": [],
+    "test_execute_batch_insert": [],
+    "test_query_data": ["BR-002"],
+    "test_aggregate_functions": ["BR-002"],
+    "test_update": [],
+    "test_delete": [],
+    "test_sequential_queries": [],
+    "test_csv_export": ["BR-004"],
+    "test_drop_table": [],
 }
 
-UNCOVERED_CONTRACTS = ['BR-001', 'BR-003', 'BR-005', 'BR-006', 'BR-007', 'BR-008', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'EC-009', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-001",
+    "BR-003",
+    "BR-005",
+    "BR-006",
+    "BR-007",
+    "BR-008",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "EC-008",
+    "EC-009",
+    "ER-001",
+]
 
 # Configuration
-DATABASE = os.environ.get('DATABASE', ':memory:')  # In-memory by default
-USER_ID = os.environ.get('USER_ID', 'test_user')
+DATABASE = os.environ.get("DATABASE", ":memory:")  # In-memory by default
+USER_ID = os.environ.get("USER_ID", "test_user")
 
 # Test results
 PASSED = 0
@@ -76,8 +92,11 @@ async def test_health_check(client: AsyncDuckDBClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
-        test_result(success, f"Health check (version: {health.get('version', 'unknown') if health else 'N/A'})")
+        success = health is not None and health.get("healthy", False)
+        test_result(
+            success,
+            f"Health check (version: {health.get('version', 'unknown') if health else 'N/A'})",
+        )
         return success
     except Exception as e:
         test_result(False, f"Health check - {e}")
@@ -95,7 +114,7 @@ async def test_simple_query(client: AsyncDuckDBClient):
             test_result(False, "Simple query - no results")
             return
 
-        if result[0].get('num') != 1 or result[0].get('msg') != 'hello':
+        if result[0].get("num") != 1 or result[0].get("msg") != "hello":
             test_result(False, f"Simple query - unexpected value: {result[0]}")
             return
 
@@ -110,15 +129,12 @@ async def test_query_with_params(client: AsyncDuckDBClient):
     Validates: BR-002 (OLAP Query Execution)
     """
     try:
-        result = await client.query(
-            "SELECT ? as num, ? as msg",
-            params=[42, 'world']
-        )
+        result = await client.query("SELECT ? as num, ? as msg", params=[42, "world"])
         if result is None or len(result) == 0:
             test_result(False, "Query with params - no results")
             return
 
-        if result[0].get('num') != 42 or result[0].get('msg') != 'world':
+        if result[0].get("num") != 42 or result[0].get("msg") != "world":
             test_result(False, f"Query with params - unexpected: {result[0]}")
             return
 
@@ -133,14 +149,9 @@ async def test_create_table(client: AsyncDuckDBClient):
     Validates: (additional coverage)
     """
     try:
-        schema = {
-            'id': 'INTEGER',
-            'name': 'VARCHAR',
-            'value': 'DOUBLE',
-            'created_at': 'TIMESTAMP'
-        }
+        schema = {"id": "INTEGER", "name": "VARCHAR", "value": "DOUBLE", "created_at": "TIMESTAMP"}
         # db_name parameter is ignored in native client but required for API compatibility
-        success = await client.create_table('', 'test_table', schema)
+        success = await client.create_table("", "test_table", schema)
         test_result(success, "Create table")
     except Exception as e:
         test_result(False, f"Create table - {e}")
@@ -169,12 +180,12 @@ async def test_get_table_schema(client: AsyncDuckDBClient):
     Validates: (additional coverage)
     """
     try:
-        schema = await client.get_table_schema('', 'test_table')
+        schema = await client.get_table_schema("", "test_table")
         if schema is None:
             test_result(False, "Get table schema - returned None")
             return
 
-        if 'columns' not in schema:
+        if "columns" not in schema:
             test_result(False, "Get table schema - no columns")
             return
 
@@ -205,12 +216,21 @@ async def test_execute_batch_insert(client: AsyncDuckDBClient):
     try:
         # execute_batch expects list of {'sql': str, 'params': list} dictionaries
         operations = [
-            {'sql': "INSERT INTO test_table (id, name, value) VALUES (2, 'test2', 1.1)", 'params': []},
-            {'sql': "INSERT INTO test_table (id, name, value) VALUES (3, 'test3', 2.2)", 'params': []},
-            {'sql': "INSERT INTO test_table (id, name, value) VALUES (4, 'test4', 3.3)", 'params': []},
+            {
+                "sql": "INSERT INTO test_table (id, name, value) VALUES (2, 'test2', 1.1)",
+                "params": [],
+            },
+            {
+                "sql": "INSERT INTO test_table (id, name, value) VALUES (3, 'test3', 2.2)",
+                "params": [],
+            },
+            {
+                "sql": "INSERT INTO test_table (id, name, value) VALUES (4, 'test4', 3.3)",
+                "params": [],
+            },
         ]
         result = await client.execute_batch(operations)
-        success = result is not None and result.get('successful', 0) == 3
+        success = result is not None and result.get("successful", 0) == 3
         test_result(success, f"Execute batch INSERT ({len(operations)} statements)")
     except Exception as e:
         test_result(False, f"Execute batch INSERT - {e}")
@@ -256,11 +276,13 @@ async def test_aggregate_functions(client: AsyncDuckDBClient):
             return
 
         row = result[0]
-        if row.get('cnt') != 4:
+        if row.get("cnt") != 4:
             test_result(False, f"Aggregate - count mismatch: {row.get('cnt')}")
             return
 
-        test_result(True, f"Aggregate functions (count={row.get('cnt')}, sum={row.get('sum_val'):.2f})")
+        test_result(
+            True, f"Aggregate functions (count={row.get('cnt')}, sum={row.get('sum_val'):.2f})"
+        )
     except Exception as e:
         test_result(False, f"Aggregate - {e}")
 
@@ -275,7 +297,7 @@ async def test_update(client: AsyncDuckDBClient):
 
         # Verify update
         result = await client.query("SELECT value FROM test_table WHERE id = 1")
-        if result and len(result) > 0 and result[0].get('value') == 5.0:
+        if result and len(result) > 0 and result[0].get("value") == 5.0:
             test_result(True, "Execute UPDATE")
         else:
             test_result(False, "Execute UPDATE - value not updated")
@@ -293,7 +315,7 @@ async def test_delete(client: AsyncDuckDBClient):
 
         # Verify delete
         result = await client.query("SELECT COUNT(*) as cnt FROM test_table")
-        if result and len(result) > 0 and result[0].get('cnt') == 3:
+        if result and len(result) > 0 and result[0].get("cnt") == 3:
             test_result(True, "Execute DELETE")
         else:
             test_result(False, "Execute DELETE - row not deleted")
@@ -334,10 +356,10 @@ async def test_csv_export(client: AsyncDuckDBClient):
     Validates: BR-004 (Data Export)
     """
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             csv_path = f.name
 
-        await client.write_csv('test_table', csv_path)
+        await client.write_csv("test_table", csv_path)
 
         # Verify file exists and has content
         if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
@@ -355,7 +377,7 @@ async def test_drop_table(client: AsyncDuckDBClient):
     Validates: (additional coverage)
     """
     try:
-        await client.drop_table('', 'test_table')
+        await client.drop_table("", "test_table")
 
         # Verify table is gone
         tables = await client.list_tables()
@@ -371,16 +393,13 @@ async def run_tests():
     print("     ASYNC DUCKDB CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
     print()
-    print(f"Configuration:")
+    print("Configuration:")
     print(f"  Database: {DATABASE}")
     print(f"  User: {USER_ID}")
-    print(f"  Note: DuckDB is embedded - no network connection required")
+    print("  Note: DuckDB is embedded - no network connection required")
     print()
 
-    async with AsyncDuckDBClient(
-        database=DATABASE,
-        user_id=USER_ID
-    ) as client:
+    async with AsyncDuckDBClient(database=DATABASE, user_id=USER_ID) as client:
         # Health check first
         print("--- Health Check ---")
         health_ok = await test_health_check(client)
@@ -439,5 +458,5 @@ async def run_tests():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(run_tests())

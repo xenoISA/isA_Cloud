@@ -1,8 +1,9 @@
 """Unit tests for AsyncConsulRegistry — #121."""
-import json
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ============================================================================
 # L1 — Verify it extends AsyncBaseClient
@@ -25,6 +26,7 @@ class TestAsyncConsulRegistryInheritance:
 
     def test_exported_from_package(self):
         from isa_common import AsyncConsulRegistry
+
         assert AsyncConsulRegistry is not None
 
 
@@ -54,9 +56,11 @@ class TestAsyncConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import AsyncConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"), \
-                 patch.dict("os.environ", {}, clear=True):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch("isa_common.consul_client.socket.gethostname", return_value="my-mac.local"),
+                patch.dict("os.environ", {}, clear=True),
+            ):
                 registry = AsyncConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -70,14 +74,16 @@ class TestAsyncConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import AsyncConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch(
-                     "isa_common.consul_client.socket.getaddrinfo",
-                     return_value=[
-                         (2, None, None, None, ("198.18.0.177", 0)),
-                     ],
-                 ), \
-                 patch.dict("os.environ", {}, clear=True):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch(
+                    "isa_common.consul_client.socket.getaddrinfo",
+                    return_value=[
+                        (2, None, None, None, ("198.18.0.177", 0)),
+                    ],
+                ),
+                patch.dict("os.environ", {}, clear=True),
+            ):
                 registry = AsyncConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -91,18 +97,20 @@ class TestAsyncConsulRegistryInit:
         with patch("isa_common.consul_client.consul.Consul"):
             from isa_common.consul_client import AsyncConsulRegistry
 
-            with patch("isa_common.consul_client.sys.platform", "darwin"), \
-                 patch(
-                     "isa_common.consul_client.socket.getaddrinfo",
-                     return_value=[
-                         (2, None, None, None, ("192.168.65.254", 0)),
-                     ],
-                 ), \
-                 patch.dict(
-                     "os.environ",
-                     {"SERVICE_HOST": "host.docker.internal"},
-                     clear=True,
-                 ):
+            with (
+                patch("isa_common.consul_client.sys.platform", "darwin"),
+                patch(
+                    "isa_common.consul_client.socket.getaddrinfo",
+                    return_value=[
+                        (2, None, None, None, ("192.168.65.254", 0)),
+                    ],
+                ),
+                patch.dict(
+                    "os.environ",
+                    {"SERVICE_HOST": "host.docker.internal"},
+                    clear=True,
+                ),
+            ):
                 registry = AsyncConsulRegistry(
                     service_name="test-service",
                     service_port=8080,
@@ -239,15 +247,14 @@ class TestAsyncConsulConfig:
     """Async KV store get/set."""
 
     async def test_get_config(self, async_consul_registry):
-        async_consul_registry._consul.kv.get.return_value = (
-            1, {"Value": b"hello"}
-        )
+        async_consul_registry._consul.kv.get.return_value = (1, {"Value": b"hello"})
         result = await async_consul_registry.get_config("key1")
         assert result == "hello"
 
     async def test_get_config_json(self, async_consul_registry):
         async_consul_registry._consul.kv.get.return_value = (
-            1, {"Value": json.dumps({"a": 1}).encode()}
+            1,
+            {"Value": json.dumps({"a": 1}).encode()},
         )
         result = await async_consul_registry.get_config("key1")
         assert result == {"a": 1}
@@ -268,10 +275,13 @@ class TestAsyncConsulConfig:
         assert result is True
 
     async def test_get_all_config(self, async_consul_registry):
-        async_consul_registry._consul.kv.get.return_value = (1, [
-            {"Key": "test-service/db_host", "Value": b"localhost"},
-            {"Key": "test-service/db_port", "Value": b"5432"},
-        ])
+        async_consul_registry._consul.kv.get.return_value = (
+            1,
+            [
+                {"Key": "test-service/db_host", "Value": b"localhost"},
+                {"Key": "test-service/db_port", "Value": b"5432"},
+            ],
+        )
         result = await async_consul_registry.get_all_config()
         assert result == {"db_host": "localhost", "db_port": 5432}
 
@@ -285,17 +295,20 @@ class TestAsyncConsulDiscovery:
     """Async service discovery."""
 
     async def test_discover_service(self, async_consul_registry):
-        async_consul_registry._consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "svc-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8080,
-                    "Tags": ["v1"],
-                    "Meta": {},
-                }
-            },
-        ])
+        async_consul_registry._consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "svc-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8080,
+                        "Tags": ["v1"],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
         instances = await async_consul_registry.discover_service("my-service")
         assert len(instances) == 1
         assert instances[0]["address"] == "10.0.0.1"
@@ -306,17 +319,20 @@ class TestAsyncConsulDiscovery:
         assert instances == []
 
     async def test_get_service_endpoint(self, async_consul_registry):
-        async_consul_registry._consul.health.service.return_value = (1, [
-            {
-                "Service": {
-                    "ID": "svc-1",
-                    "Address": "10.0.0.1",
-                    "Port": 8080,
-                    "Tags": [],
-                    "Meta": {},
-                }
-            },
-        ])
+        async_consul_registry._consul.health.service.return_value = (
+            1,
+            [
+                {
+                    "Service": {
+                        "ID": "svc-1",
+                        "Address": "10.0.0.1",
+                        "Port": 8080,
+                        "Tags": [],
+                        "Meta": {},
+                    }
+                },
+            ],
+        )
         result = await async_consul_registry.get_service_endpoint("my-service")
         assert result == "http://10.0.0.1:8080"
 
@@ -343,9 +359,11 @@ class TestConsulLifespanCompat:
 
     def test_consul_lifespan_importable(self):
         from isa_common import consul_lifespan
+
         assert callable(consul_lifespan)
 
     def test_old_consul_registry_still_exists(self):
         from isa_common import ConsulRegistry
+
         # Original sync class is still available
         assert ConsulRegistry is not None

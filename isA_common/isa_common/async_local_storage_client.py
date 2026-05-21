@@ -13,15 +13,15 @@ Features:
 - Multi-tenant path isolation
 """
 
-import os
-import json
 import asyncio
 import hashlib
+import json
 import mimetypes
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import List, Dict, Optional, AsyncIterator, Any
+import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import AsyncIterator, Dict, List, Optional
 
 import aiofiles
 import aiofiles.os
@@ -51,11 +51,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
     ENV_PREFIX = "LOCAL_STORAGE"
     TENANT_SEPARATOR = "-"  # user-{user_id}-{bucket}
 
-    def __init__(
-        self,
-        base_path: Optional[str] = None,
-        **kwargs
-    ):
+    def __init__(self, base_path: Optional[str] = None, **kwargs):
         """
         Initialize async local storage client.
 
@@ -69,7 +65,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         if base_path:
             self._base_path = Path(base_path)
         else:
-            default_path = os.getenv('LOCAL_STORAGE_PATH', '~/.isa_mcp/storage')
+            default_path = os.getenv("LOCAL_STORAGE_PATH", "~/.isa_mcp/storage")
             self._base_path = Path(default_path).expanduser()
 
         self._executor = ThreadPoolExecutor(max_workers=4)
@@ -89,20 +85,20 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         """Get user-specific storage path."""
         if self.user_id:
             # Sanitize user_id
-            safe_user_id = self.user_id.lower().replace('_', '-').replace('|', '-')
-            while '--' in safe_user_id:
-                safe_user_id = safe_user_id.replace('--', '-')
-            safe_user_id = safe_user_id.strip('-')
+            safe_user_id = self.user_id.lower().replace("_", "-").replace("|", "-")
+            while "--" in safe_user_id:
+                safe_user_id = safe_user_id.replace("--", "-")
+            safe_user_id = safe_user_id.strip("-")
             return self._base_path / f"user-{safe_user_id}"
         return self._base_path / "default"
 
     def _get_bucket_path(self, bucket_name: str) -> Path:
         """Get full path for a bucket."""
         # Sanitize bucket name
-        safe_bucket = bucket_name.lower().replace('_', '-')
-        while '--' in safe_bucket:
-            safe_bucket = safe_bucket.replace('--', '-')
-        safe_bucket = safe_bucket.strip('-')
+        safe_bucket = bucket_name.lower().replace("_", "-")
+        while "--" in safe_bucket:
+            safe_bucket = safe_bucket.replace("--", "-")
+        safe_bucket = safe_bucket.strip("-")
 
         return self._get_user_path() / safe_bucket
 
@@ -119,9 +115,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         try:
             object_path.resolve().relative_to(bucket_path.resolve())
         except ValueError:
-            raise ValueError(
-                f"Invalid object key '{object_key}': path traversal detected"
-            )
+            raise ValueError(f"Invalid object key '{object_key}': path traversal detected")
         return object_path
 
     def _get_metadata_path(self, object_path: Path) -> Path:
@@ -138,9 +132,9 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             await self._ensure_connected()
 
             # Check base path is writable
-            test_file = self._base_path / '.health_check'
-            async with aiofiles.open(test_file, 'w') as f:
-                await f.write('ok')
+            test_file = self._base_path / ".health_check"
+            async with aiofiles.open(test_file, "w") as f:
+                await f.write("ok")
             await aiofiles.os.remove(test_file)
 
             # Get storage stats
@@ -150,10 +144,10 @@ class AsyncLocalStorageClient(AsyncBaseClient):
                 bucket_count = len([d for d in user_path.iterdir() if d.is_dir()])
 
             return {
-                'healthy': True,
-                'storage_type': 'local_filesystem',
-                'base_path': str(self._base_path),
-                'user_buckets': bucket_count
+                "healthy": True,
+                "storage_type": "local_filesystem",
+                "base_path": str(self._base_path),
+                "user_buckets": bucket_count,
             }
 
         except Exception as e:
@@ -198,7 +192,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
                 return True
 
             # Check if empty (excluding metadata files)
-            contents = [f for f in bucket_path.iterdir() if not f.name.endswith('.meta.json')]
+            contents = [f for f in bucket_path.iterdir() if not f.name.endswith(".meta.json")]
             if contents:
                 self._logger.error(f"Bucket {bucket_name} is not empty")
                 return False
@@ -239,7 +233,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         object_key: str,
         data: bytes,
         content_type: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, str]] = None,
     ) -> Optional[str]:
         """
         Upload object to bucket.
@@ -266,7 +260,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             object_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Write object data
-            async with aiofiles.open(object_path, 'wb') as f:
+            async with aiofiles.open(object_path, "wb") as f:
                 await f.write(data)
 
             # Calculate ETag (MD5)
@@ -275,19 +269,19 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             # Guess content type if not provided
             if not content_type:
                 content_type, _ = mimetypes.guess_type(object_key)
-                content_type = content_type or 'application/octet-stream'
+                content_type = content_type or "application/octet-stream"
 
             # Write metadata
             meta = {
-                'content_type': content_type,
-                'size': len(data),
-                'etag': etag,
-                'last_modified': datetime.now(timezone.utc).isoformat(),
-                'metadata': metadata or {}
+                "content_type": content_type,
+                "size": len(data),
+                "etag": etag,
+                "last_modified": datetime.now(timezone.utc).isoformat(),
+                "metadata": metadata or {},
             }
 
             metadata_path = self._get_metadata_path(object_path)
-            async with aiofiles.open(metadata_path, 'w') as f:
+            async with aiofiles.open(metadata_path, "w") as f:
                 await f.write(json.dumps(meta, indent=2))
 
             return etag
@@ -295,11 +289,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "put object")
 
-    async def get_object(
-        self,
-        bucket_name: str,
-        object_key: str
-    ) -> Optional[bytes]:
+    async def get_object(self, bucket_name: str, object_key: str) -> Optional[bytes]:
         """
         Download object from bucket.
 
@@ -319,17 +309,14 @@ class AsyncLocalStorageClient(AsyncBaseClient):
                 self._logger.warning(f"Object not found: {bucket_name}/{object_key}")
                 return None
 
-            async with aiofiles.open(object_path, 'rb') as f:
+            async with aiofiles.open(object_path, "rb") as f:
                 return await f.read()
 
         except Exception as e:
             return self.handle_error(e, "get object")
 
     async def get_object_stream(
-        self,
-        bucket_name: str,
-        object_key: str,
-        chunk_size: int = 64 * 1024
+        self, bucket_name: str, object_key: str, chunk_size: int = 64 * 1024
     ) -> AsyncIterator[bytes]:
         """
         Stream object data.
@@ -350,7 +337,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             if not object_path.exists():
                 return
 
-            async with aiofiles.open(object_path, 'rb') as f:
+            async with aiofiles.open(object_path, "rb") as f:
                 while True:
                     chunk = await f.read(chunk_size)
                     if not chunk:
@@ -360,11 +347,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         except Exception as e:
             self.handle_error(e, "get object stream")
 
-    async def delete_object(
-        self,
-        bucket_name: str,
-        object_key: str
-    ) -> Optional[bool]:
+    async def delete_object(self, bucket_name: str, object_key: str) -> Optional[bool]:
         """Delete object from bucket."""
         try:
             await self._ensure_connected()
@@ -385,11 +368,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "delete object")
 
-    async def delete_objects(
-        self,
-        bucket_name: str,
-        object_keys: List[str]
-    ) -> Optional[int]:
+    async def delete_objects(self, bucket_name: str, object_keys: List[str]) -> Optional[int]:
         """Delete multiple objects."""
         try:
             await self._ensure_connected()
@@ -404,11 +383,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "delete objects")
 
-    async def object_exists(
-        self,
-        bucket_name: str,
-        object_key: str
-    ) -> bool:
+    async def object_exists(self, bucket_name: str, object_key: str) -> bool:
         """Check if object exists."""
         try:
             await self._ensure_connected()
@@ -420,11 +395,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             self.handle_error(e, "object exists")
             return False
 
-    async def get_object_info(
-        self,
-        bucket_name: str,
-        object_key: str
-    ) -> Optional[Dict]:
+    async def get_object_info(self, bucket_name: str, object_key: str) -> Optional[Dict]:
         """Get object metadata."""
         try:
             await self._ensure_connected()
@@ -437,7 +408,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
 
             # Read metadata file
             if metadata_path.exists():
-                async with aiofiles.open(metadata_path, 'r') as f:
+                async with aiofiles.open(metadata_path, "r") as f:
                     content = await f.read()
                     meta = json.loads(content)
             else:
@@ -445,30 +416,29 @@ class AsyncLocalStorageClient(AsyncBaseClient):
                 stat = object_path.stat()
                 content_type, _ = mimetypes.guess_type(object_key)
                 meta = {
-                    'content_type': content_type or 'application/octet-stream',
-                    'size': stat.st_size,
-                    'last_modified': datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                    'metadata': {}
+                    "content_type": content_type or "application/octet-stream",
+                    "size": stat.st_size,
+                    "last_modified": datetime.fromtimestamp(
+                        stat.st_mtime, timezone.utc
+                    ).isoformat(),
+                    "metadata": {},
                 }
 
             return {
-                'key': object_key,
-                'bucket': bucket_name,
-                'size': meta.get('size', 0),
-                'content_type': meta.get('content_type', 'application/octet-stream'),
-                'etag': meta.get('etag', ''),
-                'last_modified': meta.get('last_modified', ''),
-                'metadata': meta.get('metadata', {})
+                "key": object_key,
+                "bucket": bucket_name,
+                "size": meta.get("size", 0),
+                "content_type": meta.get("content_type", "application/octet-stream"),
+                "etag": meta.get("etag", ""),
+                "last_modified": meta.get("last_modified", ""),
+                "metadata": meta.get("metadata", {}),
             }
 
         except Exception as e:
             return self.handle_error(e, "get object info")
 
     async def list_objects(
-        self,
-        bucket_name: str,
-        prefix: str = '',
-        limit: int = 1000
+        self, bucket_name: str, prefix: str = "", limit: int = 1000
     ) -> List[Dict]:
         """
         List objects in bucket.
@@ -495,7 +465,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             for root, dirs, files in os.walk(bucket_path):
                 for filename in files:
                     # Skip metadata files
-                    if filename.endswith('.meta.json'):
+                    if filename.endswith(".meta.json"):
                         continue
 
                     file_path = Path(root) / filename
@@ -528,11 +498,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
     # ============================================
 
     async def copy_object(
-        self,
-        source_bucket: str,
-        source_key: str,
-        dest_bucket: str,
-        dest_key: str
+        self, source_bucket: str, source_key: str, dest_bucket: str, dest_key: str
     ) -> Optional[str]:
         """Copy object to new location."""
         try:
@@ -545,25 +511,19 @@ class AsyncLocalStorageClient(AsyncBaseClient):
 
             # Get source metadata
             source_info = await self.get_object_info(source_bucket, source_key)
-            metadata = source_info.get('metadata', {}) if source_info else {}
-            content_type = source_info.get('content_type') if source_info else None
+            metadata = source_info.get("metadata", {}) if source_info else {}
+            content_type = source_info.get("content_type") if source_info else None
 
             # Write to destination
             return await self.put_object(
-                dest_bucket, dest_key, data,
-                content_type=content_type,
-                metadata=metadata
+                dest_bucket, dest_key, data, content_type=content_type, metadata=metadata
             )
 
         except Exception as e:
             return self.handle_error(e, "copy object")
 
     async def move_object(
-        self,
-        source_bucket: str,
-        source_key: str,
-        dest_bucket: str,
-        dest_key: str
+        self, source_bucket: str, source_key: str, dest_bucket: str, dest_key: str
     ) -> Optional[str]:
         """Move object to new location."""
         try:
@@ -580,11 +540,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
     # ============================================
 
     async def get_presigned_url(
-        self,
-        bucket_name: str,
-        object_key: str,
-        expiry_seconds: int = 3600,
-        method: str = 'GET'
+        self, bucket_name: str, object_key: str, expiry_seconds: int = 3600, method: str = "GET"
     ) -> Optional[str]:
         """
         Get presigned URL for object.
@@ -597,7 +553,7 @@ class AsyncLocalStorageClient(AsyncBaseClient):
 
             object_path = self._get_object_path(bucket_name, object_key)
 
-            if method == 'GET' and not object_path.exists():
+            if method == "GET" and not object_path.exists():
                 return None
 
             # Return file:// URL
@@ -627,18 +583,18 @@ class AsyncLocalStorageClient(AsyncBaseClient):
                         bucket_count += 1
                         for root, dirs, files in os.walk(bucket_dir):
                             for filename in files:
-                                if not filename.endswith('.meta.json'):
+                                if not filename.endswith(".meta.json"):
                                     file_path = Path(root) / filename
                                     total_size += file_path.stat().st_size
                                     total_objects += 1
 
             return {
-                'base_path': str(self._base_path),
-                'user_path': str(user_path),
-                'bucket_count': bucket_count,
-                'total_objects': total_objects,
-                'total_size_bytes': total_size,
-                'total_size_mb': round(total_size / (1024 * 1024), 2)
+                "base_path": str(self._base_path),
+                "user_path": str(user_path),
+                "bucket_count": bucket_count,
+                "total_objects": total_objects,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
             }
 
         except Exception as e:
@@ -646,18 +602,18 @@ class AsyncLocalStorageClient(AsyncBaseClient):
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
         async with AsyncLocalStorageClient(
-            base_path='/tmp/isa_storage_test',
-            user_id='test_user'
+            base_path="/tmp/isa_storage_test", user_id="test_user"
         ) as client:
             # Health check
             health = await client.health_check()
             print(f"Health: {health}")
 
             # Create bucket
-            await client.create_bucket('test-bucket')
+            await client.create_bucket("test-bucket")
 
             # List buckets
             buckets = await client.list_buckets()
@@ -666,22 +622,24 @@ if __name__ == '__main__':
             # Put object
             data = b"Hello, World!"
             etag = await client.put_object(
-                'test-bucket', 'hello.txt', data,
-                content_type='text/plain',
-                metadata={'author': 'test'}
+                "test-bucket",
+                "hello.txt",
+                data,
+                content_type="text/plain",
+                metadata={"author": "test"},
             )
             print(f"Uploaded, ETag: {etag}")
 
             # Get object
-            retrieved = await client.get_object('test-bucket', 'hello.txt')
+            retrieved = await client.get_object("test-bucket", "hello.txt")
             print(f"Retrieved: {retrieved.decode()}")
 
             # Get object info
-            info = await client.get_object_info('test-bucket', 'hello.txt')
+            info = await client.get_object_info("test-bucket", "hello.txt")
             print(f"Info: {info}")
 
             # List objects
-            objects = await client.list_objects('test-bucket')
+            objects = await client.list_objects("test-bucket")
             print(f"Objects: {objects}")
 
             # Stats
@@ -689,7 +647,7 @@ if __name__ == '__main__':
             print(f"Stats: {stats}")
 
             # Cleanup
-            await client.delete_object('test-bucket', 'hello.txt')
-            await client.delete_bucket('test-bucket')
+            await client.delete_object("test-bucket", "hello.txt")
+            await client.delete_bucket("test-bucket")
 
     asyncio.run(main())

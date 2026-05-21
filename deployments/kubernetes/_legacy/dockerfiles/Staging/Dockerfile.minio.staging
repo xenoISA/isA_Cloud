@@ -33,10 +33,10 @@ MINIO_PID=$!
 if [ "${CONSUL_ENABLED}" = "true" ]; then
     echo "Waiting for MinIO to be ready..."
     sleep 5
-    
+
     echo "Registering service to Consul..."
     HOSTNAME=$(hostname)
-    
+
     # 注册 MinIO API 服务
     curl -X PUT "http://${CONSUL_HOST}:${CONSUL_PORT}/v1/agent/service/register" -d "{
         \"ID\": \"${SERVICE_NAME}-${HOSTNAME}\",
@@ -53,7 +53,7 @@ if [ "${CONSUL_ENABLED}" = "true" ]; then
             \"Timeout\": \"5s\"
         }
     }" || echo "Failed to register with Consul (will retry)"
-    
+
     echo "Service registered: ${SERVICE_NAME}-${HOSTNAME}"
 fi
 
@@ -68,6 +68,3 @@ RUN chmod +x /usr/local/bin/start-minio.sh
 EXPOSE 9000 9001
 
 CMD ["/usr/local/bin/start-minio.sh"]
-
-
-

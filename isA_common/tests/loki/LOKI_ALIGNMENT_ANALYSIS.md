@@ -102,4 +102,3 @@ The test script `test_loki_functional.sh` currently has **7 tests** covering:
 4. ⏳ Expand test coverage
 5. ⏳ Run comprehensive tests
 6. ⏳ Create Python examples
-

@@ -1,6 +1,6 @@
 """AsyncMQTTClient unit tests — mocked state, no infrastructure required."""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import AsyncMock, patch
 
 
 class TestMQTTConnection:
@@ -80,9 +80,7 @@ class TestMQTTPublish:
             mock_mqtt.__aexit__ = AsyncMock(return_value=None)
 
             with patch("isa_common.async_mqtt_client.aiomqtt.Client", return_value=mock_mqtt):
-                result = await mqtt_client.publish(
-                    session_id, "sensors/temp", b"22.5", qos=1
-                )
+                result = await mqtt_client.publish(session_id, "sensors/temp", b"22.5", qos=1)
                 assert result is not None
                 assert result.get("success") is True
 
@@ -135,8 +133,6 @@ class TestMQTTErrorHandling:
         mock_mqtt.__aenter__ = AsyncMock(side_effect=Exception("broker unreachable"))
 
         with patch("isa_common.async_mqtt_client.aiomqtt.Client", return_value=mock_mqtt):
-            result = await mqtt_client.publish(
-                "some_session", "topic", b"data"
-            )
+            result = await mqtt_client.publish("some_session", "topic", b"data")
 
         assert result is None

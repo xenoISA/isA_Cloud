@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import subprocess
 
-
 CATALOG_PATH = "/etc/iceberg/iceberg-catalog.properties"
 
 
@@ -64,9 +63,9 @@ def test_v2_iceberg_catalog_properties_correct(namespace: str, flink_jm_pod: str
     )
     body = out.stdout
 
-    assert "thrift://hive-metastore" in body, (
-        f"Iceberg catalog must reference HMS Thrift; got:\n{body}"
-    )
-    assert "s3a://" in body or "warehouse" in body.lower(), (
-        f"Iceberg catalog must declare an s3a:// warehouse; got:\n{body}"
-    )
+    assert (
+        "thrift://hive-metastore" in body
+    ), f"Iceberg catalog must reference HMS Thrift; got:\n{body}"
+    assert (
+        "s3a://" in body or "warehouse" in body.lower()
+    ), f"Iceberg catalog must declare an s3a:// warehouse; got:\n{body}"

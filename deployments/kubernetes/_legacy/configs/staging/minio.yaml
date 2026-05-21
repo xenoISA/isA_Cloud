@@ -29,6 +29,3 @@ logger:
     enabled: true
   file:
     enabled: false
-
-
-

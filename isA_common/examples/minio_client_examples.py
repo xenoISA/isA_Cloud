@@ -51,12 +51,12 @@ New in v0.1.6:
 Note: All operations include proper error handling and use context managers for resource cleanup.
 """
 
-import sys
 import argparse
 import io
 import json
+import sys
 from datetime import datetime
-from pathlib import Path
+
 from isa_common.consul_client import ConsulRegistry
 
 # Import the MinIOClient from isa_common
@@ -73,7 +73,7 @@ except ImportError:
     sys.exit(1)
 
 
-def example_01_health_check(host='localhost', port=50051):
+def example_01_health_check(host="localhost", port=50051):
     """
     Example 1: Health Check
 
@@ -83,19 +83,19 @@ def example_01_health_check(host='localhost', port=50051):
     print("Example 1: Service Health Check")
     print("=" * 80)
 
-    with MinIOClient(host=host, port=port, user_id='example-user') as client:
+    with MinIOClient(host=host, port=port, user_id="example-user") as client:
         health = client.health_check(detailed=True)
 
-        if health and health.get('healthy'):
-            print(f" Service is healthy!")
+        if health and health.get("healthy"):
+            print(" Service is healthy!")
             print(f"   Status: {health.get('status')}")
-            if health.get('details'):
+            if health.get("details"):
                 print(f"   Details: {health.get('details')}")
         else:
             print("L Service is not healthy")
 
 
-def example_02_bucket_lifecycle(host='localhost', port=50051):
+def example_02_bucket_lifecycle(host="localhost", port=50051):
     """
     Example 2: Bucket Create/Delete Lifecycle
 
@@ -105,13 +105,13 @@ def example_02_bucket_lifecycle(host='localhost', port=50051):
     print("Example 2: Bucket Create/Delete Lifecycle")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'example-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
         # Create bucket
-        result = client.create_bucket(bucket_name, organization_id='example-org')
-        if result and result.get('success'):
+        result = client.create_bucket(bucket_name, organization_id="example-org")
+        if result and result.get("success"):
             print(f" Bucket created: {result.get('bucket')}")
 
         # Check if bucket exists
@@ -121,7 +121,7 @@ def example_02_bucket_lifecycle(host='localhost', port=50051):
         # Get bucket info
         info = client.get_bucket_info(bucket_name)
         if info:
-            print(f" Bucket info:")
+            print(" Bucket info:")
             print(f"   Name: {info.get('name')}")
             print(f"   Owner: {info.get('owner_id')}")
             print(f"   Region: {info.get('region')}")
@@ -133,10 +133,10 @@ def example_02_bucket_lifecycle(host='localhost', port=50051):
         # Delete bucket
         success = client.delete_bucket(bucket_name)
         if success:
-            print(f" Bucket deleted successfully")
+            print(" Bucket deleted successfully")
 
 
-def example_03_bucket_policies(host='localhost', port=50051):
+def example_03_bucket_policies(host="localhost", port=50051):
     """
     Example 3: Bucket Policy Management
 
@@ -146,7 +146,7 @@ def example_03_bucket_policies(host='localhost', port=50051):
     print("Example 3: Bucket Policy Management")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'policy-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -156,12 +156,14 @@ def example_03_bucket_policies(host='localhost', port=50051):
         # Define a bucket policy (S3-compatible)
         policy = {
             "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": {"AWS": ["*"]},
-                "Action": ["s3:GetObject"],
-                "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
-            }]
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": ["*"]},
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{bucket_name}/*"],
+                }
+            ],
         }
 
         # Set bucket policy
@@ -183,7 +185,7 @@ def example_03_bucket_policies(host='localhost', port=50051):
         client.delete_bucket(bucket_name)
 
 
-def example_04_bucket_tags(host='localhost', port=50051):
+def example_04_bucket_tags(host="localhost", port=50051):
     """
     Example 4: Bucket Tagging
 
@@ -193,7 +195,7 @@ def example_04_bucket_tags(host='localhost', port=50051):
     print("Example 4: Bucket Tagging")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'tagged-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -205,7 +207,7 @@ def example_04_bucket_tags(host='localhost', port=50051):
             "Environment": "development",
             "Project": "isA-Platform",
             "Owner": "team-backend",
-            "CostCenter": "engineering"
+            "CostCenter": "engineering",
         }
 
         success = client.set_bucket_tags(bucket_name, tags)
@@ -215,7 +217,7 @@ def example_04_bucket_tags(host='localhost', port=50051):
         # Get bucket tags
         retrieved_tags = client.get_bucket_tags(bucket_name)
         if retrieved_tags:
-            print(f" Retrieved tags:")
+            print(" Retrieved tags:")
             for key, value in retrieved_tags.items():
                 print(f"   {key}: {value}")
 
@@ -228,7 +230,7 @@ def example_04_bucket_tags(host='localhost', port=50051):
         client.delete_bucket(bucket_name)
 
 
-def example_05_object_upload_download(host='localhost', port=50051):
+def example_05_object_upload_download(host="localhost", port=50051):
     """
     Example 5: Object Upload/Download
 
@@ -238,7 +240,7 @@ def example_05_object_upload_download(host='localhost', port=50051):
     print("Example 5: Object Upload/Download")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'data-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -246,7 +248,7 @@ def example_05_object_upload_download(host='localhost', port=50051):
         client.create_bucket(bucket_name)
 
         # Upload object (using convenience method)
-        object_key = 'documents/readme.txt'
+        object_key = "documents/readme.txt"
         content = f"Hello from MinIO!\nTimestamp: {datetime.now()}\n".encode()
 
         success = client.put_object(bucket_name, object_key, io.BytesIO(content), len(content))
@@ -256,7 +258,7 @@ def example_05_object_upload_download(host='localhost', port=50051):
         # Get object metadata
         metadata = client.get_object_metadata(bucket_name, object_key)
         if metadata:
-            print(f" Object metadata:")
+            print(" Object metadata:")
             print(f"   Size: {metadata['size']} bytes")
             print(f"   Content-Type: {metadata['content_type']}")
             print(f"   ETag: {metadata['etag']}")
@@ -271,7 +273,7 @@ def example_05_object_upload_download(host='localhost', port=50051):
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_06_upload_from_file(host='localhost', port=50051):
+def example_06_upload_from_file(host="localhost", port=50051):
     """
     Example 6: Object Upload from File
 
@@ -281,7 +283,7 @@ def example_06_upload_from_file(host='localhost', port=50051):
     print("Example 6: Object Upload from File")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'files-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -289,12 +291,12 @@ def example_06_upload_from_file(host='localhost', port=50051):
         client.create_bucket(bucket_name)
 
         # Create a temporary file
-        temp_file = '/tmp/minio_example_file.txt'
-        with open(temp_file, 'w') as f:
+        temp_file = "/tmp/minio_example_file.txt"
+        with open(temp_file, "w") as f:
             f.write(f"Example file content\nCreated at: {datetime.now()}\n")
 
         # Upload file
-        object_key = 'uploads/example_file.txt'
+        object_key = "uploads/example_file.txt"
         success = client.upload_file(bucket_name, object_key, temp_file)
         if success:
             print(f" File uploaded: {object_key}")
@@ -306,11 +308,12 @@ def example_06_upload_from_file(host='localhost', port=50051):
 
         # Cleanup
         import os
+
         os.remove(temp_file)
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_07_object_copy(host='localhost', port=50051):
+def example_07_object_copy(host="localhost", port=50051):
     """
     Example 7: Object Copy Operation
 
@@ -320,7 +323,7 @@ def example_07_object_copy(host='localhost', port=50051):
     print("Example 7: Object Copy Operation")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'copy-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -328,13 +331,13 @@ def example_07_object_copy(host='localhost', port=50051):
         client.create_bucket(bucket_name)
 
         # Upload source object
-        source_key = 'source/original.txt'
-        content = b'Original content to be copied'
+        source_key = "source/original.txt"
+        content = b"Original content to be copied"
         client.put_object(bucket_name, source_key, io.BytesIO(content), len(content))
         print(f" Source object uploaded: {source_key}")
 
         # Copy object
-        dest_key = 'destination/copy.txt'
+        dest_key = "destination/copy.txt"
         success = client.copy_object(bucket_name, dest_key, bucket_name, source_key)
         if success:
             print(f" Object copied: {source_key} -> {dest_key}")
@@ -349,7 +352,7 @@ def example_07_object_copy(host='localhost', port=50051):
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_08_list_delete_operations(host='localhost', port=50051):
+def example_08_list_delete_operations(host="localhost", port=50051):
     """
     Example 8: Object List/Delete Operations
 
@@ -359,7 +362,7 @@ def example_08_list_delete_operations(host='localhost', port=50051):
     print("Example 8: Object List/Delete Operations")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'list-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -369,15 +372,15 @@ def example_08_list_delete_operations(host='localhost', port=50051):
         # Upload multiple objects
         objects_to_create = []
         for i in range(5):
-            key = f'data/file-{i}.txt'
-            content = f'Content of file {i}'.encode()
+            key = f"data/file-{i}.txt"
+            content = f"Content of file {i}".encode()
             client.put_object(bucket_name, key, io.BytesIO(content), len(content))
             objects_to_create.append(key)
 
         print(f" Uploaded {len(objects_to_create)} objects")
 
         # List objects
-        objects = client.list_objects(bucket_name, prefix='data/')
+        objects = client.list_objects(bucket_name, prefix="data/")
         print(f" Found {len(objects)} objects with prefix 'data/':")
         for obj in objects:
             print(f"   - {obj['key']} ({obj['size']} bytes)")
@@ -400,7 +403,7 @@ def example_08_list_delete_operations(host='localhost', port=50051):
         client.delete_bucket(bucket_name)
 
 
-def example_09_presigned_urls(host='localhost', port=50051):
+def example_09_presigned_urls(host="localhost", port=50051):
     """
     Example 9: Presigned URL Generation
 
@@ -410,39 +413,39 @@ def example_09_presigned_urls(host='localhost', port=50051):
     print("Example 9: Presigned URL Generation")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'presigned-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
         # Create bucket and upload object
         client.create_bucket(bucket_name)
-        object_key = 'shared/document.pdf'
-        content = b'PDF document content...'
+        object_key = "shared/document.pdf"
+        content = b"PDF document content..."
         client.put_object(bucket_name, object_key, io.BytesIO(content), len(content))
 
         # Generate presigned GET URL (for download)
         get_url = client.get_presigned_url(bucket_name, object_key, expiry_seconds=3600)
         if get_url:
-            print(f" Presigned GET URL generated (expires in 1 hour)")
+            print(" Presigned GET URL generated (expires in 1 hour)")
             print(f"   URL: {get_url[:80]}...")
 
         # Generate presigned PUT URL (for upload)
-        upload_key = 'uploads/new_file.txt'
+        upload_key = "uploads/new_file.txt"
         put_url = client.get_presigned_put_url(bucket_name, upload_key, expiry_seconds=3600)
         if put_url:
-            print(f" Presigned PUT URL generated (expires in 1 hour)")
+            print(" Presigned PUT URL generated (expires in 1 hour)")
             print(f"   URL: {put_url[:80]}...")
 
         # Using the convenience method
-        url = client.generate_presigned_url(bucket_name, object_key, method='GET')
+        url = client.generate_presigned_url(bucket_name, object_key, method="GET")
         if url:
-            print(f" Generated URL using convenience method")
+            print(" Generated URL using convenience method")
 
         # Cleanup
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_10_object_tags(host='localhost', port=50051):
+def example_10_object_tags(host="localhost", port=50051):
     """
     Example 10: Object Metadata and Tags
 
@@ -452,7 +455,7 @@ def example_10_object_tags(host='localhost', port=50051):
     print("Example 10: Object Metadata and Tags")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'tagged-objects-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -460,24 +463,16 @@ def example_10_object_tags(host='localhost', port=50051):
         client.create_bucket(bucket_name)
 
         # Upload object with custom metadata
-        object_key = 'documents/report.pdf'
-        content = b'Report content...'
-        metadata = {
-            "x-amz-meta-author": "John Doe",
-            "x-amz-meta-department": "Engineering"
-        }
+        object_key = "documents/report.pdf"
+        content = b"Report content..."
+        metadata = {"x-amz-meta-author": "John Doe", "x-amz-meta-department": "Engineering"}
 
         result = client.upload_object(bucket_name, object_key, content, metadata=metadata)
         if result:
-            print(f" Object uploaded with custom metadata")
+            print(" Object uploaded with custom metadata")
 
         # Set object tags
-        tags = {
-            "Type": "Report",
-            "Status": "Final",
-            "Year": "2025",
-            "Confidential": "No"
-        }
+        tags = {"Type": "Report", "Status": "Final", "Year": "2025", "Confidential": "No"}
 
         success = client.set_object_tags(bucket_name, object_key, tags)
         if success:
@@ -486,7 +481,7 @@ def example_10_object_tags(host='localhost', port=50051):
         # Get object tags
         retrieved_tags = client.get_object_tags(bucket_name, object_key)
         if retrieved_tags:
-            print(f" Retrieved tags:")
+            print(" Retrieved tags:")
             for key, value in retrieved_tags.items():
                 print(f"   {key}: {value}")
 
@@ -499,7 +494,7 @@ def example_10_object_tags(host='localhost', port=50051):
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_11_large_file_upload(host='localhost', port=50051):
+def example_11_large_file_upload(host="localhost", port=50051):
     """
     Example 11: Large File Upload
 
@@ -509,7 +504,7 @@ def example_11_large_file_upload(host='localhost', port=50051):
     print("Example 11: Large File Upload (6MB)")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'large-files-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -522,16 +517,16 @@ def example_11_large_file_upload(host='localhost', port=50051):
         data = bytes([i % 256 for i in range(size)])
 
         # Upload large file
-        object_key = 'large/data.bin'
+        object_key = "large/data.bin"
         print(f"= Uploading {size/1024/1024:.1f}MB file...")
         success = client.put_object(bucket_name, object_key, io.BytesIO(data), len(data))
         if success:
-            print(f" Large file uploaded successfully")
+            print(" Large file uploaded successfully")
 
         # Verify size
         metadata = client.get_object_metadata(bucket_name, object_key)
         if metadata:
-            actual_size = metadata['size']
+            actual_size = metadata["size"]
             print(f" Verified: {actual_size/1024/1024:.2f}MB uploaded")
             print(f"   ETag: {metadata['etag']}")
 
@@ -539,7 +534,7 @@ def example_11_large_file_upload(host='localhost', port=50051):
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_12_bucket_versioning(host='localhost', port=50051):
+def example_12_bucket_versioning(host="localhost", port=50051):
     """
     Example 12: Bucket Versioning
 
@@ -550,7 +545,7 @@ def example_12_bucket_versioning(host='localhost', port=50051):
     print("Example 12: Bucket Versioning")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'versioned-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -567,9 +562,9 @@ def example_12_bucket_versioning(host='localhost', port=50051):
         print(f" Versioning status: {'Enabled' if is_enabled else 'Disabled'}")
 
         # Upload multiple versions of the same object
-        object_key = 'documents/version_test.txt'
+        object_key = "documents/version_test.txt"
         for version in range(3):
-            content = f'Version {version} content\nTimestamp: {datetime.now()}\n'.encode()
+            content = f"Version {version} content\nTimestamp: {datetime.now()}\n".encode()
             client.put_object(bucket_name, object_key, io.BytesIO(content), len(content))
             print(f" Uploaded version {version+1}")
 
@@ -585,7 +580,7 @@ def example_12_bucket_versioning(host='localhost', port=50051):
         client.delete_bucket(bucket_name, force=True)
 
 
-def example_13_bucket_lifecycle(host='localhost', port=50051):
+def example_13_bucket_lifecycle(host="localhost", port=50051):
     """
     Example 13: Bucket Lifecycle Policies
 
@@ -596,7 +591,7 @@ def example_13_bucket_lifecycle(host='localhost', port=50051):
     print("Example 13: Bucket Lifecycle Policies")
     print("=" * 80)
 
-    user_id = 'example-user'
+    user_id = "example-user"
     bucket_name = f'lifecycle-bucket-{datetime.now().strftime("%H%M%S")}'
 
     with MinIOClient(host=host, port=port, user_id=user_id) as client:
@@ -609,14 +604,14 @@ def example_13_bucket_lifecycle(host='localhost', port=50051):
                 "id": "delete-old-logs",
                 "status": "Enabled",
                 "expiration": {"days": 30},
-                "filter": {"prefix": "logs/"}
+                "filter": {"prefix": "logs/"},
             },
             {
                 "id": "archive-reports",
                 "status": "Enabled",
                 "expiration": {"days": 90},
-                "filter": {"prefix": "reports/"}
-            }
+                "filter": {"prefix": "reports/"},
+            },
         ]
 
         # Set lifecycle policy
@@ -643,7 +638,7 @@ def example_13_bucket_lifecycle(host='localhost', port=50051):
         client.delete_bucket(bucket_name)
 
 
-def run_all_examples(host='localhost', port=50051):
+def run_all_examples(host="localhost", port=50051):
     """Run all examples in sequence"""
     print("\n" + "=" * 80)
     print("  MinIO Client Usage Examples")
@@ -674,6 +669,7 @@ def run_all_examples(host='localhost', port=50051):
         except Exception as e:
             print(f"\nL Example {i} failed: {e}")
             import traceback
+
             traceback.print_exc()
 
     print("\n" + "=" * 80)
@@ -689,22 +685,34 @@ def run_all_examples(host='localhost', port=50051):
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description='MinIO Client Usage Examples',
+        description="MinIO Client Usage Examples",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument('--host', default=None,
-                       help='MinIO gRPC service host (optional, uses Consul discovery if not provided)')
-    parser.add_argument('--port', type=int, default=None,
-                       help='MinIO gRPC service port (optional, uses Consul discovery if not provided)')
-    parser.add_argument('--consul-host', default='localhost',
-                       help='Consul host (default: localhost)')
-    parser.add_argument('--consul-port', type=int, default=8500,
-                       help='Consul port (default: 8500)')
-    parser.add_argument('--use-consul', action='store_true',
-                       help='Use Consul for service discovery')
-    parser.add_argument('--example', type=int, choices=range(1, 14),
-                       help='Run specific example (1-13, default: all)')
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="MinIO gRPC service host (optional, uses Consul discovery if not provided)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="MinIO gRPC service port (optional, uses Consul discovery if not provided)",
+    )
+    parser.add_argument(
+        "--consul-host", default="localhost", help="Consul host (default: localhost)"
+    )
+    parser.add_argument("--consul-port", type=int, default=8500, help="Consul port (default: 8500)")
+    parser.add_argument(
+        "--use-consul", action="store_true", help="Use Consul for service discovery"
+    )
+    parser.add_argument(
+        "--example",
+        type=int,
+        choices=range(1, 14),
+        help="Run specific example (1-13, default: all)",
+    )
 
     args = parser.parse_args()
 
@@ -715,13 +723,15 @@ def main():
     if host is None or port is None:
         if not args.use_consul:
             try:
-                print(f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}...")
+                print(
+                    f"🔍 Attempting Consul discovery from {args.consul_host}:{args.consul_port}..."
+                )
                 consul = ConsulRegistry(consul_host=args.consul_host, consul_port=args.consul_port)
                 url = consul.get_minio_endpoint()
 
-                if '://' in url:
-                    url = url.split('://', 1)[1]
-                discovered_host, port_str = url.rsplit(':', 1)
+                if "://" in url:
+                    url = url.split("://", 1)[1]
+                discovered_host, port_str = url.rsplit(":", 1)
                 discovered_port = int(port_str)
 
                 host = host or discovered_host
@@ -729,10 +739,10 @@ def main():
                 print(f"✅ Discovered from Consul: {host}:{port}")
             except Exception as e:
                 print(f"⚠️  Consul discovery failed: {e}")
-                print(f"📍 Falling back to localhost...")
+                print("📍 Falling back to localhost...")
 
         # Fallback to defaults
-        host = host or 'localhost'
+        host = host or "localhost"
         port = port or 50051
 
     print(f"🔗 Connecting to MinIO at {host}:{port}\n")
@@ -760,5 +770,5 @@ def main():
         run_all_examples(host=args.host, port=args.port)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

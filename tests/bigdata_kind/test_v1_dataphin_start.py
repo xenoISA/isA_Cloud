@@ -66,6 +66,4 @@ def test_v1_dataphin_chart_present(namespace: str) -> None:
         text=True,
         check=True,
     )
-    assert int(out.stdout.strip() or "0") >= 1, (
-        "Dataphin Deployment present but no replicas Ready"
-    )
+    assert int(out.stdout.strip() or "0") >= 1, "Dataphin Deployment present but no replicas Ready"

@@ -1,8 +1,8 @@
 """Unit tests for AsyncLocalStorageClient — #119."""
-import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
+from unittest.mock import MagicMock
+
+import pytest
 
 # ============================================================================
 # L1 — Path helpers (pure logic, no I/O)
@@ -14,6 +14,7 @@ class TestGetUserPath:
 
     def test_with_user_id(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
+
         client = AsyncLocalStorageClient(
             base_path=str(tmp_path), user_id="test_user", lazy_connect=True
         )
@@ -21,14 +22,14 @@ class TestGetUserPath:
 
     def test_without_user_id(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), lazy_connect=True)
         # Default user_id is "default", but _get_user_path adds "user-" prefix
         assert client._get_user_path() == tmp_path / "user-default"
 
     def test_sanitizes_user_id(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
+
         client = AsyncLocalStorageClient(
             base_path=str(tmp_path), user_id="auth0|USER_123", lazy_connect=True
         )
@@ -43,17 +44,15 @@ class TestGetBucketPath:
 
     def test_basic_bucket(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         path = client._get_bucket_path("my_bucket")
         assert path.name == "my-bucket"
 
     def test_sanitizes_double_hyphens(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         path = client._get_bucket_path("my__bucket")
         assert "--" not in path.name
 
@@ -63,25 +62,22 @@ class TestGetObjectPath:
 
     def test_valid_object_key(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         path = client._get_object_path("bucket", "dir/file.txt")
         assert "dir/file.txt" in str(path) or "dir" in str(path)
 
     def test_path_traversal_blocked(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         with pytest.raises(ValueError, match="path traversal"):
             client._get_object_path("bucket", "../../etc/passwd")
 
     def test_path_traversal_dotdot_in_middle(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         with pytest.raises(ValueError, match="path traversal"):
             client._get_object_path("bucket", "a/../../etc/passwd")
 
@@ -91,9 +87,8 @@ class TestGetMetadataPath:
 
     def test_metadata_path(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
-        client = AsyncLocalStorageClient(
-            base_path=str(tmp_path), user_id="u1", lazy_connect=True
-        )
+
+        client = AsyncLocalStorageClient(base_path=str(tmp_path), user_id="u1", lazy_connect=True)
         obj_path = tmp_path / "file.txt"
         meta_path = client._get_metadata_path(obj_path)
         assert meta_path == tmp_path / "file.txt.meta.json"
@@ -109,10 +104,9 @@ class TestLocalStorageConnect:
 
     async def test_connect_creates_directory(self, tmp_path):
         from isa_common import AsyncLocalStorageClient
+
         base = tmp_path / "new_storage"
-        client = AsyncLocalStorageClient(
-            base_path=str(base), lazy_connect=True
-        )
+        client = AsyncLocalStorageClient(base_path=str(base), lazy_connect=True)
         client._connected = True
         await client._connect()
         assert base.exists()
@@ -125,9 +119,7 @@ class TestLocalStorageDisconnect:
         mock_executor = MagicMock()
         local_storage_client._executor = mock_executor
         await local_storage_client._disconnect()
-        mock_executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
         assert local_storage_client._executor is None
 
 
@@ -200,8 +192,7 @@ class TestLocalStorageObjectOps:
 
     async def test_get_object_info(self, local_storage_client):
         await local_storage_client.put_object(
-            "bucket", "file.txt", b"data",
-            content_type="text/plain", metadata={"author": "test"}
+            "bucket", "file.txt", b"data", content_type="text/plain", metadata={"author": "test"}
         )
         info = await local_storage_client.get_object_info("bucket", "file.txt")
         assert info is not None
@@ -239,7 +230,5 @@ class TestLocalStoragePresignedUrl:
 
     async def test_presigned_url_put_method(self, local_storage_client):
         await local_storage_client.create_bucket("bucket")
-        url = await local_storage_client.get_presigned_url(
-            "bucket", "new.txt", method="PUT"
-        )
+        url = await local_storage_client.get_presigned_url("bucket", "new.txt", method="PUT")
         assert url.startswith("file://")

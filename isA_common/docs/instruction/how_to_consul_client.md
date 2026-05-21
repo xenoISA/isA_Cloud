@@ -27,16 +27,16 @@ if registry.register():
 
     # 2. Discover other services
     instances = registry.discover_service('database-service')
-    
+
     # 3. Get service endpoint URL
     db_url = registry.get_service_endpoint('database-service')
-    
+
     # 4. Store configuration
     registry.set_config('database/url', 'postgresql://localhost:5432/db')
-    
+
     # 5. Retrieve configuration
     db_config = registry.get_config('database/url')
-    
+
     # 6. Deregister on shutdown
     registry.deregister()
 ```
@@ -59,13 +59,13 @@ class APIService:
             health_check_type='ttl',
             ttl_interval=30
         )
-        
+
         # Register service on startup
         self.registry.register()
-        
+
         # Auto-deregister on shutdown
         atexit.register(self.cleanup)
-        
+
     def connect_to_database(self):
         # Discover database service - ONE LINE
         db_url = self.registry.get_service_endpoint(
@@ -73,14 +73,14 @@ class APIService:
             strategy='health_weighted',
             fallback_url='localhost:5432'
         )
-        
+
         return f"postgresql://{db_url}/mydb"
-    
+
     def connect_to_cache(self):
         # Discover Redis with load balancing
         redis_url = self.registry.get_redis_url()
         return redis_url
-    
+
     def get_application_config(self):
         # Retrieve configuration from Consul KV
         return {
@@ -88,11 +88,11 @@ class APIService:
             'cache_ttl': self.registry.get_config('cache/ttl'),
             'feature_flags': self.registry.get_all_config('features/')
         }
-    
+
     def save_config(self, key, value):
         # Store configuration - ONE CALL
         return self.registry.set_config(key, value)
-    
+
     def discover_all_api_services(self):
         # Find all instances of this service (horizontal scaling)
         instances = self.registry.discover_service(self.registry.service_name)
@@ -100,7 +100,7 @@ class APIService:
             f"{inst['address']}:{inst['port']}"
             for inst in instances
         ]
-    
+
     def maintain_health(self):
         # Keep service healthy (TTL check)
         # This would be called periodically (e.g., every 15 seconds)
@@ -111,7 +111,7 @@ class APIService:
             )
         except Exception as e:
             print(f"Health check failed: {e}")
-    
+
     def cleanup(self):
         # Clean deregistration
         self.registry.deregister()
@@ -313,7 +313,7 @@ while True:
     try:
         # Do work...
         time.sleep(15)
-        
+
         # Update health check
         registry.consul.agent.check.ttl_pass(
             f"service:{registry.service_id}",
@@ -366,11 +366,11 @@ index = None
 while True:
     # Watch for changes
     index, data = consul_client.health.service('api-service', index=index)
-    
+
     print(f"Service instances changed:")
     for service in data:
         print(f"- {service['Service']['ID']}: {service['Checks'][0]['Status']}")
-    
+
     time.sleep(1)
 ```
 
@@ -428,18 +428,18 @@ try:
         check=consul.Check.ttl('30s'),
         meta={'version': '1.0.0'}
     )
-    
+
     print(f"Service registered: {service_id}")
-    
+
     # Discover service
     _, services = consul_client.health.service('database-service', passing=True)
-    
+
     if services:
         service = services[0]['Service']
         db_url = f"{service['Address']}:{service['Port']}"
     else:
         db_url = 'localhost:5432'  # fallback
-    
+
 except Exception as e:
     print(f"Error: {e}")
 finally:
@@ -586,4 +586,3 @@ The Consul client gives you:
 - **Type-safe** results (dicts, lists)
 
 Just pip install and focus on your microservices architecture and distributed systems!
-

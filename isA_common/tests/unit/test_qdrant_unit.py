@@ -1,5 +1,5 @@
 """AsyncQdrantClient unit tests — mocked qdrant-client, no infrastructure required."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -17,9 +17,7 @@ class TestQdrantConnection:
 
 class TestQdrantHealthCheck:
     async def test_health_check_success(self, qdrant_client):
-        qdrant_client._client.get_collections = AsyncMock(
-            return_value=MagicMock(collections=[])
-        )
+        qdrant_client._client.get_collections = AsyncMock(return_value=MagicMock(collections=[]))
 
         result = await qdrant_client.health_check()
 
@@ -72,11 +70,13 @@ class TestQdrantPointOps:
 
         result = await qdrant_client.upsert_points(
             "test_collection",
-            points=[{
-                "id": "point_1",
-                "vector": [0.1] * 768,
-                "payload": {"text": "hello"},
-            }]
+            points=[
+                {
+                    "id": "point_1",
+                    "vector": [0.1] * 768,
+                    "payload": {"text": "hello"},
+                }
+            ],
         )
 
         assert result is not None
@@ -107,31 +107,24 @@ class TestQdrantPointOps:
             side_effect=Exception("collection not found")
         )
 
-        result = await qdrant_client.search(
-            "nonexistent", vector=[0.1] * 768, limit=5
-        )
+        result = await qdrant_client.search("nonexistent", vector=[0.1] * 768, limit=5)
 
         assert result is None
 
 
 class TestQdrantErrorHandling:
     async def test_create_collection_error_returns_none(self, qdrant_client):
-        qdrant_client._client.create_collection = AsyncMock(
-            side_effect=Exception("already exists")
-        )
+        qdrant_client._client.create_collection = AsyncMock(side_effect=Exception("already exists"))
 
         result = await qdrant_client.create_collection("existing", vector_size=768)
 
         assert result is None
 
     async def test_upsert_error_returns_none(self, qdrant_client):
-        qdrant_client._client.upsert = AsyncMock(
-            side_effect=Exception("dimension mismatch")
-        )
+        qdrant_client._client.upsert = AsyncMock(side_effect=Exception("dimension mismatch"))
 
         result = await qdrant_client.upsert_points(
-            "test_collection",
-            points=[{"id": "p1", "vector": [0.1], "payload": {}}]
+            "test_collection", points=[{"id": "p1", "vector": [0.1], "payload": {}}]
         )
 
         assert result is None

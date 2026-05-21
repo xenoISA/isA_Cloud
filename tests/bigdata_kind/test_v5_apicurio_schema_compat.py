@@ -20,9 +20,6 @@ import json
 import urllib.error
 import urllib.request
 
-import pytest
-
-
 GROUP = "verify-pytest"
 ARTIFACT = "hello"
 
@@ -108,13 +105,9 @@ def test_v5_apicurio_schema_register_and_evolve(apicurio_forward) -> None:
         assert status in (200, 201), f"register v2 failed: {status} {body}"
 
         # 4. Fetch latest, assert label field present.
-        status, body = _http(
-            "GET", f"{base}/groups/{GROUP}/artifacts/{ARTIFACT}"
-        )
+        status, body = _http("GET", f"{base}/groups/{GROUP}/artifacts/{ARTIFACT}")
         assert status == 200, f"fetch latest failed: {status} {body}"
-        assert "label" in body, (
-            f"v2 fetched but did not include 'label' field; body:\n{body}"
-        )
+        assert "label" in body, f"v2 fetched but did not include 'label' field; body:\n{body}"
     finally:
         _delete_artifact(base)
 

@@ -13,7 +13,7 @@
 # - Monitoring (GetStatistics, GetDeviceMetrics)
 # - QoS Levels (0, 1, 2)
 # - Binary and JSON payloads
-# 
+#
 # Total: 15+ test cases covering 24 individual operations
 # Target Success Rate: 100%
 
@@ -115,7 +115,7 @@ try:
             print("FAIL: Connect failed")
         else:
             session_id = conn.get('session_id')
-            
+
             # Get connection status
             status = client.get_connection_status(session_id)
             if not status or not status.get('connected'):
@@ -139,7 +139,7 @@ EOF
     if echo "$RESPONSE" | grep -q "SESSION_ID:"; then
         SESSION_ID=$(echo "$RESPONSE" | grep "SESSION_ID:" | cut -d: -f2)
     fi
-    
+
     if echo "$RESPONSE" | grep -q "PASS"; then
         test_result 0
     else
@@ -161,7 +161,7 @@ try:
             print("FAIL: Connect failed")
         else:
             session_id = conn.get('session_id')
-            
+
             # Basic publish
             pub1 = client.publish(session_id, 'test/topic1', b'Hello MQTT', qos=1)
             if not pub1 or not pub1.get('success'):
@@ -211,7 +211,7 @@ try:
             print("FAIL: Connect failed")
         else:
             session_id = conn.get('session_id')
-            
+
             # Test all QoS levels
             for qos in [0, 1, 2]:
                 pub = client.publish(session_id, f'test/qos{qos}', f'QoS {qos} message'.encode(), qos=qos)
@@ -248,7 +248,7 @@ try:
             print("FAIL: Connect failed")
         else:
             session_id = conn.get('session_id')
-            
+
             # Set retained message
             if not client.set_retained_message('test/retained', b'Retained content', qos=1):
                 print("FAIL: Set retained message failed")
@@ -291,9 +291,9 @@ try:
     client = MQTTClient(host='${HOST}', port=${PORT}, user_id='${USER_ID}')
     with client:
         device_id = 'test-device-001'
-        
+
         # Register device
-        reg = client.register_device(device_id, 'Test Sensor', 'sensor', 
+        reg = client.register_device(device_id, 'Test Sensor', 'sensor',
                                      {'location': 'lab', 'model': 'TH100'})
         if not reg or not reg.get('success'):
             print("FAIL: Register device failed")
@@ -352,7 +352,7 @@ try:
                 session_id = conn.get('session_id')
                 client.publish(session_id, 'test/topic1', b'data', qos=1)
                 client.publish(session_id, 'test/topic2', b'data', qos=1)
-                
+
                 # Get topic info
                 info = client.get_topic_info('test/topic1')
                 if not info:
@@ -470,7 +470,7 @@ try:
                 pub = client.publish(session_id, 'test/bulk', f'Message {i}'.encode(), qos=0)
                 if pub and pub.get('success'):
                     success_count += 1
-            
+
             client.disconnect(session_id)
             if success_count == 50:
                 print("PASS: Bulk publishing successful")

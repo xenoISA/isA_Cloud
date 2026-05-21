@@ -22,9 +22,9 @@ Usage:
         ...
 """
 
-import os
 import logging
-from typing import Optional, Dict
+import os
+from typing import Dict, Optional
 
 logger = logging.getLogger("isa_common.tracing")
 
@@ -33,14 +33,15 @@ logger = logging.getLogger("isa_common.tracing")
 # =============================================================================
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+    from opentelemetry.baggage.propagation import W3CBaggagePropagator
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.propagate import set_global_textmap
     from opentelemetry.propagators.composite import CompositePropagator
+    from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.trace.propagation import TraceContextTextMapPropagator
-    from opentelemetry.baggage.propagation import W3CBaggagePropagator
+
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
@@ -54,6 +55,7 @@ def _instrument_fastapi(app) -> bool:
     """Auto-instrument FastAPI with OpenTelemetry."""
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
         FastAPIInstrumentor.instrument_app(
             app,
             excluded_urls="health,health/detailed,metrics,ready,live",
@@ -68,6 +70,7 @@ def _instrument_aiohttp() -> bool:
     """Auto-instrument aiohttp client sessions."""
     try:
         from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+
         AioHttpClientInstrumentor().instrument()
         return True
     except ImportError:
@@ -78,6 +81,7 @@ def _instrument_asyncpg() -> bool:
     """Auto-instrument asyncpg (PostgreSQL)."""
     try:
         from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+
         AsyncPGInstrumentor().instrument()
         return True
     except ImportError:
@@ -88,6 +92,7 @@ def _instrument_redis() -> bool:
     """Auto-instrument redis-py."""
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
+
         RedisInstrumentor().instrument()
         return True
     except ImportError:
@@ -98,6 +103,7 @@ def _instrument_httpx() -> bool:
     """Auto-instrument httpx client."""
     try:
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
         HTTPXClientInstrumentor().instrument()
         return True
     except ImportError:
@@ -227,10 +233,14 @@ def setup_tracing(
     trace.set_tracer_provider(provider)
 
     # Set up W3C trace context propagation
-    set_global_textmap(CompositePropagator([
-        TraceContextTextMapPropagator(),
-        W3CBaggagePropagator(),
-    ]))
+    set_global_textmap(
+        CompositePropagator(
+            [
+                TraceContextTextMapPropagator(),
+                W3CBaggagePropagator(),
+            ]
+        )
+    )
 
     # Get the tracer
     _tracer = trace.get_tracer(service_name, version)

@@ -6,7 +6,7 @@ Guards against stale/closed connection loops in consumers.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from nats.errors import ConnectionClosedError

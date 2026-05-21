@@ -1,6 +1,6 @@
 """AsyncMinIOClient unit tests — mocked aioboto3 session, no infrastructure required."""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import AsyncMock, MagicMock
 
 
 class TestMinIOConnection:
@@ -53,13 +53,15 @@ class TestMinIOBucketOps:
 
     async def test_list_buckets(self, minio_client):
         mock_s3 = AsyncMock()
-        mock_s3.list_buckets = AsyncMock(return_value={
-            "Buckets": [
-                {"Name": "user-test_user-bucket1"},
-                {"Name": "user-test_user-bucket2"},
-                {"Name": "other-user-bucket"},
-            ]
-        })
+        mock_s3.list_buckets = AsyncMock(
+            return_value={
+                "Buckets": [
+                    {"Name": "user-test_user-bucket1"},
+                    {"Name": "user-test_user-bucket2"},
+                    {"Name": "other-user-bucket"},
+                ]
+            }
+        )
         mock_s3.__aenter__ = AsyncMock(return_value=mock_s3)
         mock_s3.__aexit__ = AsyncMock(return_value=None)
         minio_client._session.client = MagicMock(return_value=mock_s3)
@@ -77,9 +79,7 @@ class TestMinIOObjectOps:
         mock_s3.__aexit__ = AsyncMock(return_value=None)
         minio_client._session.client = MagicMock(return_value=mock_s3)
 
-        result = await minio_client.upload_object(
-            "test-bucket", "test.txt", b"hello world"
-        )
+        result = await minio_client.upload_object("test-bucket", "test.txt", b"hello world")
 
         assert result is not None
 
@@ -117,9 +117,7 @@ class TestMinIOErrorHandling:
         mock_s3.__aexit__ = AsyncMock(return_value=None)
         minio_client._session.client = MagicMock(return_value=mock_s3)
 
-        result = await minio_client.upload_object(
-            "test-bucket", "test.txt", b"data"
-        )
+        result = await minio_client.upload_object("test-bucket", "test.txt", b"data")
 
         assert result is None
 

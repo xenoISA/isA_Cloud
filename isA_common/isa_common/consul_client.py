@@ -5,6 +5,7 @@ Provides service registration and health check functionality for microservices
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -12,8 +13,6 @@ import socket
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
-
-import ipaddress
 
 import consul
 
@@ -182,9 +181,7 @@ class ConsulRegistry:
 
             self.service_id = f"{service_name}-{self.service_host}-{service_port}"
         else:
-            self.service_host = service_host or os.getenv(
-                "HOSTNAME", socket.gethostname()
-            )
+            self.service_host = service_host or os.getenv("HOSTNAME", socket.gethostname())
             self.service_id = None  # No service ID for discovery-only mode
 
         self.tags = tags or []
@@ -343,9 +340,7 @@ class ConsulRegistry:
                 if retry_count > 0:
                     sleep_time = 5  # 有错误时5秒检查一次
                 else:
-                    sleep_time = (
-                        self.ttl_interval / 2 if self.health_check_type == "ttl" else 30
-                    )
+                    sleep_time = self.ttl_interval / 2 if self.health_check_type == "ttl" else 30
 
                 await asyncio.sleep(sleep_time)
 
@@ -503,9 +498,7 @@ class ConsulRegistry:
     def _select_best_instance(self, instances: List[Dict[str, Any]]) -> Dict[str, Any]:
         """选择最佳实例（基于健康状态和负载）"""
         # 简单实现：优先选择标签包含'preferred'的实例
-        preferred_instances = [
-            inst for inst in instances if "preferred" in inst.get("tags", [])
-        ]
+        preferred_instances = [inst for inst in instances if "preferred" in inst.get("tags", [])]
         if preferred_instances:
             import random
 
@@ -532,9 +525,7 @@ class ConsulRegistry:
 
         return instances[counter]
 
-    def _log_service_metrics(
-        self, operation: str, success: bool, service_name: str = None
-    ):
+    def _log_service_metrics(self, operation: str, success: bool, service_name: str = None):
         """记录服务操作指标"""
         service = service_name or self.service_name
         status = "SUCCESS" if success else "FAILED"
@@ -573,9 +564,7 @@ class ConsulRegistry:
             try:
                 endpoint = self.get_service_endpoint(service_name)
                 if endpoint:
-                    logger.debug(
-                        f"Discovered {service_name} at {endpoint} (attempt {attempt + 1})"
-                    )
+                    logger.debug(f"Discovered {service_name} at {endpoint} (attempt {attempt + 1})")
                     return endpoint
 
                 # 如果没找到服务但没有异常，记录并继续
@@ -798,9 +787,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
                 )
             self.service_id = f"{service_name}-{self.service_host}-{service_port}"
         else:
-            self.service_host = service_host or os.getenv(
-                "HOSTNAME", socket.gethostname()
-            )
+            self.service_host = service_host or os.getenv("HOSTNAME", socket.gethostname())
             self.service_id = None
 
     # ------------------------------------------------------------------
@@ -883,9 +870,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
     async def deregister(self) -> bool:
         try:
             await self._ensure_connected()
-            await asyncio.to_thread(
-                self._consul.agent.service.deregister, self.service_id
-            )
+            await asyncio.to_thread(self._consul.agent.service.deregister, self.service_id)
             logger.info(f"✅ Service deregistered: {self.service_id}")
             return True
         except Exception as e:
@@ -903,9 +888,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
                     and info["Port"] == self.service_port
                     and sid != self.service_id
                 ):
-                    await asyncio.to_thread(
-                        self._consul.agent.service.deregister, sid
-                    )
+                    await asyncio.to_thread(self._consul.agent.service.deregister, sid)
                     removed += 1
             return removed
         except Exception as e:
@@ -936,7 +919,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
                             f"Healthy - {self.service_name}",
                         )
                         retry_count = 0
-                    except Exception as e:
+                    except Exception:
                         retry_count += 1
                         if retry_count >= max_retries:
                             await self.register()
@@ -950,7 +933,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception:
                 retry_count += 1
                 await asyncio.sleep(min(10 * (2 ** (retry_count - 1)), 60))
 
@@ -998,9 +981,7 @@ class AsyncConsulRegistry(AsyncBaseClient):
         try:
             await self._ensure_connected()
             prefix = f"{self.service_name}/"
-            _, data = await asyncio.to_thread(
-                self._consul.kv.get, prefix, recurse=True
-            )
+            _, data = await asyncio.to_thread(self._consul.kv.get, prefix, recurse=True)
             if not data:
                 return {}
             config = {}
@@ -1145,9 +1126,7 @@ async def consul_lifespan(
         # Store in app state for access in routes
         app.state.consul_registry = registry
     else:
-        logger.warning(
-            "Failed to register with Consul, continuing without service discovery"
-        )
+        logger.warning("Failed to register with Consul, continuing without service discovery")
 
     yield
 

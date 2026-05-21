@@ -8,18 +8,18 @@ calls/day). Quota state lives in Redis; a quota value of ``-1`` (Enterprise
 tier) means unlimited and short-circuits to a no-op.
 """
 
-import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+import pytest_asyncio
+
 from isa_common.quota_enforcer import (
+    UNLIMITED,
     QuotaEnforcer,
+    QuotaExceededError,
     QuotaType,
     TierQuota,
-    QuotaExceededError,
-    UNLIMITED,
 )
-
 
 # ============================================================================
 # Fixtures
@@ -179,9 +179,7 @@ class TestUnlimitedNoop:
         assert decision.unlimited is True
         redis_client._client.incrby.assert_not_called()
 
-    async def test_single_unlimited_quota_is_noop_even_on_free_named_tier(
-        self, redis_client
-    ):
+    async def test_single_unlimited_quota_is_noop_even_on_free_named_tier(self, redis_client):
         """A -1 on any individual quota disables only that quota."""
         tier = TierQuota(
             tier="pro",
@@ -529,9 +527,7 @@ class TestRayWorkerConcurrency:
 
 
 class TestPartialConsumption:
-    async def test_consume_partial_returns_granted_amount_when_short(
-        self, redis_client
-    ):
+    async def test_consume_partial_returns_granted_amount_when_short(self, redis_client):
         """When only part of the requested amount fits, grant what's available."""
         # script returns [allowed, granted, new_total, limit]
         redis_client._client.eval = AsyncMock(return_value=[1, 300, 10_000, 10_000])
@@ -623,9 +619,7 @@ class TestRedisFailureResilience:
         assert decision.allowed is False
         assert decision.degraded is True
 
-    async def test_consume_partial_degrades_gracefully_on_redis_error(
-        self, redis_client
-    ):
+    async def test_consume_partial_degrades_gracefully_on_redis_error(self, redis_client):
         """Mid-operation Redis failure yields a partial result, not a crash."""
         redis_client._client.eval = AsyncMock(side_effect=ConnectionError("down"))
         enforcer = QuotaEnforcer(redis_client, fail_open=True)

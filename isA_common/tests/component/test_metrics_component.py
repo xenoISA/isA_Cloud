@@ -1,7 +1,6 @@
 """L2 Component tests for isa_common.metrics — real middleware with TestClient."""
 
 import pytest
-from unittest.mock import MagicMock
 
 try:
     from prometheus_client import CollectorRegistry
@@ -38,11 +37,13 @@ def metrics_app():
     async def health(request):
         return PlainTextResponse("healthy")
 
-    app = Starlette(routes=[
-        Route("/", homepage),
-        Route("/api/users", users),
-        Route("/health", health),
-    ])
+    app = Starlette(
+        routes=[
+            Route("/", homepage),
+            Route("/api/users", users),
+            Route("/health", health),
+        ]
+    )
 
     m.setup_metrics(app, service_name="test_component", registry=registry)
 

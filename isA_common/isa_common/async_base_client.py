@@ -11,10 +11,10 @@ Provides standardized patterns for:
 - Multi-tenant isolation helpers
 """
 
-import os
 import logging
+import os
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 
 class AsyncBaseClient(ABC):
@@ -61,7 +61,7 @@ class AsyncBaseClient(ABC):
         user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         lazy_connect: bool = True,
-        **kwargs  # Accept additional kwargs for compatibility
+        **kwargs,  # Accept additional kwargs for compatibility
     ):
         """
         Initialize async client with standardized configuration.
@@ -74,10 +74,10 @@ class AsyncBaseClient(ABC):
             lazy_connect: Delay connection until first use (default: True)
             **kwargs: Additional arguments for subclass compatibility
         """
-        self._host = host or os.getenv(f'{self.ENV_PREFIX}_HOST', self.DEFAULT_HOST)
-        self._port = port or int(os.getenv(f'{self.ENV_PREFIX}_PORT', str(self.DEFAULT_PORT)))
-        self.user_id = user_id or 'default'
-        self.organization_id = organization_id or 'default-org'
+        self._host = host or os.getenv(f"{self.ENV_PREFIX}_HOST", self.DEFAULT_HOST)
+        self._port = port or int(os.getenv(f"{self.ENV_PREFIX}_PORT", str(self.DEFAULT_PORT)))
+        self.user_id = user_id or "default"
+        self.organization_id = organization_id or "default-org"
         self._connected = False
 
         # Setup logger
@@ -233,7 +233,7 @@ class AsyncBaseClient(ABC):
             Key without prefix
         """
         prefix = self._get_key_prefix()
-        return key[len(prefix):] if key.startswith(prefix) else key
+        return key[len(prefix) :] if key.startswith(prefix) else key
 
     # ============================================
     # Properties

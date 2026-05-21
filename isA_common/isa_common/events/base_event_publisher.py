@@ -6,12 +6,11 @@ Base Event Publisher
 Generic event publisher that can be extended for business-specific needs.
 """
 
-import json
-import logging
 import asyncio
+import logging
 import warnings
-from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
+from typing import Dict, Optional
 
 from ..nats_client import NATSClient
 from .base_event_models import BaseEvent
@@ -128,18 +127,15 @@ class BaseEventPublisher(ABC):
             JSON bytes ready for NATS
         """
         # Set source service in metadata if not already set
-        if hasattr(event, 'metadata') and event.metadata.source_service is None:
+        if hasattr(event, "metadata") and event.metadata.source_service is None:
             event.metadata.source_service = self.service_name()
 
         # Use Pydantic's JSON serialization with custom encoders
         json_str = event.model_dump_json()
-        return json_str.encode('utf-8')
+        return json_str.encode("utf-8")
 
     async def publish_event(
-        self,
-        event: BaseEvent,
-        subject: str,
-        headers: Optional[Dict[str, str]] = None
+        self, event: BaseEvent, subject: str, headers: Optional[Dict[str, str]] = None
     ) -> bool:
         """
         Publish an event to NATS.
@@ -159,39 +155,30 @@ class BaseEventPublisher(ABC):
             # Add event type to headers
             if headers is None:
                 headers = {}
-            headers['event_type'] = event.event_type
+            headers["event_type"] = event.event_type
 
             # Publish to NATS
-            result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers=headers
-            )
+            result = await self.nats_client.publish(subject=subject, data=data, headers=headers)
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(
                     f"[{self.service_name()}] Published event: {event.event_type} "
                     f"to subject: {subject}"
                 )
                 return True
             else:
-                logger.error(
-                    f"[{self.service_name()}] Failed to publish event: {result}"
-                )
+                logger.error(f"[{self.service_name()}] Failed to publish event: {result}")
                 return False
 
         except Exception as e:
             logger.error(
                 f"[{self.service_name()}] Error publishing event {event.event_type}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             return False
 
     async def publish_raw(
-        self,
-        subject: str,
-        data: bytes,
-        headers: Optional[Dict[str, str]] = None
+        self, subject: str, data: bytes, headers: Optional[Dict[str, str]] = None
     ) -> bool:
         """
         Publish raw data to NATS (for advanced use cases).
@@ -205,13 +192,9 @@ class BaseEventPublisher(ABC):
             True if published successfully
         """
         try:
-            result = await self.nats_client.publish(
-                subject=subject,
-                data=data,
-                headers=headers
-            )
+            result = await self.nats_client.publish(subject=subject, data=data, headers=headers)
 
-            if result and result.get('success'):
+            if result and result.get("success"):
                 logger.info(f"[{self.service_name()}] Published to subject: {subject}")
                 return True
             else:
@@ -220,7 +203,6 @@ class BaseEventPublisher(ABC):
 
         except Exception as e:
             logger.error(
-                f"[{self.service_name()}] Error publishing to {subject}: {e}",
-                exc_info=True
+                f"[{self.service_name()}] Error publishing to {subject}: {e}", exc_info=True
             )
             return False

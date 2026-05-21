@@ -6,17 +6,18 @@ L2 Component: redis and postgres backends (mocked clients)
 """
 
 import json
+from datetime import timezone
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from isa_common.events.base_event_subscriber import IdempotencyChecker
-
 
 # =============================================================================
 # L1 Unit — Memory backend (no I/O)
 # =============================================================================
+
 
 class TestIdempotencyMemoryBackend:
     """Tests for the in-memory idempotency backend."""
@@ -68,6 +69,7 @@ class TestIdempotencyMemoryBackend:
 # L2 Component — Redis backend (mocked client)
 # =============================================================================
 
+
 class TestIdempotencyRedisBackend:
     """Tests for the Redis idempotency backend with mocked AsyncRedisClient."""
 
@@ -118,6 +120,7 @@ class TestIdempotencyRedisBackend:
 # =============================================================================
 # L2 Component — PostgreSQL backend (mocked client)
 # =============================================================================
+
 
 class TestIdempotencyPostgresBackend:
     """Tests for the PostgreSQL idempotency backend with mocked AsyncPostgresClient."""

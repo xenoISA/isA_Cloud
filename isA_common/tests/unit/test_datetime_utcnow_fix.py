@@ -1,8 +1,8 @@
 """Unit tests for #120 — verify datetime.utcnow() is replaced with timezone-aware datetime."""
-import ast
-import pytest
-from datetime import timezone
+
 from pathlib import Path
+
+import pytest
 
 # Resolve paths relative to the isa_common package root
 _PKG_ROOT = Path(__file__).resolve().parents[2] / "isa_common"
@@ -21,9 +21,9 @@ class TestNoDeprecatedDatetime:
     def test_no_utcnow_calls(self, filepath):
         """Files must not contain datetime.utcnow() calls."""
         source = filepath.read_text()
-        assert "datetime.utcnow()" not in source, (
-            f"{filepath.name} still contains deprecated datetime.utcnow()"
-        )
+        assert (
+            "datetime.utcnow()" not in source
+        ), f"{filepath.name} still contains deprecated datetime.utcnow()"
 
     @pytest.mark.parametrize("filepath", FILES_TO_CHECK, ids=lambda p: p.name)
     def test_no_utcnow_references(self, filepath):
@@ -32,9 +32,7 @@ class TestNoDeprecatedDatetime:
         lines = source.splitlines()
         for i, line in enumerate(lines, 1):
             if "utcnow" in line:
-                pytest.fail(
-                    f"{filepath.name}:{i} still references utcnow: {line.strip()}"
-                )
+                pytest.fail(f"{filepath.name}:{i} still references utcnow: {line.strip()}")
 
 
 class TestEventModelsTimezoneAware:
@@ -47,8 +45,9 @@ class TestEventModelsTimezoneAware:
         assert meta.timestamp.tzinfo is not None, "EventMetadata.timestamp must be timezone-aware"
 
     def test_usage_event_has_timezone(self):
-        from isa_common.events.billing_events import UsageEvent, UnitType
         from decimal import Decimal
+
+        from isa_common.events.billing_events import UnitType, UsageEvent
 
         event = UsageEvent(
             user_id="u1",
@@ -59,8 +58,9 @@ class TestEventModelsTimezoneAware:
         assert event.timestamp.tzinfo is not None, "UsageEvent.timestamp must be timezone-aware"
 
     def test_billing_calculated_event_has_timezone(self):
-        from isa_common.events.billing_events import BillingCalculatedEvent, UnitType
         from decimal import Decimal
+
+        from isa_common.events.billing_events import BillingCalculatedEvent, UnitType
 
         event = BillingCalculatedEvent(
             user_id="u1",

@@ -79,4 +79,3 @@ client, _ := loki.NewClient(cfg)
 - [MQTT SDK 文档](../../pkg/infrastructure/messaging/mqtt/README.md)
 - [使用示例](../../examples/README.md)
 - [统一基础设施 SDK](../../docs/UNIFIED_INFRASTRUCTURE_SDK.md)
-

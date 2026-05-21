@@ -409,8 +409,7 @@ class QuotaEnforcer:
     ) -> str:
         """A clear block message with the reset window and an upgrade hint."""
         msg = (
-            f"Quota exceeded for '{quota_type.value}' on the {tier} tier "
-            f"({used}/{limit} used)."
+            f"Quota exceeded for '{quota_type.value}' on the {tier} tier " f"({used}/{limit} used)."
         )
         if quota_type.is_concurrency:
             msg += " The limit frees up when a worker slot is released."

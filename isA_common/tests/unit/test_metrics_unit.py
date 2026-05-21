@@ -1,16 +1,17 @@
 """Prometheus metrics client unit tests — no infrastructure required."""
+
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 try:
     from prometheus_client import CollectorRegistry
+
     _HAS_PROMETHEUS = True
 except ImportError:
     _HAS_PROMETHEUS = False
 
-pytestmark = pytest.mark.skipif(
-    not _HAS_PROMETHEUS, reason="prometheus_client not installed"
-)
+pytestmark = pytest.mark.skipif(not _HAS_PROMETHEUS, reason="prometheus_client not installed")
 
 
 # ============================================================================
@@ -160,7 +161,7 @@ class TestBucketConfigs:
         assert SLOW_BUCKETS[-1] >= 60  # Should cover long operations
 
     def test_fast_smaller_than_default(self):
-        from isa_common.metrics import FAST_BUCKETS, DEFAULT_BUCKETS
+        from isa_common.metrics import DEFAULT_BUCKETS, FAST_BUCKETS
 
         assert FAST_BUCKETS[-1] <= DEFAULT_BUCKETS[-1]
 
@@ -245,8 +246,8 @@ class TestCreateGauge:
             m._service_name, m._registry = old_svc, old_reg
 
     def test_gauge_set_and_read(self):
+
         import isa_common.metrics as m
-        from prometheus_client import REGISTRY
 
         registry = CollectorRegistry()
         old_svc, old_reg = m._service_name, m._registry
@@ -424,8 +425,8 @@ class TestMetricsText:
             m._registry = old_reg
 
     def test_contains_registered_metric(self):
+
         import isa_common.metrics as m
-        from prometheus_client import Counter
 
         registry = CollectorRegistry()
         old_svc, old_reg = m._service_name, m._registry

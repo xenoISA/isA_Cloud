@@ -51,6 +51,3 @@ tls_ca: ""                                     # CA 证书路径
 #   ISA_CLOUD_REDIS_PORT
 #   ISA_CLOUD_REDIS_PASSWORD
 #   ISA_CLOUD_REDIS_DATABASE
-
-
-

@@ -6,15 +6,17 @@ pricing, reservations, and reporting remain API-driven.
 """
 
 import re
-from enum import Enum
-from typing import Optional, Dict, Any, Iterable, List
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
+from typing import Any, Dict, Iterable, List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class EventType(str, Enum):
     """Event types for the billing system."""
+
     USAGE_RECORDED = "billing.usage.recorded"
     LEGACY_USAGE_RECORDED = "usage.recorded"
 
@@ -32,6 +34,7 @@ class EventType(str, Enum):
 
 class UnitType(str, Enum):
     """Unit types for different services."""
+
     TOKEN = "token"
     IMAGE = "image"
     MINUTE = "minute"
@@ -50,18 +53,21 @@ class UnitType(str, Enum):
 
 class BillingAccountType(str, Enum):
     """Canonical payer types."""
+
     USER = "user"
     ORGANIZATION = "organization"
 
 
 class BillingSurface(str, Enum):
     """Customer-facing abstraction for a billing event."""
+
     ABSTRACT_SERVICE = "abstract_service"
     ADD_ON = "add_on"
 
 
 class CostComponentType(str, Enum):
     """Underlying component classes bundled into an abstract service."""
+
     RUNTIME = "runtime"
     TOKEN_COMPUTE = "token_compute"
     STORAGE = "storage"
@@ -71,10 +77,9 @@ class CostComponentType(str, Enum):
 
 class CostComponent(BaseModel):
     """Underlying resource or external API component for a usage event."""
+
     component_id: str = Field(..., description="Stable component identifier")
-    component_type: CostComponentType = Field(
-        ..., description="Underlying resource or API class"
-    )
+    component_type: CostComponentType = Field(..., description="Underlying resource or API class")
     bundled: bool = Field(
         default=True,
         description="Whether the component is bundled into the abstract service price",
@@ -106,6 +111,7 @@ class CostComponent(BaseModel):
 # Usage Events (Source: isA_Model, isA_Agent)
 # ====================
 
+
 class UsageEvent(BaseModel):
     """
     Published when any service uses a billable resource.
@@ -118,6 +124,7 @@ class UsageEvent(BaseModel):
 
     Canonical NATS subject family: `billing.usage.recorded.>`
     """
+
     event_type: str = Field(default=EventType.USAGE_RECORDED.value)
     event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
     schema_version: str = Field(default="1.0", description="Billing usage event schema version")
@@ -128,9 +135,7 @@ class UsageEvent(BaseModel):
     billing_account_type: Optional[BillingAccountType] = Field(
         None, description="Canonical payer type"
     )
-    billing_account_id: Optional[str] = Field(
-        None, description="Canonical payer identifier"
-    )
+    billing_account_id: Optional[str] = Field(None, description="Canonical payer identifier")
     organization_id: Optional[str] = Field(None, description="Organization context")
     agent_id: Optional[str] = Field(None, description="Agent that executed the work")
     subscription_id: Optional[str] = Field(None, description="Active subscription")
@@ -140,7 +145,9 @@ class UsageEvent(BaseModel):
     service_type: Optional[str] = Field(None, description="Canonical service category")
     operation_type: Optional[str] = Field(None, description="Canonical operation type")
     source_service: Optional[str] = Field(None, description="Originating service name")
-    resource_name: Optional[str] = Field(None, description="Resource name within the source service")
+    resource_name: Optional[str] = Field(
+        None, description="Resource name within the source service"
+    )
     meter_type: Optional[str] = Field(None, description="Billing meter type")
     usage_amount: Decimal = Field(..., description="Amount used in native units")
     unit_type: UnitType = Field(..., description="Unit type (token, image, etc)")
@@ -168,15 +175,13 @@ class UsageEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}
 
 
 # ====================
 # Billing Events (Source: billing_service)
 # ====================
+
 
 class BillingCalculatedEvent(BaseModel):
     """
@@ -187,6 +192,7 @@ class BillingCalculatedEvent(BaseModel):
 
     NATS Subject: billing.calculated
     """
+
     event_type: str = EventType.COST_CALCULATED
     event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
@@ -207,8 +213,7 @@ class BillingCalculatedEvent(BaseModel):
 
     # Token conversion rate
     token_conversion_rate: Decimal = Field(
-        ...,
-        description="How many tokens this represents (e.g., 1 image = 1333 tokens)"
+        ..., description="How many tokens this represents (e.g., 1 image = 1333 tokens)"
     )
 
     # Billing status
@@ -218,10 +223,7 @@ class BillingCalculatedEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}
 
 
 class BillingErrorEvent(BaseModel):
@@ -233,6 +235,7 @@ class BillingErrorEvent(BaseModel):
 
     NATS Subject: billing.failed
     """
+
     event_type: str = EventType.BILLING_FAILED
     event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
@@ -247,14 +250,13 @@ class BillingErrorEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 # ====================
 # Wallet Events (Source: wallet_service)
 # ====================
+
 
 class TokensDeductedEvent(BaseModel):
     """
@@ -265,6 +267,7 @@ class TokensDeductedEvent(BaseModel):
 
     NATS Subject: wallet.tokens.deducted
     """
+
     event_type: str = EventType.TOKENS_DEDUCTED
     event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
@@ -286,10 +289,7 @@ class TokensDeductedEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}
 
 
 class TokensInsufficientEvent(BaseModel):
@@ -301,6 +301,7 @@ class TokensInsufficientEvent(BaseModel):
 
     NATS Subject: wallet.tokens.insufficient
     """
+
     event_type: str = EventType.TOKENS_INSUFFICIENT
     event_id: str = Field(default_factory=lambda: f"evt_{datetime.now(timezone.utc).timestamp()}")
 
@@ -316,22 +317,16 @@ class TokensInsufficientEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {Decimal: lambda v: float(v), datetime: lambda v: v.isoformat()}
 
 
 # ====================
 # Helper Functions
 # ====================
 
+
 def create_usage_event(
-    user_id: str,
-    product_id: str,
-    usage_amount: Decimal,
-    unit_type: UnitType,
-    **kwargs
+    user_id: str, product_id: str, usage_amount: Decimal, unit_type: UnitType, **kwargs
 ) -> UsageEvent:
     """
     Helper to create a usage event.
@@ -350,7 +345,7 @@ def create_usage_event(
         product_id=product_id,
         usage_amount=usage_amount,
         unit_type=unit_type,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -367,11 +362,7 @@ def _sanitize_subject_token(value: Optional[str], fallback: str) -> str:
 
 def _usage_subject_tokens(event: UsageEvent) -> Iterable[str]:
     """Build canonical subject tokens for a usage event."""
-    primary = (
-        event.source_service
-        or event.service_type
-        or event.product_id
-    )
+    primary = event.source_service or event.service_type or event.product_id
     yield _sanitize_subject_token(primary, "unknown")
 
     secondary = event.resource_name

@@ -17,13 +17,13 @@ Usage:
     HOST=neo4j-service PORT=50063 python test_async_neo4j.py
 """
 
+import asyncio
 import os
 import sys
-import asyncio
 import time
 
 # Add parent path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from isa_common import AsyncNeo4jClient
 
@@ -31,32 +31,45 @@ from isa_common import AsyncNeo4jClient
 # Contract Mapping — see tests/contracts/neo4j/logic_contract.md
 # ============================================
 CONTRACT_MAP = {
-    'test_health_check':                [],
-    'test_run_cypher':                  ['BR-004'],
-    'test_cypher_with_params':          ['BR-004'],
-    'test_create_node':                 ['BR-002'],
-    'test_get_node':                    ['BR-002'],
-    'test_update_node':                 ['BR-002'],
-    'test_create_second_node':          ['BR-002'],
-    'test_create_relationship':         ['BR-003'],
-    'test_get_relationship':            ['BR-003'],
-    'test_find_nodes':                  ['BR-002'],
-    'test_get_path':                    ['BR-005'],
-    'test_shortest_path':               ['BR-005'],
-    'test_concurrent_queries':          [],
-    'test_run_cypher_many_concurrent':  [],
-    'test_create_nodes_concurrent':     [],
-    'test_get_stats':                   [],
-    'test_delete_relationship':         ['BR-003'],
-    'test_delete_node':                 ['BR-002'],
+    "test_health_check": [],
+    "test_run_cypher": ["BR-004"],
+    "test_cypher_with_params": ["BR-004"],
+    "test_create_node": ["BR-002"],
+    "test_get_node": ["BR-002"],
+    "test_update_node": ["BR-002"],
+    "test_create_second_node": ["BR-002"],
+    "test_create_relationship": ["BR-003"],
+    "test_get_relationship": ["BR-003"],
+    "test_find_nodes": ["BR-002"],
+    "test_get_path": ["BR-005"],
+    "test_shortest_path": ["BR-005"],
+    "test_concurrent_queries": [],
+    "test_run_cypher_many_concurrent": [],
+    "test_create_nodes_concurrent": [],
+    "test_get_stats": [],
+    "test_delete_relationship": ["BR-003"],
+    "test_delete_node": ["BR-002"],
 }
 
-UNCOVERED_CONTRACTS = ['BR-001', 'BR-006', 'BR-007', 'EC-001', 'EC-002', 'EC-003', 'EC-004', 'EC-005', 'EC-006', 'EC-007', 'EC-008', 'ER-001']
+UNCOVERED_CONTRACTS = [
+    "BR-001",
+    "BR-006",
+    "BR-007",
+    "EC-001",
+    "EC-002",
+    "EC-003",
+    "EC-004",
+    "EC-005",
+    "EC-006",
+    "EC-007",
+    "EC-008",
+    "ER-001",
+]
 
 # Configuration
-HOST = os.environ.get('HOST', 'localhost')
-PORT = int(os.environ.get('PORT', '50063'))
-USER_ID = os.environ.get('USER_ID', 'test_user')
+HOST = os.environ.get("HOST", "localhost")
+PORT = int(os.environ.get("PORT", "50063"))
+USER_ID = os.environ.get("USER_ID", "test_user")
 
 # Test results
 PASSED = 0
@@ -87,7 +100,7 @@ async def test_health_check(client: AsyncNeo4jClient) -> bool:
     """
     try:
         health = await client.health_check()
-        success = health is not None and health.get('healthy', False)
+        success = health is not None and health.get("healthy", False)
         test_result(success, "Health check")
         return success
     except Exception as e:
@@ -106,7 +119,7 @@ async def test_run_cypher(client: AsyncNeo4jClient):
             test_result(False, "Run Cypher - no results")
             return
 
-        if result[0].get('num') != 1:
+        if result[0].get("num") != 1:
             test_result(False, f"Run Cypher - unexpected value: {result[0]}")
             return
 
@@ -122,14 +135,13 @@ async def test_cypher_with_params(client: AsyncNeo4jClient):
     """
     try:
         result = await client.run_cypher(
-            "RETURN $num as num, $msg as msg",
-            params={'num': 42, 'msg': 'world'}
+            "RETURN $num as num, $msg as msg", params={"num": 42, "msg": "world"}
         )
         if result is None or len(result) == 0:
             test_result(False, "Cypher with params - no results")
             return
 
-        if result[0].get('num') != 42:
+        if result[0].get("num") != 42:
             test_result(False, f"Cypher with params - unexpected: {result[0]}")
             return
 
@@ -146,8 +158,7 @@ async def test_create_node(client: AsyncNeo4jClient):
     global created_nodes
     try:
         node_id = await client.create_node(
-            labels=['AsyncTestPerson'],
-            properties={'name': 'Alice', 'age': 30}
+            labels=["AsyncTestPerson"], properties={"name": "Alice", "age": 30}
         )
         if node_id is None:
             test_result(False, "Create node - returned None")
@@ -175,11 +186,11 @@ async def test_get_node(client: AsyncNeo4jClient):
             test_result(False, "Get node - returned None")
             return
 
-        if 'AsyncTestPerson' not in node.get('labels', []):
+        if "AsyncTestPerson" not in node.get("labels", []):
             test_result(False, f"Get node - missing label: {node}")
             return
 
-        if node.get('properties', {}).get('name') != 'Alice':
+        if node.get("properties", {}).get("name") != "Alice":
             test_result(False, f"Get node - wrong name: {node}")
             return
 
@@ -200,8 +211,7 @@ async def test_update_node(client: AsyncNeo4jClient):
             return
 
         result = await client.update_node(
-            created_nodes[0],
-            properties={'age': 31, 'city': 'New York'}
+            created_nodes[0], properties={"age": 31, "city": "New York"}
         )
         if not result:
             test_result(False, "Update node - failed")
@@ -209,7 +219,7 @@ async def test_update_node(client: AsyncNeo4jClient):
 
         # Verify update
         node = await client.get_node(created_nodes[0])
-        if node.get('properties', {}).get('age') != 31:
+        if node.get("properties", {}).get("age") != 31:
             test_result(False, f"Update node - age not updated: {node}")
             return
 
@@ -226,8 +236,7 @@ async def test_create_second_node(client: AsyncNeo4jClient):
     global created_nodes
     try:
         node_id = await client.create_node(
-            labels=['AsyncTestPerson'],
-            properties={'name': 'Bob', 'age': 25}
+            labels=["AsyncTestPerson"], properties={"name": "Bob", "age": 25}
         )
         if node_id is None:
             test_result(False, "Create second node - returned None")
@@ -253,8 +262,8 @@ async def test_create_relationship(client: AsyncNeo4jClient):
         rel_id = await client.create_relationship(
             start_node_id=created_nodes[0],
             end_node_id=created_nodes[1],
-            rel_type='KNOWS',
-            properties={'since': 2020}
+            rel_type="KNOWS",
+            properties={"since": 2020},
         )
         if rel_id is None:
             test_result(False, "Create relationship - returned None")
@@ -282,7 +291,7 @@ async def test_get_relationship(client: AsyncNeo4jClient):
             test_result(False, "Get relationship - returned None")
             return
 
-        if rel.get('type') != 'KNOWS':
+        if rel.get("type") != "KNOWS":
             test_result(False, f"Get relationship - wrong type: {rel}")
             return
 
@@ -297,10 +306,7 @@ async def test_find_nodes(client: AsyncNeo4jClient):
     Validates: BR-002 (Node Operations)
     """
     try:
-        nodes = await client.find_nodes(
-            labels=['AsyncTestPerson'],
-            limit=10
-        )
+        nodes = await client.find_nodes(labels=["AsyncTestPerson"], limit=10)
         if nodes is None:
             test_result(False, "Find nodes - returned None")
             return
@@ -326,15 +332,13 @@ async def test_get_path(client: AsyncNeo4jClient):
             return
 
         path = await client.get_path(
-            start_node_id=created_nodes[0],
-            end_node_id=created_nodes[1],
-            max_depth=5
+            start_node_id=created_nodes[0], end_node_id=created_nodes[1], max_depth=5
         )
         if path is None:
             test_result(False, "Get path - no path found")
             return
 
-        if len(path.get('nodes', [])) < 2:
+        if len(path.get("nodes", [])) < 2:
             test_result(False, f"Get path - incomplete: {path}")
             return
 
@@ -355,9 +359,7 @@ async def test_shortest_path(client: AsyncNeo4jClient):
             return
 
         path = await client.shortest_path(
-            start_node_id=created_nodes[0],
-            end_node_id=created_nodes[1],
-            max_depth=5
+            start_node_id=created_nodes[0], end_node_id=created_nodes[1], max_depth=5
         )
         if path is None:
             test_result(False, "Shortest path - no path found")
@@ -402,9 +404,9 @@ async def test_run_cypher_many_concurrent(client: AsyncNeo4jClient):
     """
     try:
         queries = [
-            {'cypher': "RETURN 1 as num"},
-            {'cypher': "RETURN 2 as num"},
-            {'cypher': "RETURN 3 as num"},
+            {"cypher": "RETURN 1 as num"},
+            {"cypher": "RETURN 2 as num"},
+            {"cypher": "RETURN 3 as num"},
         ]
 
         start = time.time()
@@ -428,8 +430,7 @@ async def test_create_nodes_concurrent(client: AsyncNeo4jClient):
     global created_nodes
     try:
         nodes = [
-            {'labels': ['AsyncTestPerson'], 'properties': {'name': f'Person{i}'}}
-            for i in range(3)
+            {"labels": ["AsyncTestPerson"], "properties": {"name": f"Person{i}"}} for i in range(3)
         ]
 
         start = time.time()
@@ -459,7 +460,10 @@ async def test_get_stats(client: AsyncNeo4jClient):
             test_result(False, "Get stats - returned None")
             return
 
-        test_result(True, f"Get statistics (nodes: {stats.get('node_count')}, rels: {stats.get('relationship_count')})")
+        test_result(
+            True,
+            f"Get statistics (nodes: {stats.get('node_count')}, rels: {stats.get('relationship_count')})",
+        )
     except Exception as e:
         test_result(False, f"Get stats - {e}")
 
@@ -542,17 +546,13 @@ async def main():
     print("=" * 70)
     print("     ASYNC NEO4J CLIENT - COMPREHENSIVE FUNCTIONAL TESTS")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  User: {USER_ID}")
     print()
 
-    async with AsyncNeo4jClient(
-        host=HOST,
-        port=PORT,
-        user_id=USER_ID
-    ) as client:
+    async with AsyncNeo4jClient(host=HOST, port=PORT, user_id=USER_ID) as client:
         # Initial cleanup
         await cleanup(client)
 
@@ -623,6 +623,6 @@ async def main():
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)
