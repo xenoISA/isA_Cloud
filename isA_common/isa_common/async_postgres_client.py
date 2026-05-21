@@ -12,21 +12,20 @@ providing full support for all PostgreSQL operations including:
 - Batch operations
 """
 
+import asyncio
+import json
 import os
 import re
-import json
-import asyncio
-from typing import List, Dict, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import asyncpg
-from asyncpg import Pool, Connection
+from asyncpg import Connection, Pool
 
 from .async_base_client import AsyncBaseClient
 
-
 # Security: Regex pattern for validating SQL identifiers (schema, table, column names)
 # Prevents SQL injection when identifiers must be interpolated (DDL statements don't support parameterization)
-_SAFE_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+_SAFE_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def _validate_identifier(name: str, identifier_type: str = "identifier") -> str:
@@ -52,24 +51,16 @@ def _validate_identifier(name: str, identifier_type: str = "identifier") -> str:
         )
     # Additional length check to prevent extremely long identifiers
     if len(name) > 63:  # PostgreSQL identifier length limit
-        raise ValueError(f"Invalid {identifier_type} '{name}': exceeds maximum length of 63 characters")
+        raise ValueError(
+            f"Invalid {identifier_type} '{name}': exceeds maximum length of 63 characters"
+        )
     return name
 
 
 async def _init_connection(conn: Connection) -> None:
     """Initialize connection with JSON/JSONB codec for automatic dict serialization."""
-    await conn.set_type_codec(
-        'jsonb',
-        encoder=json.dumps,
-        decoder=json.loads,
-        schema='pg_catalog'
-    )
-    await conn.set_type_codec(
-        'json',
-        encoder=json.dumps,
-        decoder=json.loads,
-        schema='pg_catalog'
-    )
+    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    await conn.set_type_codec("json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
 
 
 class AsyncPostgresClient(AsyncBaseClient):
@@ -93,7 +84,7 @@ class AsyncPostgresClient(AsyncBaseClient):
         password: Optional[str] = None,
         min_pool_size: int = 5,
         max_pool_size: int = 20,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize async PostgreSQL client with native driver.
@@ -108,9 +99,9 @@ class AsyncPostgresClient(AsyncBaseClient):
         """
         super().__init__(**kwargs)
 
-        self._database = database or os.getenv('POSTGRES_DB', 'postgres')
-        self._username = username or os.getenv('POSTGRES_USER', 'postgres')
-        self._password = password or os.getenv('POSTGRES_PASSWORD', '')
+        self._database = database or os.getenv("POSTGRES_DB", "postgres")
+        self._username = username or os.getenv("POSTGRES_USER", "postgres")
+        self._password = password or os.getenv("POSTGRES_PASSWORD", "")
         self._min_pool_size = min_pool_size
         self._max_pool_size = max_pool_size
 
@@ -127,7 +118,7 @@ class AsyncPostgresClient(AsyncBaseClient):
             min_size=self._min_pool_size,
             max_size=self._max_pool_size,
             command_timeout=60,
-            init=_init_connection  # Register JSON/JSONB codecs for automatic dict serialization
+            init=_init_connection,  # Register JSON/JSONB codecs for automatic dict serialization
         )
         self._logger.info(f"Connected to PostgreSQL at {self._host}:{self._port}/{self._database}")
 
@@ -147,21 +138,21 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Simple ping
-                result = await conn.fetchval('SELECT 1')
+                # Simple ping — raises if the connection is unhealthy
+                await conn.fetchval("SELECT 1")
 
                 details = {}
                 if detailed:
-                    version = await conn.fetchval('SELECT version()')
-                    details['version'] = version
-                    details['pool_size'] = self._pool.get_size()
-                    details['pool_free'] = self._pool.get_idle_size()
+                    version = await conn.fetchval("SELECT version()")
+                    details["version"] = version
+                    details["pool_size"] = self._pool.get_size()
+                    details["pool_free"] = self._pool.get_idle_size()
 
                 return {
-                    'status': 'healthy',
-                    'healthy': True,
-                    'version': details.get('version', ''),
-                    'details': details
+                    "status": "healthy",
+                    "healthy": True,
+                    "version": details.get("version", ""),
+                    "details": details,
                 }
 
         except Exception as e:
@@ -171,8 +162,9 @@ class AsyncPostgresClient(AsyncBaseClient):
     # Query Operations
     # ============================================
 
-    async def query(self, sql: str, params: Optional[List[Any]] = None,
-                   schema: str = 'public') -> Optional[List[Dict]]:
+    async def query(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[List[Dict]]:
         """Execute SELECT query.
 
         Args:
@@ -188,9 +180,9 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 # Set search path for schema (validate to prevent SQL injection)
-                if schema != 'public':
+                if schema != "public":
                     validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f'SET search_path TO {validated_schema}, public')
+                    await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                 if params:
                     rows = await conn.fetch(sql, *params)
@@ -202,8 +194,9 @@ class AsyncPostgresClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "query")
 
-    async def query_row(self, sql: str, params: Optional[List[Any]] = None,
-                       schema: str = 'public') -> Optional[Dict]:
+    async def query_row(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[Dict]:
         """Execute single row query.
 
         Args:
@@ -219,9 +212,9 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 # Validate schema to prevent SQL injection
-                if schema != 'public':
+                if schema != "public":
                     validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f'SET search_path TO {validated_schema}, public')
+                    await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                 if params:
                     row = await conn.fetchrow(sql, *params)
@@ -235,8 +228,9 @@ class AsyncPostgresClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "query row")
 
-    async def execute(self, sql: str, params: Optional[List[Any]] = None,
-                     schema: str = 'public') -> Optional[int]:
+    async def execute(
+        self, sql: str, params: Optional[List[Any]] = None, schema: str = "public"
+    ) -> Optional[int]:
         """Execute INSERT/UPDATE/DELETE statement.
 
         Args:
@@ -252,9 +246,9 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 # Validate schema to prevent SQL injection
-                if schema != 'public':
+                if schema != "public":
                     validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f'SET search_path TO {validated_schema}, public')
+                    await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                 if params:
                     result = await conn.execute(sql, *params)
@@ -270,8 +264,9 @@ class AsyncPostgresClient(AsyncBaseClient):
         except Exception as e:
             return self.handle_error(e, "execute")
 
-    async def execute_batch(self, operations: List[Dict[str, Any]],
-                           schema: str = 'public') -> Optional[Dict]:
+    async def execute_batch(
+        self, operations: List[Dict[str, Any]], schema: str = "public"
+    ) -> Optional[Dict]:
         """Execute batch operations in a transaction.
 
         Args:
@@ -290,13 +285,13 @@ class AsyncPostgresClient(AsyncBaseClient):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     # Validate schema to prevent SQL injection
-                    if schema != 'public':
+                    if schema != "public":
                         validated_schema = _validate_identifier(schema, "schema")
-                        await conn.execute(f'SET search_path TO {validated_schema}, public')
+                        await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                     for op in operations:
-                        sql = op.get('sql', '')
-                        params = op.get('params', [])
+                        sql = op.get("sql", "")
+                        params = op.get("params", [])
 
                         try:
                             if params:
@@ -306,16 +301,15 @@ class AsyncPostgresClient(AsyncBaseClient):
 
                             # Parse rows affected
                             parts = result.split()
-                            rows_affected = int(parts[-1]) if len(parts) >= 2 and parts[-1].isdigit() else 0
+                            rows_affected = (
+                                int(parts[-1]) if len(parts) >= 2 and parts[-1].isdigit() else 0
+                            )
                             total_rows += rows_affected
-                            results.append({'rows_affected': rows_affected, 'error': ''})
+                            results.append({"rows_affected": rows_affected, "error": ""})
                         except Exception as e:
-                            results.append({'rows_affected': 0, 'error': str(e)})
+                            results.append({"rows_affected": 0, "error": str(e)})
 
-            return {
-                'total_rows_affected': total_rows,
-                'results': results
-            }
+            return {"total_rows_affected": total_rows, "results": results}
 
         except Exception as e:
             return self.handle_error(e, "execute batch")
@@ -332,7 +326,7 @@ class AsyncPostgresClient(AsyncBaseClient):
         order_by: Optional[List[str]] = None,
         limit: int = 0,
         offset: int = 0,
-        schema: str = 'public'
+        schema: str = "public",
     ) -> Optional[List[Dict]]:
         """Query builder style SELECT.
 
@@ -350,8 +344,8 @@ class AsyncPostgresClient(AsyncBaseClient):
         """
         try:
             # Build SELECT clause
-            cols = ', '.join(columns) if columns else '*'
-            sql = f'SELECT {cols} FROM {table}'
+            cols = ", ".join(columns) if columns else "*"
+            sql = f"SELECT {cols} FROM {table}"
 
             params = []
             param_idx = 1
@@ -360,23 +354,23 @@ class AsyncPostgresClient(AsyncBaseClient):
             if where:
                 conditions = []
                 for w in where:
-                    col = w.get('column', '')
-                    op = w.get('operator', '=')
-                    val = w.get('value')
-                    conditions.append(f'{col} {op} ${param_idx}')
+                    col = w.get("column", "")
+                    op = w.get("operator", "=")
+                    val = w.get("value")
+                    conditions.append(f"{col} {op} ${param_idx}")
                     params.append(val)
                     param_idx += 1
-                sql += ' WHERE ' + ' AND '.join(conditions)
+                sql += " WHERE " + " AND ".join(conditions)
 
             # Build ORDER BY clause
             if order_by:
-                sql += ' ORDER BY ' + ', '.join(order_by)
+                sql += " ORDER BY " + ", ".join(order_by)
 
             # Add LIMIT and OFFSET
             if limit > 0:
-                sql += f' LIMIT {limit}'
+                sql += f" LIMIT {limit}"
             if offset > 0:
-                sql += f' OFFSET {offset}'
+                sql += f" OFFSET {offset}"
 
             return await self.query(sql, params if params else None, schema)
 
@@ -384,11 +378,7 @@ class AsyncPostgresClient(AsyncBaseClient):
             return self.handle_error(e, "select from")
 
     async def insert_into(
-        self,
-        table: str,
-        rows: List[Dict],
-        returning: bool = False,
-        schema: str = 'public'
+        self, table: str, rows: List[Dict], returning: bool = False, schema: str = "public"
     ) -> Optional[int]:
         """Insert rows into table.
 
@@ -409,20 +399,20 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 # Validate schema to prevent SQL injection
-                if schema != 'public':
+                if schema != "public":
                     validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f'SET search_path TO {validated_schema}, public')
+                    await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                 # Get columns from first row
                 columns = list(rows[0].keys())
-                cols_str = ', '.join(columns)
+                cols_str = ", ".join(columns)
 
                 # Build values placeholders
-                placeholders = ', '.join(f'${i+1}' for i in range(len(columns)))
-                sql = f'INSERT INTO {table} ({cols_str}) VALUES ({placeholders})'
+                placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
+                sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})"
 
                 if returning:
-                    sql += ' RETURNING *'
+                    sql += " RETURNING *"
 
                 # Use executemany for batch insert
                 count = 0
@@ -441,7 +431,7 @@ class AsyncPostgresClient(AsyncBaseClient):
     # Table Operations
     # ============================================
 
-    async def list_tables(self, schema: str = 'public') -> List[str]:
+    async def list_tables(self, schema: str = "public") -> List[str]:
         """List all tables in schema.
 
         Args:
@@ -463,13 +453,13 @@ class AsyncPostgresClient(AsyncBaseClient):
 
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(sql, schema)
-                return [row['table_name'] for row in rows]
+                return [row["table_name"] for row in rows]
 
         except Exception as e:
             self.handle_error(e, "list tables")
             return []
 
-    async def table_exists(self, table: str, schema: str = 'public') -> bool:
+    async def table_exists(self, table: str, schema: str = "public") -> bool:
         """Check if table exists.
 
         Args:
@@ -511,19 +501,19 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                version = await conn.fetchval('SELECT version()')
+                version = await conn.fetchval("SELECT version()")
 
                 return {
-                    'pool': {
-                        'max_connections': self._max_pool_size,
-                        'open_connections': self._pool.get_size(),
-                        'idle_connections': self._pool.get_idle_size(),
-                        'active_connections': self._pool.get_size() - self._pool.get_idle_size(),
-                        'total_queries': 0,  # asyncpg doesn't track this
+                    "pool": {
+                        "max_connections": self._max_pool_size,
+                        "open_connections": self._pool.get_size(),
+                        "idle_connections": self._pool.get_idle_size(),
+                        "active_connections": self._pool.get_size() - self._pool.get_idle_size(),
+                        "total_queries": 0,  # asyncpg doesn't track this
                     },
-                    'database': {
-                        'version': version,
-                    }
+                    "database": {
+                        "version": version,
+                    },
                 }
 
         except Exception as e:
@@ -544,8 +534,9 @@ class AsyncPostgresClient(AsyncBaseClient):
         await self._ensure_connected()
         return self._pool.acquire()
 
-    async def execute_in_transaction(self, operations: List[Dict[str, Any]],
-                                     schema: str = 'public') -> bool:
+    async def execute_in_transaction(
+        self, operations: List[Dict[str, Any]], schema: str = "public"
+    ) -> bool:
         """Execute multiple operations in a single transaction.
 
         Args:
@@ -561,13 +552,13 @@ class AsyncPostgresClient(AsyncBaseClient):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     # Validate schema to prevent SQL injection
-                    if schema != 'public':
+                    if schema != "public":
                         validated_schema = _validate_identifier(schema, "schema")
-                        await conn.execute(f'SET search_path TO {validated_schema}, public')
+                        await conn.execute(f"SET search_path TO {validated_schema}, public")
 
                     for op in operations:
-                        sql = op.get('sql', '')
-                        params = op.get('params', [])
+                        sql = op.get("sql", "")
+                        params = op.get("params", [])
 
                         if params:
                             await conn.execute(sql, *params)
@@ -584,7 +575,9 @@ class AsyncPostgresClient(AsyncBaseClient):
     # Concurrent Operations
     # ============================================
 
-    async def query_many_concurrent(self, queries: List[Dict[str, Any]]) -> List[Optional[List[Dict]]]:
+    async def query_many_concurrent(
+        self, queries: List[Dict[str, Any]]
+    ) -> List[Optional[List[Dict]]]:
         """
         Execute multiple queries concurrently.
 
@@ -594,16 +587,17 @@ class AsyncPostgresClient(AsyncBaseClient):
         Returns:
             List of results for each query
         """
+
         async def execute_query(q: Dict) -> Optional[List[Dict]]:
             return await self.query(
-                sql=q.get('sql', ''),
-                params=q.get('params'),
-                schema=q.get('schema', 'public')
+                sql=q.get("sql", ""), params=q.get("params"), schema=q.get("schema", "public")
             )
 
         return await asyncio.gather(*[execute_query(q) for q in queries])
 
-    async def execute_many_concurrent(self, statements: List[Dict[str, Any]]) -> List[Optional[int]]:
+    async def execute_many_concurrent(
+        self, statements: List[Dict[str, Any]]
+    ) -> List[Optional[int]]:
         """
         Execute multiple statements concurrently.
 
@@ -613,26 +607,26 @@ class AsyncPostgresClient(AsyncBaseClient):
         Returns:
             List of rows affected for each statement
         """
+
         async def execute_stmt(s: Dict) -> Optional[int]:
             return await self.execute(
-                sql=s.get('sql', ''),
-                params=s.get('params'),
-                schema=s.get('schema', 'public')
+                sql=s.get("sql", ""), params=s.get("params"), schema=s.get("schema", "public")
             )
 
         return await asyncio.gather(*[execute_stmt(s) for s in statements])
 
 
 # Example usage
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def main():
         async with AsyncPostgresClient(
-            host='localhost',
+            host="localhost",
             port=5432,
-            database='testdb',
-            username='postgres',
-            password='postgres',
-            user_id='test_user'
+            database="testdb",
+            username="postgres",
+            password="postgres",
+            user_id="test_user",
         ) as client:
             # Health check
             health = await client.health_check()
@@ -647,11 +641,9 @@ if __name__ == '__main__':
             print(f"Query result: {results}")
 
             # Concurrent queries
-            results = await client.query_many_concurrent([
-                {'sql': 'SELECT 1 as num'},
-                {'sql': 'SELECT 2 as num'},
-                {'sql': 'SELECT 3 as num'}
-            ])
+            results = await client.query_many_concurrent(
+                [{"sql": "SELECT 1 as num"}, {"sql": "SELECT 2 as num"}, {"sql": "SELECT 3 as num"}]
+            )
             print(f"Concurrent results: {results}")
 
     asyncio.run(main())

@@ -235,31 +235,21 @@ class AsyncFalkorClient(AsyncBaseClient):
                 attempt += 1
                 start = time.monotonic()
                 tracer = self._get_tracer()
-                span_cm = (
-                    tracer.start_as_current_span("falkor.query") if tracer else None
-                )
+                span_cm = tracer.start_as_current_span("falkor.query") if tracer else None
                 try:
                     if span_cm:
                         with span_cm as span:
                             span.set_attribute("db.system", "falkordb")
                             span.set_attribute("db.name", graph or self._graph_name)
-                            span.set_attribute(
-                                "db.operation", "ro_query" if read_only else "query"
-                            )
-                            span.set_attribute(
-                                "db.statement", self._truncate(cypher)
-                            )
-                            result = await self._run_query(
-                                g, cypher, params, timeout_ms, read_only
-                            )
+                            span.set_attribute("db.operation", "ro_query" if read_only else "query")
+                            span.set_attribute("db.statement", self._truncate(cypher))
+                            result = await self._run_query(g, cypher, params, timeout_ms, read_only)
                             span.set_attribute(
                                 "db.rows", len(getattr(result, "result_set", []) or [])
                             )
                             return self._result_to_dicts(result)
                     else:
-                        result = await self._run_query(
-                            g, cypher, params, timeout_ms, read_only
-                        )
+                        result = await self._run_query(g, cypher, params, timeout_ms, read_only)
                         return self._result_to_dicts(result)
                 except Exception as e:
                     last_error = e
@@ -409,21 +399,11 @@ class AsyncFalkorClient(AsyncBaseClient):
             if not vp.isidentifier():
                 raise ValueError(f"Invalid vector_prop: {vp!r}")
 
-        # Build a "SET" clause that strips the vector props out of the
-        # per-row dict and writes them via vecf32() so the vector index
-        # picks them up. Other properties go through the bulk `n += row`.
-        scrub = ", ".join(f"{vp}: null" for vp in vector_props)
-        if scrub:
-            base_set = f"SET n += apoc.map.removeKeys(row, $vec_keys)"
-        else:
-            base_set = "SET n += row"
-
         # FalkorDB doesn't ship apoc; use a portable manual approach via
         # WITH and per-property removal. The portable form: store the
         # whole row, then overwrite each vector prop via vecf32().
         per_vec_sets = " ".join(
-            f"SET n.{vp} = CASE WHEN row.{vp} IS NULL THEN n.{vp} "
-            f"ELSE vecf32(row.{vp}) END"
+            f"SET n.{vp} = CASE WHEN row.{vp} IS NULL THEN n.{vp} ELSE vecf32(row.{vp}) END"
             for vp in vector_props
         )
 
@@ -438,19 +418,12 @@ class AsyncFalkorClient(AsyncBaseClient):
                     f"{per_vec_sets}"
                 )
             else:
-                cypher = (
-                    f"UNWIND $rows AS row "
-                    f"CREATE (n:{label}) "
-                    f"SET n += row "
-                    f"{per_vec_sets}"
-                )
+                cypher = f"UNWIND $rows AS row CREATE (n:{label}) SET n += row {per_vec_sets}"
 
             total = 0
             for start in range(0, len(rows), batch_size):
                 batch = rows[start : start + batch_size]
-                result = await self.query(
-                    cypher, params={"rows": batch}, graph=graph
-                )
+                result = await self.query(cypher, params={"rows": batch}, graph=graph)
                 if result is None:
                     return None
                 total += len(batch)
