@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# .githooks/pre-push — local CI gate for isA_Cloud
+# ================================================
+# Runs scripts/ci.sh (lint + unit-layer tests) before every `git push` and
+# blocks the push if it fails. Lets the team ship safely while GitHub Actions
+# billing is failing org-wide. Tracking: xenoISA/isA_Cloud#287 (epic #284).
+#
+# INSTALL (one command, from the repo root):
+#
+#     git config core.hooksPath .githooks
+#
+# That points git at this tracked directory — no copying into .git/hooks,
+# and the hook stays version-controlled. To uninstall: `git config --unset
+# core.hooksPath`.
+#
+# BYPASS
+#   git push --no-verify     # skips this hook (use sparingly)
+#
+# Git invokes this hook as: pre-push <remote-name> <remote-url>
+# with the push refs supplied on stdin.
+#
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CI="${REPO_ROOT}/scripts/ci.sh"
+
+if [ ! -x "${CI}" ]; then
+  echo "pre-push: ${CI} not found or not executable — skipping CI gate" >&2
+  echo "pre-push: (run 'chmod +x scripts/ci.sh' if it exists)" >&2
+  exit 0
+fi
+
+echo "pre-push: running local CI gate (scripts/ci.sh) — bypass with 'git push --no-verify'"
+
+if "${CI}"; then
+  exit 0
+else
+  echo >&2
+  echo "pre-push: CI gate FAILED — push blocked. Fix the issues above," >&2
+  echo "pre-push: or bypass with: git push --no-verify" >&2
+  exit 1
+fi
