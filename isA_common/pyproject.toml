@@ -66,9 +66,13 @@ observability = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
     "mypy>=1.0.0",
+    # Lint tools are EXACTLY pinned so CI lint is deterministic and matches the
+    # revs in .pre-commit-config.yaml. Bump both files together (or run
+    # `pre-commit autoupdate` and sync these). See isA_Cloud#285.
+    "black==26.5.1",
+    "isort==8.0.1",
+    "ruff==0.15.13",
 ]
 
 [project.urls]
@@ -77,7 +81,31 @@ Repository = "https://github.com/isa-platform/isA_Cloud"
 
 [tool.black]
 line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py310', 'py311', 'py312']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Import sorting (I) is intentionally NOT selected here: isort owns import
+# ordering. Running ruff's isort and standalone isort together produces a
+# ping-pong on edge cases (e.g. mixed `import (...)` + `import X as Y`).
+select = ["E", "F", "N", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test and example code follow looser conventions than library source:
+# - F841: assert-by-binding / probe assignments are common in tests
+# - N806: PascalCase locals are idiomatic for mocked/patched class objects
+# - E402: imports after sys.path tweaks in standalone test scripts
+# - E722: bare excepts in throwaway example scripts
+"tests/**" = ["F841", "N806", "E402"]
+"examples/**" = ["F841", "E722"]
 
 [tool.mypy]
 python_version = "3.8"

@@ -56,6 +56,6 @@ description = "PostgreSQL Password in Connection URL"
 regex = '''postgres(ql)?://[^:]+:([^@]+)@[^/]+'''
 tags = ["database", "postgres"]
 
-# Entropy settings - detect high-entropy strings that might be secrets
-[rules.entropy]
-enabled = true
+# Note: gitleaks v8 has no global entropy toggle. Entropy is configured
+# per-rule via an `entropy = <float>` field. The default ruleset
+# (useDefault = true above) already applies entropy-based detection.
