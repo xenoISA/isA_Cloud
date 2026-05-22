@@ -36,11 +36,11 @@ dependencies = [
     "aiofiles>=23.0.0",  # Async file I/O for streaming downloads
     "redis>=5.0.0",  # Async Redis (redis-py with asyncio)
     "nats-py>=2.6.0",  # Async NATS with JetStream
-    "qdrant-client>=1.9.0",  # Async Qdrant vector database
+    "qdrant-client>=1.10.0",  # Async Qdrant vector database (>=1.10 for RecommendInput)
     "falkordb>=1.0.0",  # Async FalkorDB graph database (Redis module)
     "aiomqtt>=2.0.0",  # Async MQTT client
     "aiosqlite>=0.19.0",  # Async SQLite
-    "duckdb>=0.10.0",  # DuckDB analytics database
+    "duckdb>=1.1.0",  # DuckDB analytics database (>=1.1.0 clears CVE-2024-41672)
     "aiohttp>=3.9.0",  # Async HTTP client (Loki)
 ]
 

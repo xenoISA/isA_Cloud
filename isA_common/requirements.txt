@@ -6,7 +6,7 @@
 #   that should be compatible with consumers' dependency versions
 #
 # To update dependencies, test compatibility first then update both files.
-# Last updated: 2026-05
+# Last updated: 2026-05-22
 
 grpcio==1.62.1
 grpcio-tools==1.62.1
@@ -24,9 +24,15 @@ aioboto3==13.0.0
 aiofiles==23.2.1
 redis==5.0.3
 nats-py==2.7.2
-qdrant-client==1.9.2
+# qdrant-client bumped 1.9.2 -> 1.12.2: 1.9.2 lacked RecommendInput, breaking
+# `import isa_common` on a clean install (isA_Cloud#303). 1.10+ adds it.
+qdrant-client==1.12.2
 aiomqtt==2.0.0
-duckdb==0.10.1
+# duckdb bumped 0.10.1 -> 1.4.4 to clear CVE-2024-41672 (PYSEC-2024-203,
+# sniff_csv filesystem read), fixed in 1.1.0+ (isA_Cloud#301). Major 0.x->1.x
+# jump; client API (connect/execute/fetch*/COPY) unchanged. No persisted
+# .duckdb files (default DUCKDB_DATABASE is ':memory:'), so no storage migration.
+duckdb==1.4.4
 
 # Transitive pins for the aioboto3 chain (exact-pin strategy).
 # urllib3>=2.7.0 clears CVE-2024-37891, -2025-50181, -2025-66418,
