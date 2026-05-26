@@ -93,7 +93,15 @@ template:
     # kind node budget.
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        # Custom image baked with Python / Node / pnpm / uv pre-installed into
+        # RUNNER_TOOL_CACHE so actions/setup-* hit the cache instead of
+        # downloading toolchains through the slow kind egress (#306). Build +
+        # load with deployments/kubernetes/local/arc/scripts/build-runner-image.sh
+        # and bump this tag when the Dockerfile version ARGs change.
+        image: isa-arc-runner:0.1.0
+        # The image is `kind load`ed into the cluster, not pulled from a
+        # registry — force kubelet to use the local copy.
+        imagePullPolicy: IfNotPresent
         command: ["/home/runner/run.sh"]
         resources:
           requests:

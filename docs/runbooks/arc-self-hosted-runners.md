@@ -118,6 +118,29 @@ Then expand the group as story
 
 ## 3. Install ARC (one command)
 
+### 3.0 Pre-bake the runner image (#306)
+
+Workflows that call `actions/setup-python`, `actions/setup-node`, or any
+download-and-extract toolchain action will hang on the local kind cluster —
+egress bandwidth is ~150 KB/s, and the setup actions abort their downloads
+long before a ~100 MB toolchain tarball can land. Build the custom runner
+image that ships Python / Node / pnpm / uv pre-installed into
+`RUNNER_TOOL_CACHE` so those actions hit the cache instead of downloading:
+
+```bash
+deployments/kubernetes/local/arc/scripts/build-runner-image.sh
+```
+
+This builds for the host architecture (kind is single-arch) and `kind load`s
+the resulting `isa-arc-runner:0.1.0` into the cluster. Re-run after bumping
+any version `ARG` in `deployments/kubernetes/local/arc/runner-image/Dockerfile`.
+
+`runner-scale-set.yaml` references the image by tag with
+`imagePullPolicy: IfNotPresent`, so the kubelet uses the loaded copy and
+never tries to pull from a registry.
+
+### 3.1 Install ARC
+
 From the repo root, with the kind cluster running:
 
 ```bash
@@ -148,7 +171,7 @@ deployments/kubernetes/local/arc/scripts/install-arc.sh --skip-secret
 
 `*.local.yaml` is gitignored — never commit a filled-in copy.
 
-### 3.1 Verify the install
+### 3.2 Verify the install
 
 ```bash
 kubectl -n arc-systems get pods                       # controller Running
