@@ -29,6 +29,12 @@ githubConfigUrl: "https://github.com/xenoISA"
 # keys from this Secret.
 githubConfigSecret: arc-github-app
 
+# Runner group boundary in the xenoISA org. The org admin must create this
+# runner group before installing the scale set and scope it to the isA repos
+# that are allowed to consume local-kind CI capacity. This keeps arbitrary org
+# repos from scheduling jobs onto the local cluster.
+runnerGroup: "isA CI"
+
 # -----------------------------------------------------------------------------
 # Controller service account — required to be explicit
 # -----------------------------------------------------------------------------

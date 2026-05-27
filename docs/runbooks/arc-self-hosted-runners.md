@@ -44,6 +44,7 @@ and is **not** done here.
 | Running kind cluster `isa-cloud-local` | developer | `.claude/skills/cluster_operations/scripts/setup-local.sh` |
 | `kubectl`, `helm` (>= 3.8, OCI support) | developer | `brew install kubectl helm` |
 | GitHub App registered + installed on `xenoISA` | **org admin** | See section 2 — one-time |
+| Org runner group `isA CI` | **org admin** | Scope it to allowed isA repos before install |
 | GitHub App private-key `.pem` file | **org admin** | Downloaded once at App creation |
 
 ARC needs the GitHub API reachable to receive jobs — it does not replace
@@ -96,12 +97,24 @@ token-rotation chore, scoped permissions, and a higher API rate limit.
 You now have the three values ARC needs: **App ID**, **installation ID**,
 **private-key `.pem`**.
 
-### 2.4 (Optional) Org runner group
+### 2.4 Org runner group
 
-To scope which repos may use the runners, create an org **runner group**
+Create an org **runner group** named `isA CI`
 (`xenoISA` org → Settings → Actions → Runner groups) and restrict it to the
-isA repos. The scale set joins the `Default` group unless `runnerGroup` is set
-in `values/runner-scale-set.yaml`.
+repos allowed to consume local-kind CI capacity. The runner scale-set values
+set `runnerGroup: "isA CI"` so the install fails clearly if the group is
+missing instead of silently exposing the runner to the org-wide `Default`
+group.
+
+For the first pilot, include at least:
+
+- `isA_App_SDK`
+- `isA_user`
+- `isA_`
+- `isA_Cloud`
+
+Then expand the group as story
+[#291](https://github.com/xenoISA/isA_Cloud/issues/291) rolls out.
 
 ## 3. Install ARC (one command)
 
@@ -194,6 +207,7 @@ in the same values file.
 |---------|-------|--------------------|
 | Listener pod `CrashLoopBackOff` | `kubectl -n arc-runners logs -l app.kubernetes.io/component=runner-scale-set-listener` | Bad GitHub App credentials — verify App ID / installation ID / key in the `arc-github-app` Secret. |
 | Scale set never appears in GitHub | listener logs | App not installed on the org, or missing **Self-hosted runners** org permission. |
+| Helm install fails with runner group not found | `helm status isa-kind-runners -n arc-runners`; GitHub org runner settings | Create the `isA CI` org runner group or update `runnerGroup` to an existing scoped group. |
 | Jobs stuck `Queued`, no runner pod | `kubectl -n arc-runners get pods`; listener logs | Listener not connected, or `maxRunners` already saturated. |
 | Runner pod `Pending` | `kubectl -n arc-runners describe pod <pod>` | kind node out of CPU/memory — lower `maxRunners` or per-runner requests. |
 | `docker build` fails in a job | runner pod logs (`runner` + `dind` containers) | dind sidecar not ready — confirm `containerMode.type: dind` and that `arc-runners` is at PSA `privileged`. |

@@ -26,7 +26,8 @@ arc/
 ## Quick start
 
 This is **config only**. The live deploy needs a GitHub App registered on the
-`xenoISA` org (org-admin) and a running kind cluster — see the runbook.
+`xenoISA` org, an org runner group named `isA CI`, and a running kind cluster
+— see the runbook.
 
 ```bash
 # from the repo root, kind cluster running:
@@ -38,10 +39,11 @@ ISA_ARC_GITHUB_APP_PRIVATE_KEY_PATH=~/secrets/isa-arc.private-key.pem \
 
 ## `runs-on` label
 
-The runner scale set is installed as `self-hosted`, so workflows target it
-with `runs-on: self-hosted` — the label four isA repos already use for their
-`deploy-kind` jobs. Workflow migration is story
-[#289](https://github.com/xenoISA/isA_Cloud/issues/289), not done here.
+The runner scale set name is `self-hosted`, so workflows target it with
+`runs-on: self-hosted` — the label four isA repos already use for their
+`deploy-kind` jobs. Access is restricted by the `isA CI` org runner group.
+Workflow migration is story [#289](https://github.com/xenoISA/isA_Cloud/issues/289),
+not done here.
 
 ## Security
 
