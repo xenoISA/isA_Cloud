@@ -54,7 +54,11 @@ controllerServiceAccount:
 # running. maxRunners caps concurrency so a burst of jobs cannot exhaust the
 # 3-node kind cluster. Tune maxRunners up during the 19-repo rollout (#291).
 minRunners: 0
-maxRunners: 4
+# Capped at 2 (not 3-node-worker capacity of 4) so simultaneous dind sidecar
+# startups do not thrash overlay storage when the larger pre-baked runner
+# image (#306) lands fresh on each node. Bump back to 4 once we have a
+# smaller image or a faster storage class on the local kind cluster.
+maxRunners: 2
 
 # -----------------------------------------------------------------------------
 # Runner label / `runs-on`
@@ -91,6 +95,13 @@ template:
     # ARC injects the runner + (for dind) the dind sidecar. We only override
     # the runner container's resource envelope so a job pod stays within the
     # kind node budget.
+    # The chart auto-injects init-dind-externals + the dind sidecar when
+    # containerMode.type == dind. Its default `docker info` startup probe
+    # (1 s timeout, 24 retries × 5 s) is tight under overlay-storage IO
+    # pressure on kind. Capping maxRunners at 2 (above) keeps dind sidecar
+    # concurrency low enough that the default probe wins; the chart's
+    # initContainers list cannot be merged by name without duplicating, so
+    # leave the dind container fully chart-managed.
     containers:
       - name: runner
         # Custom image baked with Python / Node / pnpm / uv pre-installed into
