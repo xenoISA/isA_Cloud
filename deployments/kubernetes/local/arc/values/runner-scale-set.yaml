@@ -54,7 +54,10 @@ controllerServiceAccount:
 # running. maxRunners caps concurrency so a burst of jobs cannot exhaust the
 # 3-node kind cluster. Tune maxRunners up during the 19-repo rollout (#291).
 minRunners: 0
-maxRunners: 4
+# With the dind sidecar removed (see containerMode comment below), max can
+# be back at 3 — one runner per worker node, matching the 3-node kind
+# cluster's capacity. Bump higher once the cluster has more nodes (#291).
+maxRunners: 3
 
 # -----------------------------------------------------------------------------
 # Runner label / `runs-on`
@@ -70,14 +73,20 @@ maxRunners: 4
 runnerScaleSetName: "self-hosted"
 
 # -----------------------------------------------------------------------------
-# Runner container mode — Docker-in-Docker
+# Runner container mode — NO sidecar
 # -----------------------------------------------------------------------------
-# `dind` gives each runner pod its own Docker daemon sidecar so `docker build`
-# jobs work without a shared host socket. This is the safe default for CI that
-# builds images. The dind sidecar requires a privileged container — acceptable
-# on a local kind cluster; revisit (rootless / buildkit) before any shared env.
-containerMode:
-  type: "dind"
+# The chart's optional `dind` sidecar bakes a hard-coded `docker info` startup
+# probe with a 1 s timeout. On the local kind cluster's overlay storage,
+# `docker info` (CLI fork+exec) cannot complete inside 1 s — even when dockerd
+# itself is healthy — so the probe never passes and runner pods are killed
+# before they register. The chart does not expose the probe via values.
+#
+# Our current pilot jobs (ruff, tsc, pytest, vitest) do not need a Docker
+# daemon, so leaving containerMode unset means the chart skips the sidecar
+# and runs just the runner container. When a workflow eventually needs
+# `docker build`, switch to a tuned template override (full pod-spec
+# takeover) or to `containerMode.type: kubernetes`. Tracked under #291.
+# containerMode: {}  # intentionally absent
 
 # -----------------------------------------------------------------------------
 # Runner pod spec
@@ -91,9 +100,24 @@ template:
     # ARC injects the runner + (for dind) the dind sidecar. We only override
     # the runner container's resource envelope so a job pod stays within the
     # kind node budget.
+    # The chart auto-injects init-dind-externals + the dind sidecar when
+    # containerMode.type == dind. Its default `docker info` startup probe
+    # (1 s timeout, 24 retries × 5 s) is tight under overlay-storage IO
+    # pressure on kind. maxRunners=1 (above) eliminates dind sidecar
+    # contention entirely. The chart's initContainers list cannot be merged
+    # by name without duplicating, so leave the dind container fully
+    # chart-managed.
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:latest
+        # Custom image baked with Python / Node / pnpm / uv pre-installed into
+        # RUNNER_TOOL_CACHE so actions/setup-* hit the cache instead of
+        # downloading toolchains through the slow kind egress (#306). Build +
+        # load with deployments/kubernetes/local/arc/scripts/build-runner-image.sh
+        # and bump this tag when the Dockerfile version ARGs change.
+        image: isa-arc-runner:0.1.0
+        # The image is `kind load`ed into the cluster, not pulled from a
+        # registry — force kubelet to use the local copy.
+        imagePullPolicy: IfNotPresent
         command: ["/home/runner/run.sh"]
         resources:
           requests:

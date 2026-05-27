@@ -85,17 +85,25 @@ if [ -f "$RUNNER_VALUES" ]; then
         fail "runner scale set is not assigned to scoped isA CI runner group"
     fi
 
+    # maxRunners caps concurrency so a burst of jobs can't exhaust the kind
+    # cluster. The cap is currently 3 (one per kind worker); the absolute
+    # bound is whatever the local cluster's worker count is, so we just
+    # assert it is a positive small integer rather than pinning a value.
     if grep -q 'minRunners: 0' "$RUNNER_VALUES" &&
-       grep -q 'maxRunners: 4' "$RUNNER_VALUES"; then
-        pass "runner autoscaling is bounded and scales to zero"
+       grep -qE '^maxRunners: [1-9][0-9]?$' "$RUNNER_VALUES"; then
+        pass "runner autoscaling scales to zero and caps concurrency"
     else
-        fail "runner autoscaling is not bounded at 0..4"
+        fail "runner autoscaling is not bounded (expect minRunners: 0 + small maxRunners)"
     fi
 
-    if grep -A2 '^containerMode:' "$RUNNER_VALUES" | grep -q 'type: "dind"'; then
-        pass "runner pods use isolated docker-in-docker mode"
+    # dind sidecar is intentionally omitted on the local kind cluster — the
+    # chart's hard-coded `docker info` startup probe (1 s timeout) cannot pass
+    # under overlay-storage IO pressure. See #306. Once a workflow needs
+    # docker-build, take over the pod template or switch to kubernetes mode.
+    if ! grep -qE '^containerMode:' "$RUNNER_VALUES"; then
+        pass "runner pods skip the dind sidecar (probe untunable on kind, #306)"
     else
-        fail "runner pods do not use dind mode for docker builds"
+        fail "containerMode is set; expect dind sidecar to stall on kind"
     fi
 
     if grep -q 'runnerScaleSetName: "self-hosted"' "$RUNNER_VALUES"; then
@@ -149,6 +157,77 @@ if [ -f "$GITIGNORE" ]; then
         pass "gitignore protects ARC local secret material"
     else
         fail "gitignore does not protect ARC local secret material"
+    fi
+fi
+
+# ----------------------------------------------------------------------------
+# Pre-baked runner image (#306)
+# ----------------------------------------------------------------------------
+RUNNER_DOCKERFILE="$ARC_DIR/runner-image/Dockerfile"
+RUNNER_IMAGE_README="$ARC_DIR/runner-image/README.md"
+BUILD_SCRIPT="$ARC_DIR/scripts/build-runner-image.sh"
+
+require_file "$RUNNER_DOCKERFILE" "runner image Dockerfile"
+require_file "$RUNNER_IMAGE_README" "runner image README"
+require_file "$BUILD_SCRIPT" "build-runner-image.sh"
+
+if [ -f "$RUNNER_DOCKERFILE" ]; then
+    if grep -q "RUNNER_TOOL_CACHE=/opt/hostedtoolcache" "$RUNNER_DOCKERFILE"; then
+        pass "Dockerfile sets RUNNER_TOOL_CACHE for actions/setup-* cache hits"
+    else
+        fail "Dockerfile does not set RUNNER_TOOL_CACHE"
+    fi
+
+    if grep -q "PYTHON_311=" "$RUNNER_DOCKERFILE" && grep -q "PYTHON_312=" "$RUNNER_DOCKERFILE"; then
+        pass "Dockerfile pins Python 3.11 + 3.12 versions"
+    else
+        fail "Dockerfile does not pin Python versions"
+    fi
+
+    if grep -q "NODE_20=" "$RUNNER_DOCKERFILE" && grep -q "NODE_22=" "$RUNNER_DOCKERFILE"; then
+        pass "Dockerfile pins Node.js 20 + 22 versions"
+    else
+        fail "Dockerfile does not pin Node.js versions"
+    fi
+
+    if grep -q "\.complete" "$RUNNER_DOCKERFILE"; then
+        pass "Dockerfile writes tool-cache <arch>.complete markers"
+    else
+        fail "Dockerfile missing tool-cache .complete markers (setup-python will miss cache)"
+    fi
+
+    if grep -q "FROM ghcr.io/actions/actions-runner:" "$RUNNER_DOCKERFILE"; then
+        pass "Dockerfile extends the official actions/actions-runner base"
+    else
+        fail "Dockerfile does not extend ghcr.io/actions/actions-runner"
+    fi
+fi
+
+if [ -f "$BUILD_SCRIPT" ]; then
+    if [ -x "$BUILD_SCRIPT" ]; then
+        pass "build script is executable"
+    else
+        fail "build script is not executable"
+    fi
+
+    if grep -q "kind load docker-image" "$BUILD_SCRIPT"; then
+        pass "build script loads image into the kind cluster"
+    else
+        fail "build script does not call kind load docker-image"
+    fi
+fi
+
+if [ -f "$RUNNER_VALUES" ]; then
+    if grep -q "image: isa-arc-runner:" "$RUNNER_VALUES"; then
+        pass "runner scale-set values reference the custom isa-arc-runner image"
+    else
+        fail "runner scale-set values still point at the stock actions/runner image"
+    fi
+
+    if grep -q "imagePullPolicy: IfNotPresent" "$RUNNER_VALUES"; then
+        pass "runner scale-set uses imagePullPolicy: IfNotPresent (uses kind-loaded image)"
+    else
+        fail "runner scale-set will try to pull from a registry (image is kind-loaded only)"
     fi
 fi
 
