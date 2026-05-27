@@ -217,6 +217,27 @@ if [ -f "$BUILD_SCRIPT" ]; then
     fi
 fi
 
+# ----------------------------------------------------------------------------
+# Runner status dashboard script (#292)
+# ----------------------------------------------------------------------------
+STATUS_SCRIPT="$ARC_DIR/scripts/runner-status.sh"
+require_file "$STATUS_SCRIPT" "runner-status.sh"
+if [ -f "$STATUS_SCRIPT" ]; then
+    if [ -x "$STATUS_SCRIPT" ]; then
+        pass "runner-status.sh is executable"
+    else
+        fail "runner-status.sh is not executable"
+    fi
+
+    if grep -q "autoscalingrunnerset" "$STATUS_SCRIPT" &&
+       grep -q "ephemeralrunner" "$STATUS_SCRIPT" &&
+       grep -q "runner-scale-set-listener" "$STATUS_SCRIPT"; then
+        pass "runner-status.sh inspects the full ARC stack (controller, scale set, runners, listener)"
+    else
+        fail "runner-status.sh missing one of the required ARC stack inspections"
+    fi
+fi
+
 if [ -f "$RUNNER_VALUES" ]; then
     if grep -q "image: isa-arc-runner:" "$RUNNER_VALUES"; then
         pass "runner scale-set values reference the custom isa-arc-runner image"

@@ -9,6 +9,17 @@ the modern scale-set model.
 > Full operational guide: [`docs/runbooks/arc-self-hosted-runners.md`](../../../../docs/runbooks/arc-self-hosted-runners.md).
 > Design rationale: [`docs/adr/0004-arc-self-hosted-runners.md`](../../../../docs/adr/0004-arc-self-hosted-runners.md).
 
+## Quick health check
+
+```bash
+deployments/kubernetes/local/arc/scripts/runner-status.sh
+```
+
+Read-only dashboard: cluster reachability → controller/listener health →
+scale-set bounds and current scaling → runner pods → listener queue depth →
+recent ephemeral runner assignments. Exits 0 healthy, 1 degraded (with
+markers next to the broken component).
+
 ## Layout
 
 ```
