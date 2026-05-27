@@ -85,17 +85,25 @@ if [ -f "$RUNNER_VALUES" ]; then
         fail "runner scale set is not assigned to scoped isA CI runner group"
     fi
 
+    # maxRunners caps concurrency so a burst of jobs can't exhaust the kind
+    # cluster. The cap is currently 3 (one per kind worker); the absolute
+    # bound is whatever the local cluster's worker count is, so we just
+    # assert it is a positive small integer rather than pinning a value.
     if grep -q 'minRunners: 0' "$RUNNER_VALUES" &&
-       grep -q 'maxRunners: 4' "$RUNNER_VALUES"; then
-        pass "runner autoscaling is bounded and scales to zero"
+       grep -qE '^maxRunners: [1-9][0-9]?$' "$RUNNER_VALUES"; then
+        pass "runner autoscaling scales to zero and caps concurrency"
     else
-        fail "runner autoscaling is not bounded at 0..4"
+        fail "runner autoscaling is not bounded (expect minRunners: 0 + small maxRunners)"
     fi
 
-    if grep -A2 '^containerMode:' "$RUNNER_VALUES" | grep -q 'type: "dind"'; then
-        pass "runner pods use isolated docker-in-docker mode"
+    # dind sidecar is intentionally omitted on the local kind cluster — the
+    # chart's hard-coded `docker info` startup probe (1 s timeout) cannot pass
+    # under overlay-storage IO pressure. See #306. Once a workflow needs
+    # docker-build, take over the pod template or switch to kubernetes mode.
+    if ! grep -qE '^containerMode:' "$RUNNER_VALUES"; then
+        pass "runner pods skip the dind sidecar (probe untunable on kind, #306)"
     else
-        fail "runner pods do not use dind mode for docker builds"
+        fail "containerMode is set; expect dind sidecar to stall on kind"
     fi
 
     if grep -q 'runnerScaleSetName: "self-hosted"' "$RUNNER_VALUES"; then
