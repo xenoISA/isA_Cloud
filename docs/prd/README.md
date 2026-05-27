@@ -913,15 +913,20 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-## Epic 14: Platform CI Independence (Self-Hosted Runners + Pre-Commit)
+## Epic 14: Platform CI Independence (Pre-Commit + Workflow Controls)
 
-> Decouple platform CI from GitHub-hosted Actions billing. Billing failures
-> (failed payments / spending limit) have blocked CI across isA repos, forcing
-> local-test + admin-override merges. Move CI compute onto the kind cluster via
-> self-hosted runners, standardize pre-commit as a zero-cost local gate, and
-> keep a path to full GitHub-independence (Woodpecker/Forgejo) as DR.
-> Source: discovery (investigate → design → spec). Recommended approach:
-> self-hosted Actions runners on kind, layered on standardized pre-commit.
+> **Scope reduced on 2026-05-28** by [ADR 0005](../adr/0005-revert-to-github-hosted-ci.md).
+> The original epic moved CI compute onto the kind cluster via ARC self-hosted
+> runners ([ADR 0004](../adr/0004-arc-self-hosted-runners.md)). After one week
+> in production the ARC pool went all-offline and the operational overhead was
+> found to exceed the cost of GitHub-hosted minutes at platform scale. The
+> self-hosted-runner stories (**US4–US7, US8**) are **Cancelled**. The
+> repo-mirroring DR story (**US9**) is **Deferred** to a future epic. The
+> pre-commit / pre-push / docs stories (**US1, US2, US3, US10**) remain — they
+> are zero-cost local gates that pay off independent of where CI runs. The
+> primary cost control is now `paths-ignore` + `cancel-in-progress` +
+> diff-aware job gating on GitHub-hosted runners. See ADR 0005 for the full
+> reversal rationale.
 
 ### E14-US1: Standardized pre-commit config
 
@@ -965,104 +970,101 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | AC-3.2 | git `pre-push` hook invokes `scripts/ci.sh`; blocks push on failure | Planned |
 | AC-3.3 | Hook is bypassable (`--no-verify`) but CI re-checks server-side | Planned |
 
-### E14-US4: Self-hosted GitHub Actions runners on the kind cluster
+### E14-US4: Self-hosted GitHub Actions runners on the kind cluster — **Cancelled ([ADR 0005](../adr/0005-revert-to-github-hosted-ci.md))**
 
-**As a** platform lead
-**I want** GitHub Actions runners deployed on the kind cluster
-**So that** CI compute no longer depends on GitHub-hosted billing
-
-#### Acceptance Criteria
-
-| ID | Criteria | Status |
-|----|----------|--------|
-| AC-4.1 | Runner deployment (ARC or runner pods) on kind, registered to the org | Planned |
-| AC-4.2 | Org runner group scoped to the isA repos | Planned |
-| AC-4.3 | Runners survive restarts; persistent state + Docker cleanup handled | Planned |
-| AC-4.4 | Self-hosted runner usage incurs zero GitHub-hosted minutes | Planned |
-
-### E14-US5: Migrate test/lint/docker workflows to self-hosted runners
-
-**As a** developer
-**I want** CI workflows to run on self-hosted runners
-**So that** test/lint/build jobs run on platform infra, not GitHub-hosted
+> Original goal was to deploy ARC on the kind cluster. Delivered in
+> [#298](https://github.com/xenoISA/isA_Cloud/issues/298), then withdrawn —
+> see [ADR 0005](../adr/0005-revert-to-github-hosted-ci.md) for why.
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-5.1 | `ci.yml`/`test.yml`/`docker.yml` use `runs-on: [self-hosted, isa-cloud]` | Planned |
-| AC-5.2 | Caching, artifacts, and timeouts validated on self-hosted runners | Planned |
-| AC-5.3 | GitHub status checks still appear on PRs | Planned |
+| AC-4.1 | Runner deployment (ARC or runner pods) on kind, registered to the org | Cancelled |
+| AC-4.2 | Org runner group scoped to the isA repos | Cancelled |
+| AC-4.3 | Runners survive restarts; persistent state + Docker cleanup handled | Cancelled |
+| AC-4.4 | Self-hosted runner usage incurs zero GitHub-hosted minutes | Cancelled |
 
-### E14-US6: Pilot CI on three repos
+### E14-US5: Migrate test/lint/docker workflows to self-hosted runners — **Cancelled ([ADR 0005](../adr/0005-revert-to-github-hosted-ci.md))**
 
-**As a** platform lead
-**I want** the self-hosted CI validated on 3 pilot repos
-**So that** issues are found before rolling out to all 19
-
-#### Acceptance Criteria
-
-| ID | Criteria | Status |
-|----|----------|--------|
-| AC-6.1 | isA_Mate, isA_Agent_SDK, isA_Cloud run full CI on self-hosted runners | Planned |
-| AC-6.2 | Multi-repo checkout (PAT) works on self-hosted runners | Planned |
-| AC-6.3 | Pilot results documented; rollout blockers identified | Planned |
-
-### E14-US7: Roll out self-hosted runners to all isA repos
-
-**As a** platform lead
-**I want** all 19 repos on self-hosted runners
-**So that** the whole platform is decoupled from GitHub-hosted billing
+> Migration of isA_/ci.yml landed in [xenoISA/isA_#480](https://github.com/xenoISA/isA_/pull/480)
+> and was reverted in [xenoISA/isA_#482](https://github.com/xenoISA/isA_/pull/482).
+> No other repos were migrated.
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-7.1 | All 19 isA repos' CI workflows run on self-hosted runners | Planned |
-| AC-7.2 | `ubuntu-latest` GitHub-hosted jobs retired | Planned |
-| AC-7.3 | Workflow templates (isA_Vibe) updated so new repos inherit the pattern | Planned |
+| AC-5.1 | `ci.yml`/`test.yml`/`docker.yml` use `runs-on: [self-hosted, isa-cloud]` | Cancelled |
+| AC-5.2 | Caching, artifacts, and timeouts validated on self-hosted runners | Cancelled |
+| AC-5.3 | GitHub status checks still appear on PRs | Cancelled |
 
-### E14-US8: Runner health and queue-depth dashboard
-
-**As an** SRE
-**I want** runner health and CI queue depth in Grafana
-**So that** I can add capacity or diagnose failures before developers stall
+### E14-US6: Pilot CI on three repos — **Cancelled ([ADR 0005](../adr/0005-revert-to-github-hosted-ci.md))**
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-8.1 | Runner metrics (online count, busy/idle, queue depth) scraped | Planned |
-| AC-8.2 | Grafana dashboard for runner health and job latency | Planned |
-| AC-8.3 | Alert on all-runners-offline or queue depth above threshold | Planned |
+| AC-6.1 | isA_Mate, isA_Agent_SDK, isA_Cloud run full CI on self-hosted runners | Cancelled |
+| AC-6.2 | Multi-repo checkout (PAT) works on self-hosted runners | Cancelled |
+| AC-6.3 | Pilot results documented; rollout blockers identified | Cancelled |
 
-### E14-US9: Repo-mirroring DR for the SN white-label fork
-
-**As a** platform owner
-**I want** isA repos mirrored to an independent host
-**So that** CI and the SN white-label sync survive a GitHub account suspension
+### E14-US7: Roll out self-hosted runners to all isA repos — **Cancelled ([ADR 0005](../adr/0005-revert-to-github-hosted-ci.md))**
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-9.1 | All 19 isA repos mirror to an independent Git host (Forgejo/GitLab) | Planned |
-| AC-9.2 | Mirror sync runs automatically; lag is monitored | Planned |
-| AC-9.3 | Documented failover: CI + SN sync can run off the mirror | Planned |
+| AC-7.1 | All 19 isA repos' CI workflows run on self-hosted runners | Cancelled |
+| AC-7.2 | `ubuntu-latest` GitHub-hosted jobs retired | Cancelled (inverted: ubuntu-latest is the standard) |
+| AC-7.3 | Workflow templates (isA_Vibe) updated so new repos inherit the pattern | Cancelled |
 
-### E14-US10: CI/runner setup documentation
+### E14-US8: Runner health and queue-depth dashboard — **Cancelled ([ADR 0005](../adr/0005-revert-to-github-hosted-ci.md))**
+
+> No self-hosted runners to monitor. GitHub-hosted minute usage is monitored
+> via GitHub's built-in org-level Actions usage page; recommend setting a
+> 1500-min soft alert on the org.
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-8.1 | Runner metrics (online count, busy/idle, queue depth) scraped | Cancelled |
+| AC-8.2 | Grafana dashboard for runner health and job latency | Cancelled |
+| AC-8.3 | Alert on all-runners-offline or queue depth above threshold | Cancelled |
+
+### E14-US9: Repo-mirroring DR for the SN white-label fork — **Deferred**
+
+> Originally framed as a DR layer underneath ARC. With ARC removed, this is no
+> longer in scope for Epic 14. GitHub-availability DR remains a real concern
+> for the SN white-label sync; re-open as a standalone epic if/when needed.
+
+#### Acceptance Criteria
+
+| ID | Criteria | Status |
+|----|----------|--------|
+| AC-9.1 | All 19 isA repos mirror to an independent Git host (Forgejo/GitLab) | Deferred |
+| AC-9.2 | Mirror sync runs automatically; lag is monitored | Deferred |
+| AC-9.3 | Documented failover: CI + SN sync can run off the mirror | Deferred |
+
+### E14-US10: CI/local-gate setup documentation
 
 **As a** new contributor
-**I want** pre-commit, pre-push, and runner setup documented
+**I want** pre-commit, pre-push, and CI conventions documented
 **So that** I can get a working local + remote CI environment quickly
+
+> Scope narrowed: the runner setup / DR runbook bullets are dropped (no
+> self-hosted runners, no mirror). What remains is documenting the
+> pre-commit + pre-push local gates and the standard GitHub-hosted CI
+> conventions (paths-ignore, cancel-in-progress, caching).
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
 | AC-10.1 | CONTRIBUTING covers `pre-commit install` and the pre-push hook | Planned |
-| AC-10.2 | Runbook for self-hosted runner deployment and recovery | Planned |
-| AC-10.3 | DR runbook for the mirror failover path | Planned |
+| AC-10.2 | CI conventions doc covers `paths-ignore`, `cancel-in-progress`, caching, `timeout-minutes` | Planned |
+| AC-10.3 | ~~DR runbook for the mirror failover path~~ — moved to deferred DR epic | Cancelled |
 
 ---
 
@@ -1083,7 +1085,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E11: Big Data Platform | P1 | Planned | Ray distributed compute, DAG orchestrator, streaming ETL |
 | E12: Agent Runtime Platform | P0 | Planned | Firecracker/KVM, container-service, VM pool management |
 | E13: Production Readiness | P0 | Planned | SLO, alerting, rate limiting, tracing, backup verification |
-| E14: Platform CI Independence | P0 | Planned | Self-hosted runners on kind, pre-commit, GitHub-billing decoupling |
+| E14: Platform CI Independence | P1 | Scope reduced | Pre-commit + workflow controls on GitHub-hosted CI. Self-hosted runner stories cancelled per [ADR 0005](../adr/0005-revert-to-github-hosted-ci.md). |
 
 ---
 
@@ -1095,5 +1097,5 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ---
 
-**Version**: 2.5.0
-**Last Updated**: 2026-05-21
+**Version**: 2.6.0
+**Last Updated**: 2026-05-28
