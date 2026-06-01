@@ -93,6 +93,20 @@ apisix:
 # Local dev uses the chart-managed etcd statefulset (apisix-etcd)
 etcd:
   enabled: true
+  # Bitnami etcd's default readiness probe uses an exec healthcheck script.
+  # In the local kind stack, repeated probe timeouts accumulated zombie shell
+  # processes on the worker node. Keep the probe in-process-free by using
+  # etcd's HTTP readiness endpoint directly.
+  customReadinessProbe:
+    httpGet:
+      path: /readyz
+      port: 2379
+      scheme: HTTP
+    initialDelaySeconds: 60
+    periodSeconds: 15
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 5
 
 # Dashboard - enabled for local dev
 dashboard:

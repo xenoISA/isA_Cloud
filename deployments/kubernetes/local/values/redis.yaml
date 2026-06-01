@@ -37,6 +37,27 @@ master:
     maxmemory 256mb
     maxmemory-policy allkeys-lru
 
+  # Bitnami Redis defaults to shell-based health probes. Under local kind,
+  # repeated probe timeouts left defunct child processes on the worker node.
+  # TCP probes are enough for local readiness and avoid spawning shells.
+  customLivenessProbe:
+    tcpSocket:
+      port: 6379
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 5
+
+  customReadinessProbe:
+    tcpSocket:
+      port: 6379
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 5
+
   podLabels:
     tier: infrastructure
     environment: local
