@@ -73,6 +73,11 @@ from .tracing import get_tracer, setup_tracing
 from .brand import BrandConfig, get_brand
 
 # =============================================================================
+# Edition (runtime "which edition + which features" contract — ADR 0006)
+# =============================================================================
+from .edition import EditionConfig, EditionType, get_edition
+
+# =============================================================================
 # Plugin / Extension SDK (ADR 0006)
 # =============================================================================
 from .plugin import (
@@ -160,6 +165,10 @@ __all__ = [
     # Brand (white-label config)
     "BrandConfig",
     "get_brand",
+    # Edition (runtime feature flags — ADR 0006)
+    "EditionType",
+    "EditionConfig",
+    "get_edition",
     # Plugin / Extension SDK (ADR 0006)
     "PluginKind",
     "PluginManifest",
