@@ -42,6 +42,7 @@ dependencies = [
     "aiosqlite>=0.19.0",  # Async SQLite
     "duckdb>=0.10.0",  # DuckDB analytics database
     "aiohttp>=3.9.0",  # Async HTTP client (Loki)
+    "pyyaml>=6.0",  # Plugin manifest (plugin.yaml) parsing — ADR 0006
 ]
 
 [project.optional-dependencies]

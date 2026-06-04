@@ -73,6 +73,17 @@ from .tracing import get_tracer, setup_tracing
 from .brand import BrandConfig, get_brand
 
 # =============================================================================
+# Plugin / Extension SDK (ADR 0006)
+# =============================================================================
+from .plugin import (
+    PluginKind,
+    PluginManifest,
+    PluginServiceRegistry,
+    ServiceBinding,
+    load_manifest,
+)
+
+# =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
 # =============================================================================
 # Keep isa_common importable in lean producer runtimes even when local-mode
@@ -149,6 +160,12 @@ __all__ = [
     # Brand (white-label config)
     "BrandConfig",
     "get_brand",
+    # Plugin / Extension SDK (ADR 0006)
+    "PluginKind",
+    "PluginManifest",
+    "ServiceBinding",
+    "PluginServiceRegistry",
+    "load_manifest",
     # Local-mode alternative clients
     "AsyncSQLiteClient",
     "AsyncLocalStorageClient",
