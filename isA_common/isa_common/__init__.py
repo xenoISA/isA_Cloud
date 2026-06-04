@@ -68,6 +68,11 @@ from .observability import setup_observability
 from .tracing import get_tracer, setup_tracing
 
 # =============================================================================
+# Brand (white-label "brand as config" contract)
+# =============================================================================
+from .brand import BrandConfig, get_brand
+
+# =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)
 # =============================================================================
 # Keep isa_common importable in lean producer runtimes even when local-mode
@@ -141,6 +146,9 @@ __all__ = [
     "setup_tracing",
     "get_tracer",
     "setup_observability",
+    # Brand (white-label config)
+    "BrandConfig",
+    "get_brand",
     # Local-mode alternative clients
     "AsyncSQLiteClient",
     "AsyncLocalStorageClient",
