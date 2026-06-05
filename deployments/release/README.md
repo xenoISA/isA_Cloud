@@ -111,8 +111,11 @@ python3 -m pytest tests/unit/test_generate_release_manifest.py -q
 
 ## Phases beyond this MVP (stories under #332)
 
-3. Platform-release workflow (on `platform-v*` tag → verify images → manifest →
-   package+publish → attach bundle to a GitHub Release).
-4. SN mirror integration (point `mirror-to-harbor.sh` at the manifest; SN runbook).
+3. **Platform-release workflow** — [`../../.github/workflows/platform-release.yml`](../../.github/workflows/platform-release.yml):
+   on a `platform-v*` tag → resolve GHCR digests → emit manifest + offline bundle →
+   package charts → publish a GitHub Release with the assets. **(done)**
+4. **SN mirror integration / install runbook** — [`SN-DELIVERY.md`](SN-DELIVERY.md):
+   seed Harbor from the offline-bundle CSV via `mirror-to-harbor.sh`, then
+   `helm install/upgrade` with edition + brand overlays; update + rollback flows. **(done)**
 5. Fix base-image outliers (isA_MCP / isA_user / isA_Admin → build base to GHCR).
 6. ArgoCD image-tag sync from the manifest (`promote-to-production.yml`).
