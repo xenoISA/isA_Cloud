@@ -1,0 +1,179 @@
+name: Platform Release
+
+# ADR 0007 (docs/adr/0007-artifact-delivery.md) phase 3 — the platform-release
+# workflow. A "platform release" pins a coherent set of EXISTING per-repo GHCR
+# images by digest (it does NOT build the 14 service images — each repo's own CI
+# builds + pushes ghcr.io/xenoisa/isa-<service>). This workflow:
+#   1. resolves digests for the pinned version,
+#   2. generates the release manifest + offline-bundle CSV,
+#   3. packages the Helm charts (+ bundled edition overlays),
+#   4. (optionally) OCI-publishes charts, gated off by default,
+#   5. publishes a GitHub Release with the manifest, CSV, and chart .tgz files.
+#
+# Trigger: push a `platform-vX.Y.Z` tag (cuts the release), or run manually via
+# workflow_dispatch with a `version` input (dry-run / re-cut a known version).
+
+on:
+  push:
+    tags:
+      - "platform-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Platform version X.Y.Z (manual run; on tag this is derived from the tag)"
+        required: true
+        type: string
+      publish_charts:
+        description: "OCI-publish charts to oci://ghcr.io/xenoisa/charts (default off)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+  packages: write # read GHCR for digest resolution; (optionally) push OCI charts
+
+env:
+  # GHCR is the single source-of-truth registry (ADR 0007 §1). Charts publish to
+  # the OCI sub-path; image digests are resolved from ghcr.io/xenoisa/isa-<svc>.
+  OCI_REGISTRY: oci://ghcr.io/xenoisa/charts
+
+jobs:
+  release:
+    name: Cut platform release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- 1. Derive PLATFORM_VERSION ------------------------------------------
+      # On a `platform-v*` tag: strip the `platform-v` prefix. On a manual run:
+      # use the `version` input. The generator re-validates X.Y.Z and fails on junk.
+      - name: Derive platform version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ github.event.inputs.version }}"
+          else
+            RAW="${GITHUB_REF_NAME#platform-v}"
+          fi
+          VERSION="${RAW#platform-v}"
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
+            echo "::error::Derived version '$VERSION' is not semver X.Y.Z (ref=${GITHUB_REF_NAME})"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Platform version: $VERSION"
+
+      # --- 2. Toolchain --------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install release-script dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # generate-release-manifest.py needs PyYAML; skopeo resolves @sha256
+          # digests (preferred over `docker pull`, no image download).
+          pip install pyyaml
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+
+      # --- 3. Auth to GHCR so digest resolution works --------------------------
+      # skopeo reads ~/.docker/config.json; `docker login ghcr.io` populates it.
+      # GITHUB_TOKEN can read the org's GHCR packages.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- 4. Generate manifest + offline-bundle CSV (digest-pinned) -----------
+      # Timestamp is INJECTED (the script never calls datetime.now()) so manifests
+      # are reproducible — pass the workflow run's UTC start time.
+      # A release MUST be complete: if any image is missing at this version, fail.
+      - name: Generate release manifest + offline bundle
+        env:
+          RELEASE_GENERATED_AT: ${{ github.event.repository.updated_at }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Resolving GHCR digests for platform v${VERSION} (generated-at ${TS})"
+
+          # Capture stderr (the generator reports "resolved N/M digests" there).
+          python deployments/release/generate-release-manifest.py \
+            --version "$VERSION" \
+            --resolve-digests \
+            --generated-at "$TS" 2> resolve.log || { cat resolve.log; exit 1; }
+          cat resolve.log
+
+          MANIFEST="deployments/release/releases/platform-v${VERSION}.json"
+          CSV="deployments/release/releases/platform-v${VERSION}.offline-bundle.csv"
+          test -f "$MANIFEST" || { echo "::error::manifest not generated: $MANIFEST"; exit 1; }
+          test -f "$CSV" || { echo "::error::offline-bundle CSV not generated: $CSV"; exit 1; }
+
+          # A complete release pins EVERY image-bearing service by digest. If any
+          # service still carries a :tag ref (digest unresolved → image missing at
+          # this version), fail — the release would be incomplete (ADR 0007 §2).
+          UNPINNED="$(python -c 'import json,sys; m=json.load(open(sys.argv[1])); print("\n".join(f"{k} -> {v}" for k,v in m["services"].items() if "@sha256:" not in v))' "$MANIFEST")"
+          if [ -n "$UNPINNED" ]; then
+            echo "::error::release is incomplete — these service images are not digest-pinned (missing at v${VERSION}?):"
+            printf '%s\n' "$UNPINNED"
+            exit 1
+          fi
+          echo "All services digest-pinned. Manifest: $MANIFEST"
+
+      # --- 5. Package charts (+ bundled edition overlays) ----------------------
+      - name: Package Helm charts
+        run: |
+          set -euo pipefail
+          chmod +x deployments/release/package-charts.sh
+          deployments/release/package-charts.sh "${{ steps.ver.outputs.version }}"
+
+      # --- 6. (Optional) OCI-publish charts — gated off by default -------------
+      # Enable by setting repo variable PUBLISH_CHARTS=true, or via the manual
+      # `publish_charts` input. Default: off (MVP / connected-install only).
+      - name: Publish charts to OCI (optional)
+        if: ${{ vars.PUBLISH_CHARTS == 'true' || github.event.inputs.publish_charts == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
+          for tgz in deployments/release/releases/charts/*.tgz; do
+            echo "helm push $tgz ${OCI_REGISTRY}"
+            helm push "$tgz" "${OCI_REGISTRY}"
+          done
+
+      # --- 7. Publish the GitHub Release ---------------------------------------
+      # Attach: the release manifest JSON, the offline-bundle CSV, and chart .tgz.
+      # On a tag push, softprops binds to that tag; on a manual run it creates the
+      # platform-vX.Y.Z tag for the release.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: platform-v${{ steps.ver.outputs.version }}
+          name: Platform v${{ steps.ver.outputs.version }}
+          body: |
+            Platform release **v${{ steps.ver.outputs.version }}** (ADR 0007 artifact delivery).
+
+            Digest-pinned set of edition-agnostic service images + the editions Helm
+            chart. SN seeds Harbor from the attached offline-bundle CSV and installs
+            with edition + brand overlays. See `deployments/release/SN-DELIVERY.md`.
+
+            Assets:
+            - `platform-v${{ steps.ver.outputs.version }}.json` — release manifest (source of truth)
+            - `platform-v${{ steps.ver.outputs.version }}.offline-bundle.csv` — SN mirror input
+            - `isa-service-${{ steps.ver.outputs.version }}.tgz`, `isa-bigdata-${{ steps.ver.outputs.version }}.tgz` — packaged charts
+          files: |
+            deployments/release/releases/platform-v${{ steps.ver.outputs.version }}.json
+            deployments/release/releases/platform-v${{ steps.ver.outputs.version }}.offline-bundle.csv
+            deployments/release/releases/charts/*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
