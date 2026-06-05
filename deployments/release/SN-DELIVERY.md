@@ -1,4 +1,4 @@
-# SN Delivery Runbook — platform release → `harbor.prod.sn.local`
+# SN Delivery Runbook — platform release → `core.harbor.domain`
 
 > Implements **ADR 0007 — Artifact Delivery Pipeline** ([`../../docs/adr/0007-artifact-delivery.md`](../../docs/adr/0007-artifact-delivery.md)),
 > phase 4 (story #320, epic #332). Pairs with the phase-3
@@ -11,11 +11,34 @@ isA platform on the customer's air-gapped cluster from a single, digest-pinned
 
 ## Audience + where this runs
 
-- **Run by:** SN ops, on an SN-internal host that can reach **`harbor.prod.sn.local`**
+- **Run by:** SN ops, on an SN-internal host that can reach **`core.harbor.domain`**
   (the customer Harbor) and, for the seeding step only, the public GHCR mirror —
   OR fully offline via `MODE=archive` sneakernet (see below).
 - **isA side** (this repo) only *produces* the bundle via `platform-release.yml`;
   it never touches the SN cluster.
+
+### SN production environment (real values — per `service-deployment-and-operations-playbook.md`)
+
+> The SN side is **EonKube (Rancher/RKE2), K8s v1.25.6, 3 nodes**. Source of truth
+> for live addresses is that playbook; values below are current as of 2026-06-05.
+
+| Thing | Real value |
+|---|---|
+| Harbor | `core.harbor.domain` == LB **`10.60.65.10`** (self-signed CA, CN `core.harbor.domain`) |
+| Platform namespace | `sn-cloud-production` |
+| Big-data namespace | `sn-bigdata` / `dataphin` |
+| SN edition | **on-prem-full** + brand-sn |
+| Deploy path (now) | **bootstrap**: SSH to a node (`10.60.64.11/12/13`) → `helm` directly. ArgoCD is **待部署** → once up, GitOps with **manual sync** (auto-sync off). |
+
+**Push to SN Harbor — use `skopeo` (bootstrap method, bypasses the self-signed cert):**
+```bash
+# Per image (mirror-to-harbor.sh wraps this over the CSV; raw form for reference):
+skopeo copy --dest-tls-verify=false --dest-creds admin:<HARBOR_PWD> \
+  docker://<source_ref>  docker://10.60.65.10/<project>/<image>:<tag>
+# Offline .imz vendor bundles: docker load -i x.imz → skopeo copy docker-daemon:... docker://10.60.65.10/...
+# Create the Harbor project once: curl -sk -u admin:<pwd> -X POST https://10.60.65.10/api/v2.0/projects -d '{"project_name":"isa","public":false}'
+```
+Cluster pull needs an `imagePullSecret` for Harbor + the Harbor CA trusted on nodes.
 
 ## Hard constraints (why this is offline-first)
 
@@ -24,7 +47,7 @@ From ADR 0007 §Context and the SN production network policy:
 - **~20M international egress budget.** Pull each image **once** into Harbor, then
   never again — plan the seed around this number (`approx_size` column in the CSV).
 - **No public registry pulls post-deploy** (firewall **FW-OUT-001**). Everything
-  the cluster runs MUST already live in `harbor.prod.sn.local`. The chart's images
+  the cluster runs MUST already live in `core.harbor.domain`. The chart's images
   are re-tagged to the Harbor host before `helm install`.
 - **Immutable digests required** — no `:latest`. The release manifest pins every
   service to `@sha256:…`; the offline bundle carries those digests as `source_ref`.
@@ -38,7 +61,7 @@ A `platform-vX.Y.Z` GitHub Release (cut by `platform-release.yml`) attaches:
 | Asset | Role |
 |---|---|
 | `platform-vX.Y.Z.json` | **Release manifest** — single source of truth: `services` (digest-pinned GHCR refs) + `charts` versions. |
-| `platform-vX.Y.Z.offline-bundle.csv` | **Mirror input** — same column shape as SN's `offline-bundle-manifest.csv`; one `MIRROR` row per image → `harbor.prod.sn.local/isa/<image>:X.Y.Z`. |
+| `platform-vX.Y.Z.offline-bundle.csv` | **Mirror input** — same column shape as SN's `offline-bundle-manifest.csv`; one `MIRROR` row per image → `core.harbor.domain/isa/<image>:X.Y.Z`. |
 | `isa-service-X.Y.Z.tgz` | Packaged base service chart (version = platform version). |
 | `isa-bigdata-X.Y.Z.tgz` | Packaged big-data umbrella (on-prem-full only). |
 
@@ -84,7 +107,7 @@ transformation is needed**.
 **Connected seed** (host can reach GHCR + Harbor — pulls each image once, ~20M budget):
 
 ```bash
-export HARBOR=harbor.prod.sn.local
+export HARBOR=core.harbor.domain
 # CSV points at the release's offline bundle; mirror copies source_ref -> harbor_target.
 CSV=platform-v${PLATFORM_VERSION}.offline-bundle.csv ./mirror-to-harbor.sh images
 ```
@@ -99,7 +122,7 @@ MODE=archive ARCHIVE_DIR=./bundle-archive ./mirror-to-harbor.sh load
 ```
 
 After this step every `services.*` digest from the manifest exists in Harbor as
-`harbor.prod.sn.local/isa/<image>:X.Y.Z`. **No further public pulls occur.**
+`core.harbor.domain/isa/<image>:X.Y.Z`. **No further public pulls occur.**
 
 ## Step 2 — Install (first deployment)
 
@@ -107,13 +130,17 @@ SN runs **on-prem-full + brand-sn**. Install the base service chart with the
 edition overlay then the brand overlay (brand last so its env wins, per
 [`../editions/README.md`](../editions/README.md)):
 
+> **Namespaces** (per the env table): the platform release goes in
+> **`sn-cloud-production`**; the big-data umbrella in **`sn-bigdata`**. Any `-n isa`
+> shown below is a placeholder — substitute accordingly.
+
 ```bash
 helm upgrade --install isa-on-prem ./isa-service-${PLATFORM_VERSION}.tgz \
-  --namespace isa --create-namespace \
+  --namespace sn-cloud-production --create-namespace \
   -f editions/values-base.yaml \
   -f editions/values-on-prem-full.yaml \
   -f editions/values-brand-sn.yaml \
-  --set global.imageRegistry=harbor.prod.sn.local/isa \
+  --set global.imageRegistry=core.harbor.domain/isa \
   --wait --timeout 15m
 ```
 
@@ -127,8 +154,8 @@ of the local `.tgz`:
 
 ```bash
 helm upgrade --install isa-on-prem \
-  oci://harbor.prod.sn.local/charts/isa-service --version ${PLATFORM_VERSION} \
-  --namespace isa --create-namespace \
+  oci://core.harbor.domain/charts/isa-service --version ${PLATFORM_VERSION} \
+  --namespace sn-cloud-production --create-namespace \
   -f editions/values-base.yaml \
   -f editions/values-on-prem-full.yaml \
   -f editions/values-brand-sn.yaml \
@@ -142,8 +169,8 @@ helm upgrade --install isa-on-prem \
 
 ```bash
 helm upgrade --install isa-bigdata ./isa-bigdata-${PLATFORM_VERSION}.tgz \
-  --namespace isa \
-  --set global.imageRegistry=harbor.prod.sn.local/isa \
+  --namespace sn-bigdata \
+  --set global.imageRegistry=core.harbor.domain/isa \
   --wait --timeout 20m
 ```
 
@@ -152,11 +179,11 @@ helm upgrade --install isa-bigdata ./isa-bigdata-${PLATFORM_VERSION}.tgz \
 ```bash
 helm status isa-on-prem -n isa
 kubectl get pods -n isa            # all Running / Ready
-kubectl get deploy -n isa -o wide  # IMAGE column shows harbor.prod.sn.local/isa/... (NOT ghcr.io)
+kubectl get deploy -n isa -o wide  # IMAGE column shows core.harbor.domain/isa/... (NOT ghcr.io)
 
 # Confirm no pod is pulling from a public registry (FW-OUT-001 compliance).
 kubectl get pods -n isa -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}' \
-  | grep -v '^harbor.prod.sn.local/' && echo "WARN: non-Harbor image above" || echo "OK — all images Harbor-local"
+  | grep -v '^core.harbor.domain/' && echo "WARN: non-Harbor image above" || echo "OK — all images Harbor-local"
 ```
 
 ## Step 4 — Rollback on failure
@@ -185,7 +212,7 @@ gh release download "$REL" --repo xenoISA/isA_Cloud --dir "$REL" && cd "$REL"
 
 # 1. Mirror the DELTA. mirror-to-harbor.sh skips digests already present in Harbor,
 #    so re-running against the new CSV pulls only changed images (keeps egress low).
-export HARBOR=harbor.prod.sn.local
+export HARBOR=core.harbor.domain
 CSV=platform-v${PLATFORM_VERSION}.offline-bundle.csv ./mirror-to-harbor.sh images
 
 # 2a. Imperative upgrade (same overlays as install).
@@ -194,7 +221,7 @@ helm upgrade isa-on-prem ./isa-service-${PLATFORM_VERSION}.tgz \
   -f editions/values-base.yaml \
   -f editions/values-on-prem-full.yaml \
   -f editions/values-brand-sn.yaml \
-  --set global.imageRegistry=harbor.prod.sn.local/isa \
+  --set global.imageRegistry=core.harbor.domain/isa \
   --wait --timeout 15m
 
 # 2b. OR GitOps: bump the chart/app version in the SN ArgoCD Application to
