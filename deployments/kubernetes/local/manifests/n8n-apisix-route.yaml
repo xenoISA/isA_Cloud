@@ -1,0 +1,192 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-apisix-route-script
+  namespace: isa-cloud-local
+  labels:
+    app: n8n-apisix-route
+    tier: infrastructure
+data:
+  register_routes.sh: |
+    #!/bin/bash
+    # Register n8n APISIX routes — /n8n and /n8n/*
+    # Tracking: isa_maestro multi-engine orchestration
+    set -e
+
+    APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-local.svc.cluster.local:9180}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    CORS_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4100,http://localhost:4200,http://localhost:4300}"
+    AUTH_SERVICE_JWT_KEY="${AUTH_SERVICE_JWT_KEY:-isa_user}"
+    AUTH_SERVICE_JWT_ALGORITHM="${AUTH_SERVICE_JWT_ALGORITHM:-HS256}"
+
+    GREEN='\033[0;32m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+    ok()   { echo -e "${GREEN}OK  $1${NC}"; }
+    err()  { echo -e "${RED}ERR $1${NC}"; }
+    info() { echo -e "${BLUE}INFO $1${NC}"; }
+
+    if [ -z "${AUTH_SERVICE_JWT_SECRET:-}" ]; then
+      err "AUTH_SERVICE_JWT_SECRET is required to validate auth_service HS256 JWTs"
+      exit 1
+    fi
+
+    info "Registering auth-service-jwt consumer for auth_service-issued JWTs..."
+    CONSUMER_RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/consumers/auth-service-jwt" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --arg key "$AUTH_SERVICE_JWT_KEY" \
+          --arg secret "$AUTH_SERVICE_JWT_SECRET" \
+          --arg algorithm "$AUTH_SERVICE_JWT_ALGORITHM" \
+          '{
+            "username": "auth-service-jwt",
+            "plugins": {
+              "jwt-auth": {
+                "key": $key,
+                "secret": $secret,
+                "algorithm": $algorithm
+              }
+            }
+          }')")
+
+    CONSUMER_HTTP=$(echo "$CONSUMER_RESP" | tail -n1)
+    if [ "$CONSUMER_HTTP" = "200" ] || [ "$CONSUMER_HTTP" = "201" ]; then
+      ok "auth-service-jwt consumer registered (HTTP $CONSUMER_HTTP)"
+    else
+      err "Failed to register auth-service-jwt consumer (HTTP $CONSUMER_HTTP)"
+      echo "$CONSUMER_RESP" | head -n -1
+      exit 1
+    fi
+
+    info "Registering n8n_route (/n8n[/*] -> n8n:5678)..."
+
+    PLUGINS=$(jq -n --arg cors "$CORS_ORIGINS" '{
+      "cors": {
+        "allow_origins": $cors,
+        "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+        "expose_headers": "X-Request-ID",
+        "max_age": 86400,
+        "allow_credential": true
+      },
+      "limit-count": {
+        "count": 100,
+        "time_window": 60,
+        "rejected_code": 429,
+        "rejected_msg": "Rate limit exceeded",
+        "policy": "local"
+      },
+      "request-id": { "algorithm": "uuid", "include_in_response": true },
+      "proxy-rewrite": { "regex_uri": ["^/n8n/?(.*)$", "/$1"] },
+      "prometheus": {},
+      "serverless-pre-function": {
+        "phase": "access",
+        "functions": [
+          "return function(conf, ctx) local core = require(\"apisix.core\"); local authorization = core.request.header(ctx, \"authorization\"); if authorization then local token = authorization:match(\"^[Bb]earer%s+(.+)$\") or authorization; core.request.set_header(ctx, \"x-n8n-jwt\", token); end end"
+        ]
+      },
+      "jwt-auth": {
+        "header": "x-n8n-jwt",
+        "key_claim_name": "iss",
+        "hide_credentials": true
+      }
+    }')
+
+    UPSTREAM=$(jq -n '{
+      "type": "roundrobin",
+      "scheme": "http",
+      "pass_host": "pass",
+      "retries": 2,
+      "retry_timeout": 6,
+      "timeout": { "connect": 6, "send": 30, "read": 60 },
+      "keepalive_pool": { "size": 320, "idle_timeout": 60, "requests": 1000 },
+      "nodes": {
+        "n8n.isa-cloud-local.svc.cluster.local:5678": 1
+      }
+    }')
+
+    RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+      "${APISIX_ADMIN_URL}/apisix/admin/routes/n8n_route" \
+      -H "X-API-KEY: ${ADMIN_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -n \
+          --argjson plugins "$PLUGINS" \
+          --argjson upstream "$UPSTREAM" \
+          '{
+            "name": "n8n_route",
+            "uris": ["/n8n", "/n8n/*"],
+            "priority": 10,
+            "status": 1,
+            "plugins": $plugins,
+            "upstream": $upstream
+          }')")
+
+    HTTP=$(echo "$RESP" | tail -n1)
+    if [ "$HTTP" = "200" ] || [ "$HTTP" = "201" ]; then
+      ok "n8n_route registered (HTTP $HTTP)"
+    else
+      err "Failed to register n8n_route (HTTP $HTTP)"
+      echo "$RESP" | head -n -1
+      exit 1
+    fi
+
+    info "n8n APISIX route registered successfully."
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: n8n-apisix-route-register
+  namespace: isa-cloud-local
+  labels:
+    app: n8n-apisix-route
+    tier: infrastructure
+  annotations:
+    # Re-run to reconcile:
+    #   kubectl delete job n8n-apisix-route-register -n isa-cloud-local
+    #   kubectl apply -f n8n-apisix-route.yaml
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: n8n-apisix-route
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache bash curl jq > /dev/null 2>&1
+              bash /scripts/register_routes.sh
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          env:
+            - name: APISIX_ADMIN_URL
+              value: "http://apisix-admin.isa-cloud-local.svc.cluster.local:9180"
+            - name: APISIX_ADMIN_KEY
+              value: "edd1c9f034335f136f87ad84b625c8f1"
+            - name: AUTH_SERVICE_JWT_KEY
+              value: "isa_user"
+            - name: AUTH_SERVICE_JWT_ALGORITHM
+              value: "HS256"
+            - name: AUTH_SERVICE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-jwt
+                  key: jwt-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: n8n-apisix-route-script
+            defaultMode: 0755

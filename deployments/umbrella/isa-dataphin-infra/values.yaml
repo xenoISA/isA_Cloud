@@ -1,0 +1,17 @@
+# =============================================================================
+# isa-dataphin-infra umbrella — defaults
+# =============================================================================
+# DEFAULT pass-through values for the two subcharts. Environment-specific
+# overrides live under deployments/values/*.yaml (top-level keys
+# `postgres-dataphin` and `redis`) and are applied with
+# `-f values/<env>.yaml`, exactly like the isa-bigdata umbrella.
+#
+# Defaults here match the staging tier. They deliberately do NOT match
+# on-prem-full — production opts in via values/on-prem-full.yaml.
+# =============================================================================
+
+postgres-dataphin:
+  enabled: true
+
+redis:
+  enabled: true

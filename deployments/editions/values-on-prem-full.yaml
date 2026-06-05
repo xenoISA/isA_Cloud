@@ -27,6 +27,16 @@
 bigdata:
   enabled: true
 
+# Dataphin data-middle-platform — OPTIONAL on-prem-full component, default OFF.
+# Opt-in by setting `dataphin.enabled: true`. When enabled, the deploy tooling /
+# ArgoCD app additionally installs the isa-dataphin-infra umbrella release
+# (deployments/umbrella/isa-dataphin-infra: a dedicated postgres-dataphin +
+# standalone redis) into the `dataphin` namespace. Dataphin consumes the
+# lakehouse backbone (HMS/Kafka/Apicurio/MinIO/StarRocks/Flink/Iceberg) from the
+# isa-bigdata umbrella above. Absent from SaaS and on-prem-lite editions.
+dataphin:
+  enabled: false
+
 modules:
   metering: true
   charging: false      # on-prem single-tenant: no SaaS billing

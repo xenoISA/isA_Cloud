@@ -44,6 +44,12 @@ Toggles are enforced by `isa_common.edition` flags (`bigdata_enabled`,
 values; the big-data umbrella is a **separate Helm release** installed only when
 `bigdata.enabled` (full edition).
 
+> **Dataphin deploy charts** now live in `deployments/charts/` (`postgres-dataphin`,
+> `redis`) + the `deployments/umbrella/isa-dataphin-infra` umbrella. Dataphin is
+> **opt-in** within on-prem-full via `dataphin.enabled` (default `false` in
+> `deployments/editions/values-on-prem-full.yaml`); it is absent from the SaaS and
+> on-prem-lite editions.
+
 ## SN-only: customer-specific modules (Enterprise full)
 
 Beyond the platform, SN deploys its **24 customer-specific modules** (no isA upstream —

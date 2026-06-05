@@ -1,0 +1,23 @@
+apiVersion: v2
+name: redis
+description: |
+  Standalone Redis for the Dataphin data-middle-platform.
+
+  Dataphin requires a Redis (cache / session / lock store) that no other
+  platform component provides — isa-bigdata has no Redis subchart, and Dataphin
+  must not reach into the shared cloud infra. This is a thin, self-authored
+  chart (StatefulSet + Service + auth Secret) rather than a bitnami wrapper,
+  so it stays fully offline-installable from a private-registry-mirrored image
+  in air-gapped / bandwidth-constrained environments.
+type: application
+version: 0.1.0
+appVersion: "7.4"
+keywords:
+  - redis
+  - dataphin
+  - cache
+home: https://redis.io
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+maintainers:
+  - name: isA Platform
