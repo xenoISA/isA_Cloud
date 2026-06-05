@@ -1,0 +1,49 @@
+# =============================================================================
+# Brand overlay EXAMPLE — SN white-label                  xenoISA/isA_Cloud #316
+# =============================================================================
+# EXAMPLE ONLY (.example.yaml). Shows how a customer white-label overlay sets the
+# BRAND_* contract on top of an on-prem edition, WITHOUT touching the edition
+# files. Apply LAST so its env list wins:
+#
+#   helm install isa-on-prem ./deployments/charts/isa-service \
+#     -f deployments/editions/values-base.yaml \
+#     -f deployments/editions/values-on-prem-full.yaml \
+#     -f deployments/editions/values-brand-sn.example.yaml
+#
+# Brand keys are consumed by isa_common.brand (BRAND_* / AUTH_COOKIE_DOMAIN).
+# See docs/saas-deployment/brand-surface-audit.md for the full surface list and
+# docs/saas-deployment/edition-boundary.md for the white-label boundary.
+#
+# NOTE: a brand overlay restates the FULL env list because Helm replaces (not
+# merges) list-valued keys — so it must re-include the edition env keys it wants
+# to keep. Copy the edition's ISA_* block in, then change only the BRAND_*.
+# Real deliveries: copy this to values-brand-<customer>.yaml (drop `.example`).
+# =============================================================================
+
+env:
+  # --- Edition contract: re-stated from the chosen edition (here: on-prem-full) ---
+  - name: ISA_EDITION
+    value: "on-prem-full"
+  - name: ISA_BIGDATA_ENABLED
+    value: "true"
+  - name: ISA_METERING_ENABLED
+    value: "true"
+  - name: ISA_CHARGING_ENABLED
+    value: "false"
+  - name: ISA_MULTI_TENANT
+    value: "false"
+  # --- Brand contract: SN white-label values ---
+  - name: BRAND_NAME
+    value: "SN"
+  - name: BRAND_DISPLAY_NAME
+    value: "SN Platform"
+  - name: BRAND_ORG_NAME
+    value: "SN"
+  - name: BRAND_SUPPORT_EMAIL
+    value: "support@sn.example.com"
+  - name: AUTH_COOKIE_DOMAIN
+    value: ".sn.example.com"
+  - name: BRAND_PRIMARY_HOST
+    value: "sn.example.com"
+  - name: BRAND_DOCS_URL
+    value: "docs.sn.example.com"
