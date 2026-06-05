@@ -14,14 +14,14 @@
 |---|:---:|:---:|---|
 | **Platform 平台镜像** | ✅ | ✅ 应 sync | isA upstream,sync 到 sn |
 | **Customer-specific 客户专属** | ❌ | ❌ **永不** | 仅 sn 环境,独立演进 |
-| **Orphaned isA 孤儿** | ✅(无 sn 镜像) | 待定 | isA upstream,暂不 fork |
+| **Orphaned isA 孤儿** | ✅(无 sn 镜像) | 已定性(#324) | Admin→平台(第17镜像);IDE/Orch/Reading/Trade/Chain/Frame→isA-only |
 
 > 第四类(规划中):**SaaS-only** —— 多租户/对外收费模块,活在 isA 但
 > **不进白标 fork**(charging policy)。当前尚未拆出独立 repo,见下方「待办」。
 
 ---
 
-## A. Platform 平台镜像(16 — 应 sync)
+## A. Platform 平台镜像(17 — 应 sync;含 #324 新增 isA_Admin)
 
 `sn_X` ↔ `isA_X` 一一对应。sanitizer **只应**对这 16 个运行。
 
@@ -43,9 +43,10 @@
 | sn_training | isA_Training |
 | sn_user | isA_user |
 | sn_vibe | isA_Vibe |
+| sn_admin | isA_Admin (#324, 新增) |
 
 规范化的平台 key(供 sanitizer 白名单使用):
-`agent agent_sdk app_sdk cloud console creative data docs marketing mate mcp model os training user vibe`
+`agent agent_sdk app_sdk cloud console creative data docs marketing mate mcp model os training user vibe admin`
 
 ---
 
@@ -86,12 +87,21 @@
 
 ---
 
-## C. Orphaned isA 孤儿(7 — 有上游、暂无 sn 镜像)
+## C. Orphaned isA 孤儿(7 — 已全部定性,#324 closed 2026-06-05)
 
-存在于 isA upstream,但还没 fork 到 sn。属于平台代码,只是 SN 客户暂未用到。
-**决策待定**:要么纳入未来 sync map(若客户需要),要么标记为 isA-only。
+原为"有上游、暂无 sn 镜像、决策待定"。现已全部定性:
 
-`isA_Admin · isA_Chain · isA_Frame · isA_IDE · isA_Orch · isA_Reading · isA_Trade`
+| repo | 定性 | 处置 |
+|---|---|---|
+| **isA_Admin** | **平台**(白标交付) | **纳入 sync map(第 17 个)** — SN 运维需要管理后台。已加入 `sanitize.sh` PLATFORM_REPOS(sn-platform#27) |
+| isA_IDE | **isA-only 产品** | 不 sync(独立产品,同 Reading/Trade/Chain) |
+| isA_Orch | **isA-only 内部工具** | 不 sync(平台开发工具:code index / project registry,非客户交付物) |
+| isA_Reading | isA-only 产品 | 不 sync(此前已定性) |
+| isA_Trade | isA-only 产品 | 不 sync(此前已定性) |
+| isA_Chain | isA-only 产品 | 不 sync(此前已定性) |
+| isA_Frame | isA-only 产品(EmoFrame) | 不 sync(此前已定性) |
+
+结果:**平台镜像 16 → 17**(+isA_Admin)。其余 6 个孤儿确认为 isA-only,永不进白标。
 
 > 注:`isA_` 是一个空的残留目录,忽略(建议清理)。
 
