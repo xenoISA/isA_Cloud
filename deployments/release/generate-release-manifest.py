@@ -26,7 +26,7 @@ Usage:
   generate-release-manifest.py --version 1.2.3
   generate-release-manifest.py --version 1.2.3 --resolve-digests
   generate-release-manifest.py --version 1.2.3 \
-      --generated-at 2026-06-05T00:00:00Z --harbor-host harbor.prod.sn.local
+      --generated-at 2026-06-05T00:00:00Z --harbor-host core.harbor.domain
 
 Exit non-zero on bad input; prints the two output paths on success.
 """
@@ -51,7 +51,9 @@ except ImportError:  # pragma: no cover - import guard
 
 # --- Constants ---------------------------------------------------------------
 
-DEFAULT_HARBOR_HOST = "harbor.prod.sn.local"
+# SN production Harbor (per service-deployment-and-operations-playbook.md):
+# core.harbor.domain == LB 10.60.65.10. Override with --harbor-host per customer.
+DEFAULT_HARBOR_HOST = "core.harbor.domain"
 HARBOR_PROJECT = "isa"  # harbor.<host>/isa/<image>:<ref>  (white-label sanitizer -> sn)
 
 # Column order MUST match SN's offline-bundle-manifest.csv so mirror-to-harbor.sh
