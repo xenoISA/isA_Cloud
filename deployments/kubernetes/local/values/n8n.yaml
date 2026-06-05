@@ -1,0 +1,65 @@
+# n8n Workflow Automation — local kind cluster (isa-cloud-local)
+# Reuses the in-cluster PostgreSQL ('n8n' DB). Shared platform service:
+# isa_maestro reaches it in-cluster at n8n.isa-cloud-local.svc.cluster.local:5678
+# for its multi-engine process orchestration.
+#
+# Chart: community-charts/n8n  (verified against chart 1.16.41 / appVersion 2.21.4)
+# Tracking issue: isa_maestro multi-engine orchestration
+#
+# Secrets required (created out-of-band, never inline):
+#   - n8n-db-credentials   (key: postgres-password)  — scoped 'n8n' role password
+#   - n8n-encryption-key   (key: N8N_ENCRYPTION_KEY)  — `openssl rand -hex 24`
+#   - n8n-api-key          (key: api-key) — n8n public API key for consumers
+#
+# Re-deploy:  helm upgrade --install n8n community-charts/n8n -n isa-cloud-local -f n8n.yaml
+
+service:
+  type: ClusterIP
+  port: 5678
+
+# n8n public REST API — isa_maestro's N8nAdapter drives workflows through it.
+api:
+  enabled: true
+
+# Single n8n "main" instance (regular mode, no queue/workers) — fine for local dev.
+main:
+  count: 1
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  # n8n keeps local files + credential cache under /home/node/.n8n
+  persistence:
+    enabled: true
+    mountPath: "/home/node/.n8n"
+    size: 4Gi
+  extraEnvVars:
+    GENERIC_TIMEZONE: "UTC"
+    N8N_PROTOCOL: "http"
+
+# Backend store — reuse the in-cluster PostgreSQL, scoped 'n8n' database + role.
+db:
+  type: postgresdb
+
+externalPostgresql:
+  host: "postgresql.isa-cloud-local.svc.cluster.local"
+  port: 5432
+  database: "n8n"
+  username: "n8n"
+  # Password from the scoped K8s secret (chart requires key `postgres-password`).
+  existingSecret: "n8n-db-credentials"
+
+# Encryption key — n8n encrypts saved credentials with it; must be stable across
+# restarts. From a K8s secret (chart requires key `N8N_ENCRYPTION_KEY`).
+existingEncryptionKeySecret: "n8n-encryption-key"
+
+# No ingress in this scoped setup — APISIX is not deployed here; n8n is reached
+# via `kubectl port-forward` (see deployments/kubernetes/local/scripts/README-phase3.md).
+ingress:
+  enabled: false
+
+serviceAccount:
+  create: true

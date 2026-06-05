@@ -1,0 +1,17 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: isa-cloud-n8n
+
+# Phase-3 / n8n-migration bring-up — minimal, COEXISTENCE-safe config.
+#
+# The full `kind-config.yaml` maps ~40 host ports (5432, 6379, 9010, …).
+# Those collide with the already-running `isa-cloud-local` cluster — two kind
+# clusters cannot bind the same host ports — which is why a bring-up with the
+# full config fails with "port is already allocated".
+#
+# This config maps NO host ports, so `isa-cloud-n8n` coexists cleanly with
+# `isa-cloud-local`. Services (n8n, Postgres) are reached via
+# `kubectl port-forward`. A single control-plane node is plenty for the
+# Phase-3 footprint (Postgres + n8n).
+nodes:
+  - role: control-plane

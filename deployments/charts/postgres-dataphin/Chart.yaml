@@ -1,0 +1,38 @@
+apiVersion: v2
+name: postgres-dataphin
+description: |
+  Dedicated PostgreSQL instance for the Dataphin data-middle-platform.
+
+  Dataphin is NOT a normal single-database consumer of postgres-bigdata.
+  Its installer (init-postgresql.sh, shipped in dataphin.tar.gz) connects
+  as the postgres SUPERUSER and creates ~18 datasource databases/roles
+  (rs, sop, oneid, quality, stream_meta, datasecurity, qd.*, ...) plus
+  roles with `ALTER ROLE ... LOGIN SUPERUSER`. Hosting that on the shared
+  postgres-bigdata instance (which backs hive-metastore + apicurio) would
+  break tenant isolation, so Dataphin gets its own instance here.
+
+  Wraps the bitnami/postgresql chart with our profile defaults, matching
+  postgres-bigdata so the two read alike. We deliberately do NOT pre-create
+  the Dataphin databases via initdb — Dataphin's own installer owns that.
+  This chart only provides a clean instance plus the postgres superuser
+  credential the installer needs.
+
+  Optional on-prem-full component, opt-in via `dataphin.enabled` (default off).
+type: application
+version: 0.1.0
+appVersion: "18.3.0"
+keywords:
+  - postgresql
+  - dataphin
+  - data-platform
+  - metadata
+home: https://github.com/bitnami/charts/tree/main/bitnami/postgresql
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+  - https://github.com/bitnami/charts
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: postgresql
+    version: "18.6.3"
+    repository: https://charts.bitnami.com/bitnami

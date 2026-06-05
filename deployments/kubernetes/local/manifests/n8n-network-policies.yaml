@@ -1,0 +1,65 @@
+# Network policies for n8n (shared platform service).
+# Default-deny posture is set in network-policies.yaml; this file adds the
+# explicit allow-lists for the n8n workflow automation service.
+#
+# Apply: kubectl apply -f n8n-network-policies.yaml
+# Verify:
+#   kubectl run -n isa-cloud-local --rm -i --restart=Never test \
+#     --image=alpine -- sh -c 'apk add --no-cache curl >/dev/null 2>&1 && \
+#       curl -s -o /dev/null -w "HTTP %{http_code}" http://n8n:5678/healthz'
+#   # Expect: timeout (denied) when test pod has no allowed labels.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: n8n-allow
+  namespace: isa-cloud-local
+  labels:
+    app.kubernetes.io/instance: n8n
+    tier: backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: n8n
+
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # APISIX gateway -> n8n:5678  (the only "public" path)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - { protocol: TCP, port: 5678 }
+
+    # isa_maestro pods (multi-engine orchestration calling the n8n public API
+    # directly in-cluster, bypassing the APISIX gateway).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maestro
+      ports:
+        - { protocol: TCP, port: 5678 }
+
+    # Same-pod readiness/liveness probes from kubelet (allowed by default but
+    # documented here for clarity).
+
+  egress:
+    # PostgreSQL backend store
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - { protocol: TCP, port: 5432 }
+
+    # CoreDNS — required for any DNS resolution in-cluster
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
