@@ -152,7 +152,7 @@ namespaceInit:
   # The flink-sql-runner image — carries sql-client.sh + the iceberg/hive jars.
   # Air-gapped deployments override the repository to a private registry mirror.
   image:
-    repository: ghcr.io/xenoISA/flink-sql-runner
+    repository: ghcr.io/xenoisa/flink-sql-runner
     tag: "1.20.0-runner-1.10.0-iceberg-1.7.2"
     pullPolicy: IfNotPresent
   backoffLimit: 3

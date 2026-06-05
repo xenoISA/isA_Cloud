@@ -31,7 +31,7 @@ Usage:
   verify-model-runtime-production.sh [options]
 
 Options:
-  -n, --namespace NAME          SN workload namespace (default: isa-cloud-production)
+  -n, --namespace NAME          isA workload namespace (default: isa-cloud-production)
       --gpu-namespace NAME      GPU Operator namespace (default: gpu-operator)
       --apisix-base-url URL     APISIX base URL for external route smoke
       --gates LIST              Comma-separated gates to run
@@ -131,13 +131,13 @@ gate_m1_gpu_placement() {
   local context
   context="$(kubectl config current-context 2>/dev/null || true)"
   if [[ "${context}" =~ (^|[-_])(kind|isa)([-_]|$) ]]; then
-    record "M-1 GPU placement" SKIP "Context ${context} is not a clean SN production cluster"
-    warn "M-1 SKIP — current context is not SN production: ${context}"
+    record "M-1 GPU placement" SKIP "Context ${context} is not a clean isA production cluster"
+    warn "M-1 SKIP — current context is not isA production: ${context}"
     return
   fi
 
   local gpu_nodes
-  gpu_nodes="$(kubectl get nodes -l nvidia.com/gpu.present=true -L sn.node/gpu-count --no-headers 2>/dev/null || true)"
+  gpu_nodes="$(kubectl get nodes -l nvidia.com/gpu.present=true -L isa.node/gpu-count --no-headers 2>/dev/null || true)"
   if [[ -z "${gpu_nodes}" ]]; then
     record "M-1 GPU placement" FAIL "No nodes with nvidia.com/gpu.present=true"
     return
