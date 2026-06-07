@@ -44,11 +44,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # --- platform base image (build FIRST; isa-os/isa-model FROM it) ---
+          - svc: isa-python-base
+            repos: isA_Vibe
+            dockerfile: isA_Vibe/deployment/base/Dockerfile.python-base
+            context: isA_Vibe
           # --- self-contained (single-repo build context) ---
           - svc: isa-mcp
             repos: isA_MCP
             dockerfile: isA_MCP/deployment/docker/Dockerfile
             context: isA_MCP
+          - svc: isa-os
+            repos: isA_OS
+            dockerfile: isA_OS/web_services/deployment/docker/Dockerfile
+            context: isA_OS/web_services
           - svc: isa-data
             repos: isA_Data
             dockerfile: isA_Data/deployment/docker/Dockerfile
