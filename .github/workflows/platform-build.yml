@@ -83,6 +83,11 @@ jobs:
             repos: isA_Agent isA_Agent_SDK isA_Model isA_Cloud
             dockerfile: isA_Agent/deployment/docker/Dockerfile
             context: .
+          # --- frontend (Next.js); needs isA_App_SDK nested at <repo>/isA_App_SDK ---
+          - svc: isa-console
+            repos: isA_Console
+            dockerfile: isA_Console/Dockerfile
+            context: isA_Console
     name: build ${{ matrix.svc }}
     steps:
       - name: Select (skip if not requested)
@@ -103,6 +108,13 @@ jobs:
             git clone --depth 1 \
               "https://x-access-token:${{ secrets.PLATFORM_BUILD_PAT }}@github.com/xenoisa/$r.git" "$r"
           done
+
+      - name: (frontend) nest isA_App_SDK for Next.js link: deps
+        if: steps.pick.outputs.go == 'true' && matrix.svc == 'isa-console'
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${{ secrets.PLATFORM_BUILD_PAT }}@github.com/xenoisa/isA_App_SDK.git" \
+            isA_Console/isA_App_SDK
 
       - name: Set up Buildx
         if: steps.pick.outputs.go == 'true'
