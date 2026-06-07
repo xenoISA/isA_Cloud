@@ -61,10 +61,18 @@ spec:
         ports:
         - containerPort: {{ .Values.port }}
           name: http
-        {{- if .Values.configMapRef }}
+        {{- if or .Values.configMapRef .Values.secretRef }}
         envFrom:
+        {{- if .Values.configMapRef }}
         - configMapRef:
             name: {{ .Values.configMapRef }}
+        {{- end }}
+        {{- if .Values.secretRef }}
+        # infra credentials (ESO-synced from Vault) — keys are env-var names
+        # (POSTGRES_PASSWORD, REDIS_PASSWORD, ...). Hosts come from configMapRef.
+        - secretRef:
+            name: {{ .Values.secretRef }}
+        {{- end }}
         {{- end }}
         env:
         {{- if .Values.observability }}
@@ -93,6 +101,10 @@ spec:
             port: {{ .Values.port }}
           initialDelaySeconds: {{ .Values.health.initialDelaySeconds }}
           periodSeconds: {{ .Values.health.periodSeconds }}
+          # k8s default timeout is 1s — too tight for heavy services whose
+          # /health does real work. Configurable; default 5s / 3 failures.
+          timeoutSeconds: {{ .Values.health.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.health.failureThreshold | default 3 }}
         {{- if .Values.volumeMounts }}
         volumeMounts:
         {{- toYaml .Values.volumeMounts | nindent 8 }}
@@ -106,6 +118,8 @@ spec:
             port: {{ .Values.port }}
           initialDelaySeconds: {{ .Values.liveness.initialDelaySeconds | default 15 }}
           periodSeconds: {{ .Values.liveness.periodSeconds | default 20 }}
+          timeoutSeconds: {{ .Values.liveness.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.liveness.failureThreshold | default 3 }}
         {{- if and .Values.startupProbe .Values.startupProbe.enabled }}
         # startupProbe holds liveness off until the app is fully booted.
         # Total budget = failureThreshold * periodSeconds.
