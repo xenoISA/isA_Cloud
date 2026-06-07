@@ -133,13 +133,17 @@ jobs:
         if: steps.pick.outputs.go == 'true'
         uses: docker/setup-buildx-action@v3
 
+      # Use the org-wide PLATFORM_BUILD_PAT (not GITHUB_TOKEN) so this workflow
+      # can push EVERY canonical isa-<svc> package regardless of which repo a
+      # pre-existing package is linked to. (isa-admin was created linked to
+      # isA_Admin during onboarding #324; the repo-scoped GITHUB_TOKEN got 403.)
       - name: Log in to GHCR
         if: steps.pick.outputs.go == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.PLATFORM_BUILD_PAT }}
 
       - name: Build & push ${{ matrix.svc }} (native amd64)
         if: steps.pick.outputs.go == 'true'
