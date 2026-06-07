@@ -123,6 +123,8 @@ jobs:
       - name: "(frontend) nest isA_App_SDK for the combined pnpm workspace"
         if: steps.pick.outputs.go == 'true' && matrix.frontend == 'true'
         run: |
+          # some repos commit a symlink isA_App_SDK -> ../isA_App_SDK; replace it
+          rm -rf "${{ matrix.repos }}/isA_App_SDK"
           git clone --depth 1 \
             "https://x-access-token:${{ secrets.PLATFORM_BUILD_PAT }}@github.com/xenoisa/isA_App_SDK.git" \
             "${{ matrix.repos }}/isA_App_SDK"
