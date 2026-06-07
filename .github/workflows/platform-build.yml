@@ -109,7 +109,7 @@ jobs:
               "https://x-access-token:${{ secrets.PLATFORM_BUILD_PAT }}@github.com/xenoisa/$r.git" "$r"
           done
 
-      - name: (frontend) nest isA_App_SDK for Next.js link: deps
+      - name: "(frontend) nest isA_App_SDK for Next.js link deps"
         if: steps.pick.outputs.go == 'true' && matrix.svc == 'isa-console'
         run: |
           git clone --depth 1 \
