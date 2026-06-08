@@ -1,0 +1,240 @@
+# Faster-Whisper Production Runtime — Whisper Large V3 Turbo
+#
+# Staged local STT runtime for the unified isA_Cloud production profile.
+# This is a specialty role engine and consumes one physical GPU until the
+# grouped specialty runtime is introduced for sub-card co-location.
+# The production deploy script rewrites namespace: isa-cloud-production to the
+# requested NAMESPACE, e.g. sn-cloud-production for SN bootstrap deployments.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-whisper
+  namespace: isa-cloud-production
+  labels:
+    app: faster-whisper-v3-turbo
+    isa-model/model-id: whisper-large-v3-turbo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 80Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: faster-whisper-v3-turbo-config
+  namespace: isa-cloud-production
+  labels:
+    app: faster-whisper-v3-turbo
+    engine: faster-whisper
+data:
+  MODEL_ID: "openai/whisper-large-v3-turbo"
+  WHISPER_MODEL: "Systran/faster-whisper-large-v3-turbo"
+  COMPUTE_TYPE: "float16"
+  DEVICE: "cuda"
+  BEAM_SIZE: "5"
+  BATCH_SIZE: "8"
+  MAX_CONCURRENT_REQUESTS: "8"
+  TASK: "transcribe"
+  ENABLE_VAD: "true"
+  IDLE_TIMEOUT_SECONDS: "0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faster-whisper-v3-turbo
+  namespace: isa-cloud-production
+  labels:
+    app: faster-whisper-v3-turbo
+    engine: faster-whisper
+    isa-model/instance-group: specialty
+    isa-model/model-id: whisper-large-v3-turbo
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2400
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: faster-whisper-v3-turbo
+  template:
+    metadata:
+      labels:
+        app: faster-whisper-v3-turbo
+        engine: faster-whisper
+        isa-model/instance-group: specialty
+        isa-model/model-id: whisper-large-v3-turbo
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: faster-whisper
+          image: fedirz/faster-whisper-server:latest-cuda
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: MODEL_ID
+            - name: WHISPER__MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: WHISPER_MODEL
+            - name: WHISPER__COMPUTE_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: COMPUTE_TYPE
+            - name: WHISPER__DEVICE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: DEVICE
+            - name: WHISPER__INFERENCE_DEVICE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: DEVICE
+            - name: WHISPER__TTL
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: IDLE_TIMEOUT_SECONDS
+            - name: DEFAULT_LANGUAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: LANGUAGE
+                  optional: true
+            - name: DEFAULT_TASK
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: TASK
+            - name: BEAM_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: BEAM_SIZE
+            - name: BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: BATCH_SIZE
+            - name: MAX_CONCURRENT_REQUESTS
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: MAX_CONCURRENT_REQUESTS
+            - name: ENABLE_VAD
+              valueFrom:
+                configMapKeyRef:
+                  name: faster-whisper-v3-turbo-config
+                  key: ENABLE_VAD
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          resources:
+            requests:
+              cpu: "4000m"
+              memory: "12Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8000m"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 240
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-whisper
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: faster-whisper-v3-turbo
+  namespace: isa-cloud-production
+  labels:
+    app: faster-whisper-v3-turbo
+    engine: faster-whisper
+spec:
+  type: ClusterIP
+  selector:
+    app: faster-whisper-v3-turbo
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: faster-whisper-v3-turbo
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: faster-whisper-v3-turbo
