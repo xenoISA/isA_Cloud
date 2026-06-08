@@ -21,13 +21,17 @@
 # Provider & Sizing Flags (optional — apply to any command):
 #   --provider <name>    Select storage profile (infotrend, aws, generic)
 #   --nodes <count>      Select resource profile (3, 5, etc.)
+#   --brand <name>       Select customer brand overlay (sn, isa, etc.)
+#   --edition <name>     Select delivery edition (on-prem-full, on-prem-lite, etc.)
+#   --gpu-role-profile <profile>
+#                        Apply GPU node role labels (sn-3node)
 #   --skip-preflight     Skip pre-flight verification checks
 # =============================================================================
 
 set -e
 
 # Configuration
-NAMESPACE="isa-cloud-production"
+NAMESPACE="${NAMESPACE:-isa-cloud-production}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VALUES_DIR="${SCRIPT_DIR}/../values"
 MANIFESTS_DIR="${SCRIPT_DIR}/../manifests"
@@ -37,6 +41,9 @@ TIMEOUT="10m"
 # Provider & sizing (set via flags, see parse_global_flags)
 PROVIDER=""
 NODE_COUNT=""
+BRAND="${BRAND:-}"
+EDITION="${EDITION:-}"
+GPU_ROLE_PROFILE="${GPU_ROLE_PROFILE:-}"
 SKIP_PREFLIGHT=false
 
 # Colors
@@ -61,7 +68,7 @@ confirm() {
     fi
 }
 
-# Parse global flags (--provider, --nodes, --skip-preflight)
+# Parse global flags (--provider, --nodes, --brand, --edition, --skip-preflight)
 # Called from main() before dispatching to subcommands
 parse_global_flags() {
     local args=()
@@ -69,6 +76,9 @@ parse_global_flags() {
         case $1 in
             --provider)       PROVIDER="$2"; shift 2 ;;
             --nodes)          NODE_COUNT="$2"; shift 2 ;;
+            --brand)          BRAND="$2"; shift 2 ;;
+            --edition)        EDITION="$2"; shift 2 ;;
+            --gpu-role-profile) GPU_ROLE_PROFILE="$2"; shift 2 ;;
             --skip-preflight) SKIP_PREFLIGHT=true; shift ;;
             *)                args+=("$1"); shift ;;
         esac
@@ -110,6 +120,70 @@ resolve_storage() {
         fi
     fi
     echo ""
+}
+
+apply_manifest_for_namespace() {
+    local manifest="$1"
+    if [[ ! -f "$manifest" ]]; then
+        log_error "Manifest not found: ${manifest}"
+        exit 1
+    fi
+
+    sed "s/namespace: isa-cloud-production/namespace: ${NAMESPACE}/g" "$manifest" | kubectl apply -f -
+}
+
+apply_gpu_role_profile() {
+    local profile="${GPU_ROLE_PROFILE}"
+    if [[ -z "${profile}" && "${BRAND}" == "sn" && "${NODE_COUNT}" == "3" ]]; then
+        profile="sn-3node"
+    fi
+
+    case "${profile}" in
+        "")
+            log_warn "No GPU role profile selected; relying on generic NVIDIA GPU labels"
+            ;;
+        sn-3node)
+            log_step "Applying SN 3-node GPU role labels..."
+            local llm_nodes="${LLM_NODES:-sn-prod-k8s-01 sn-prod-k8s-02}"
+            local specialty_nodes="${SPECIALTY_NODES:-sn-prod-k8s-03}"
+            local elastic_nodes="${ELASTIC_NODES:-sn-prod-k8s-03}"
+            local node
+
+            for node in ${llm_nodes}; do
+                kubectl label node "${node}" \
+                    isa.io/gpu-role-llm=true \
+                    isa.io/gpu-physical-count=2 \
+                    isa.node/gpu=true \
+                    isa.node/gpu-count=2 \
+                    sn.io/gpu-role=llm \
+                    sn.node/gpu=true \
+                    sn.node/gpu-count=2 \
+                    --overwrite
+            done
+
+            for node in ${specialty_nodes}; do
+                kubectl label node "${node}" \
+                    isa.io/gpu-role-specialty=true \
+                    isa.io/gpu-physical-count=2 \
+                    isa.node/gpu=true \
+                    isa.node/gpu-count=2 \
+                    sn.io/gpu-role=specialty \
+                    sn.node/gpu=true \
+                    sn.node/gpu-count=2 \
+                    --overwrite
+            done
+
+            for node in ${elastic_nodes}; do
+                kubectl label node "${node}" \
+                    isa.io/gpu-role-elastic=true \
+                    --overwrite
+            done
+            ;;
+        *)
+            log_error "Unknown GPU role profile: ${profile}"
+            exit 1
+            ;;
+    esac
 }
 
 # Run pre-flight checks
@@ -427,15 +501,20 @@ deploy_gpu() {
 
     # 2. Apply GPU node labels
     log_step "Applying GPU node configuration..."
-    kubectl apply -f "${MANIFESTS_DIR}/gpu/gpu-node-labels.yaml"
+    apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/gpu-node-labels.yaml"
+    apply_gpu_role_profile
 
     # 3. Create model cache PVCs
     log_step "Creating model cache PVCs..."
-    kubectl apply -f "${MANIFESTS_DIR}/gpu/model-cache-pvc.yaml"
+    apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/model-cache-pvc.yaml"
+
+    # 3b. Publish the local inference catalog used by isa_model/sn_model routing.
+    log_step "Publishing local inference catalog..."
+    apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/local-inference-catalog.yaml"
 
     # 4. Pre-pull models
     log_step "Running model pre-pull job..."
-    kubectl apply -f "${MANIFESTS_DIR}/gpu/model-prepull-job.yaml"
+    apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/model-prepull-job.yaml"
     log_info "Model download started in background (check: kubectl logs job/model-prepull-vllm -n ${NAMESPACE})"
 
     # 5. Deploy vLLM
@@ -444,9 +523,16 @@ deploy_gpu() {
         -n ${NAMESPACE} \
         $(helm_values vllm) \
         --wait --timeout 15m || {
-        # Fallback: deploy as raw manifest if no Helm chart
-        log_warn "vLLM Helm chart not available, deploying via values as reference..."
+        log_warn "vLLM Helm chart not available, deploying bundled manifest fallback..."
+        apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/vllm-deployment.yaml"
+        kubectl -n ${NAMESPACE} rollout status deploy/vllm --timeout=15m
     }
+
+    if [[ "${ENABLE_LOCAL_EMBEDDING_RUNTIME:-true}" == "true" ]]; then
+        log_step "Deploying vLLM embedding runtime..."
+        apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/vllm-embedding-deployment.yaml"
+        kubectl -n ${NAMESPACE} rollout status deploy/vllm-qwen3-embedding-8b --timeout=30m
+    fi
 
     # 6. Deploy Triton
     log_step "Deploying Triton Inference Server..."
@@ -466,7 +552,7 @@ deploy_gpu() {
 
     # 8. Apply monitoring
     log_step "Applying GPU monitoring dashboards and alerts..."
-    kubectl apply -f "${MANIFESTS_DIR}/gpu/gpu-grafana-dashboard.yaml"
+    apply_manifest_for_namespace "${MANIFESTS_DIR}/gpu/gpu-grafana-dashboard.yaml"
 
     log_info "GPU infrastructure deployment complete!"
     run_healthcheck
@@ -720,12 +806,17 @@ usage() {
     echo "Flags:"
     echo "  --provider <name>    Storage profile (infotrend, aws, generic)"
     echo "  --nodes <count>      Resource profile (3, 5, etc.)"
+    echo "  --brand <name>       Customer brand overlay (sn, isa, etc.)"
+    echo "  --edition <name>     Delivery edition (on-prem-full, on-prem-lite, etc.)"
+    echo "  --gpu-role-profile <profile>"
+    echo "                       GPU placement profile (sn-3node)"
     echo "  --skip-preflight     Skip pre-flight verification"
     echo ""
     echo "Examples:"
     echo "  $0 status                                     # Check current status"
     echo "  $0 infrastructure                             # Deploy (default profile)"
     echo "  $0 infrastructure --provider infotrend --nodes 3  # Infotrend 3-node"
+    echo "  NAMESPACE=sn-cloud-production $0 gpu --provider infotrend --nodes 3 --brand sn --edition on-prem-full"
     echo "  $0 all --provider aws --nodes 5               # AWS 5-node cluster"
     echo "  $0 rollback postgresql                        # Rollback PostgreSQL"
     echo ""
@@ -735,7 +826,7 @@ usage() {
 
 # Main
 main() {
-    # Parse global flags first (--provider, --nodes, --skip-preflight)
+    # Parse global flags first (--provider, --nodes, --brand, --edition, --skip-preflight)
     parse_global_flags "$@"
     set -- "${REMAINING_ARGS[@]}"
 
@@ -745,6 +836,9 @@ main() {
     # Log provider/node config if set
     [[ -n "$PROVIDER" ]] && log_info "Provider profile: ${PROVIDER}"
     [[ -n "$NODE_COUNT" ]] && log_info "Node count profile: ${NODE_COUNT}-node"
+    [[ -n "$BRAND" ]] && log_info "Brand profile: ${BRAND}"
+    [[ -n "$EDITION" ]] && log_info "Edition profile: ${EDITION}"
+    [[ -n "$GPU_ROLE_PROFILE" ]] && log_info "GPU role profile: ${GPU_ROLE_PROFILE}"
 
     case "${command}" in
         secrets)

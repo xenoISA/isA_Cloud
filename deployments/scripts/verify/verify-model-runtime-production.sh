@@ -9,7 +9,11 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-isa-cloud-production}"
 GPU_NAMESPACE="${GPU_NAMESPACE:-gpu-operator}"
 APISIX_BASE_URL="${APISIX_BASE_URL:-}"
-GATES="${GATES:-M-1,M-2,M-3,M-4,M-5,M-6,M-7,M-8,R-1,R-2}"
+EXPECTED_GPU_ROLE_PROFILE="${EXPECTED_GPU_ROLE_PROFILE:-}"
+if [[ -z "${EXPECTED_GPU_ROLE_PROFILE}" && "${NAMESPACE}" == sn-* ]]; then
+  EXPECTED_GPU_ROLE_PROFILE="sn-3node"
+fi
+GATES="${GATES:-M-0,M-1,M-2,M-3,M-4,M-5,M-6,M-7,M-8,M-9,R-1,R-2}"
 EVIDENCE_FILE="${EVIDENCE_FILE:-}"
 TIMEOUT_READY="${TIMEOUT_READY:-10m}"
 
@@ -39,6 +43,7 @@ Options:
   -h, --help                    Show help
 
 Default gates:
+  M-0 GPU role profile labels
   M-1 GPU placement
   M-2 GPU Operator readiness
   M-3 model cache PVC readiness
@@ -47,6 +52,7 @@ Default gates:
   M-6 Ray GPU readiness
   M-7 model pre-pull/model registry evidence
   M-8 APISIX and internal service path smoke
+  M-9 physical GPU accounting / time-slicing guard
   R-1 privileged runtime workload evidence
   R-2 KVM/Ignite readiness evidence
 USAGE
@@ -101,6 +107,15 @@ probe_http_service() {
   local remote_port="$3"
   local path="$4"
 
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl not on PATH; cannot probe HTTP service"
+    return 1
+  fi
+  if ! command -v nc >/dev/null 2>&1; then
+    warn "nc not on PATH; cannot wait for port-forward readiness"
+    return 1
+  fi
+
   kubectl -n "${NAMESPACE}" port-forward "svc/${svc}" "${local_port}:${remote_port}" \
     >/dev/null 2>&1 &
   local pf_pid=$!
@@ -125,6 +140,31 @@ probe_http_service() {
   return "${rc}"
 }
 
+gate_m0_gpu_role_profile() {
+  log "M-0: GPU role profile labels"
+  if [[ -z "${EXPECTED_GPU_ROLE_PROFILE}" ]]; then
+    record "M-0 GPU role profile" SKIP "EXPECTED_GPU_ROLE_PROFILE not set"
+    return
+  fi
+
+  case "${EXPECTED_GPU_ROLE_PROFILE}" in
+    sn-3node)
+      local llm specialty elastic
+      llm="$(kubectl get nodes -l isa.io/gpu-role-llm=true --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      specialty="$(kubectl get nodes -l isa.io/gpu-role-specialty=true --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      elastic="$(kubectl get nodes -l isa.io/gpu-role-elastic=true --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      if [[ "${llm}" == "2" && "${specialty}" == "1" && "${elastic}" == "1" ]]; then
+        record "M-0 GPU role profile" PASS "sn-3node labels present: llm=2 specialty=1 elastic=1"
+      else
+        record "M-0 GPU role profile" FAIL "sn-3node labels mismatch: llm=${llm} specialty=${specialty} elastic=${elastic}"
+      fi
+      ;;
+    *)
+      record "M-0 GPU role profile" SKIP "Unknown expected profile: ${EXPECTED_GPU_ROLE_PROFILE}"
+      ;;
+  esac
+}
+
 gate_m1_gpu_placement() {
   log "M-1: GPU placement"
 
@@ -137,20 +177,42 @@ gate_m1_gpu_placement() {
   fi
 
   local gpu_nodes
-  gpu_nodes="$(kubectl get nodes -l nvidia.com/gpu.present=true -L isa.node/gpu-count --no-headers 2>/dev/null || true)"
+  gpu_nodes="$(kubectl get nodes -l nvidia.com/gpu.present=true -L nvidia.com/gpu.count -L isa.node/gpu-count --no-headers 2>/dev/null || true)"
   if [[ -z "${gpu_nodes}" ]]; then
     record "M-1 GPU placement" FAIL "No nodes with nvidia.com/gpu.present=true"
     return
   fi
 
   local count_two
-  count_two="$(printf '%s\n' "${gpu_nodes}" | awk '$NF == "2" { count++ } END { print count + 0 }')"
+  count_two="$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{range .items[*]}{.metadata.labels.nvidia\.com/gpu\.count}{"\n"}{end}' 2>/dev/null | awk '$1 == "2" { count++ } END { print count + 0 }')"
   if [[ "${count_two}" == "3" ]]; then
     record "M-1 GPU placement" PASS "Verified 2+2+2 placement across 3 GPU nodes"
   else
     local actual
     actual="$(printf '%s' "${gpu_nodes}" | tr '\n' ';')"
     record "M-1 GPU placement" PASS "Actual GPU placement recorded: ${actual}"
+  fi
+}
+
+gate_m9_physical_gpu_accounting() {
+  log "M-9: physical GPU accounting"
+  local rows
+  rows="$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.nvidia\.com/gpu\.count}{"\t"}{.status.allocatable.nvidia\.com/gpu}{"\t"}{.metadata.labels.nvidia\.com/gpu\.sharing-strategy}{"\t"}{.metadata.labels.nvidia\.com/gpu\.replicas}{"\n"}{end}' 2>/dev/null || true)"
+  if [[ -z "${rows}" ]]; then
+    record "M-9 physical GPU accounting" FAIL "No NVIDIA GPU node accounting data"
+    return
+  fi
+
+  local unsafe
+  unsafe="$(printf '%s\n' "${rows}" | awk '($4 == "time-slicing") || ($5 != "" && $5 != "1") || ($3 != "" && $2 != "" && $3 != $2) { print }')"
+  if [[ -n "${unsafe}" ]]; then
+    local compact
+    compact="$(printf '%s' "${unsafe}" | tr '\n' ';')"
+    record "M-9 physical GPU accounting" FAIL "Logical GPU sharing active; physical policy not enforceable: ${compact}"
+  else
+    local compact
+    compact="$(printf '%s' "${rows}" | tr '\n' ';')"
+    record "M-9 physical GPU accounting" PASS "nvidia.com/gpu matches physical GPUs: ${compact}"
   fi
 }
 
@@ -201,6 +263,17 @@ gate_m4_vllm() {
     record "M-4 vLLM" PASS "${svc} /health OK"
   else
     record "M-4 vLLM" FAIL "${svc} /health failed"
+  fi
+
+  local embedding_svc
+  if embedding_svc="$(first_existing_service vllm-qwen3-embedding-8b)"; then
+    if probe_http_service "${embedding_svc}" 18002 8000 /health; then
+      record "M-4 vLLM embedding" PASS "${embedding_svc} /health OK"
+    else
+      record "M-4 vLLM embedding" FAIL "${embedding_svc} /health failed"
+    fi
+  else
+    record "M-4 vLLM embedding" SKIP "vLLM embedding Service not found"
   fi
 }
 
@@ -336,8 +409,6 @@ print_summary() {
 
 main() {
   command -v kubectl >/dev/null 2>&1 || die "kubectl not on PATH"
-  command -v curl >/dev/null 2>&1 || die "curl not on PATH"
-  command -v nc >/dev/null 2>&1 || die "nc not on PATH"
 
   IFS=',' read -ra requested <<<"${GATES}"
   for gate in "${requested[@]}"; do
@@ -350,6 +421,8 @@ main() {
       M-6) gate_m6_ray_gpu ;;
       M-7) gate_m7_model_prepull ;;
       M-8) gate_m8_routes ;;
+      M-0) gate_m0_gpu_role_profile ;;
+      M-9) gate_m9_physical_gpu_accounting ;;
       R-1) gate_r1_privileged_runtime ;;
       R-2) gate_r2_kvm_ignite ;;
       *) warn "Unknown gate: ${gate} (skipped)" ;;

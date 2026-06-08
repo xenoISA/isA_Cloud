@@ -24,30 +24,40 @@ dependencies:
   - name: kafka
     version: 0.1.0
     repository: file://../../charts/kafka
+    condition: kafka.enabled
   - name: apicurio-registry
     version: 0.1.0
     repository: file://../../charts/apicurio-registry
+    condition: apicurio-registry.enabled
   - name: postgres-bigdata
     version: 0.1.0
     repository: file://../../charts/postgres-bigdata
+    condition: postgres-bigdata.enabled
   - name: hive-metastore
     version: 0.1.0
     repository: file://../../charts/hive-metastore
+    condition: hive-metastore.enabled
   - name: minio
     version: 0.1.0
     repository: file://../../charts/minio
+    condition: minio.enabled
   - name: iceberg-tools
     version: 0.2.0
     repository: file://../../charts/iceberg-tools
+    condition: iceberg-tools.enabled
   - name: starrocks
     version: 0.1.0
     repository: file://../../charts/starrocks
+    condition: starrocks.enabled
   - name: flink
     version: 0.1.0
     repository: file://../../charts/flink
+    condition: flink.enabled
   - name: flink-cdc-jobs
     version: 0.1.0
     repository: file://../../charts/flink-cdc-jobs
+    condition: flink-cdc-jobs.enabled
   - name: fluss
     version: 0.1.0
     repository: file://../../charts/fluss
+    condition: fluss.enabled

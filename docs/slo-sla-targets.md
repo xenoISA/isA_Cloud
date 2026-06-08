@@ -140,7 +140,7 @@ Example for 99.99%: `43200 × 0.0001 = 4.32 minutes/month`
 | Consul, APISIX, etcd | @platform-team | @infra-lead |
 | MinIO, Qdrant, Neo4j | @data-team | @platform-lead |
 | EMQX | @iot-team | @platform-lead |
-| GPU (vLLM, Triton) | @ml-team | @infra-lead |
+| GPU (vLLM, Ray) | @ml-team | @infra-lead |
 | Agent Runtime | @runtime-team | @infra-lead |
 
 ## Measurement

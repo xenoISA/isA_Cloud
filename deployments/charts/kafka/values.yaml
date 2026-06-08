@@ -122,6 +122,8 @@ serviceMonitor:
 # =============================================================================
 # Scheduling — anti-affinity hard rule for broker pods (one per node) once
 # replicas >= 2. Disabled automatically for single-broker kind installs.
+# Keep the selector broker-only; Entity Operator shares the cluster label and
+# must be allowed to co-locate with a broker on a 3-node production cluster.
 # =============================================================================
 podAntiAffinity:
   enabled: true

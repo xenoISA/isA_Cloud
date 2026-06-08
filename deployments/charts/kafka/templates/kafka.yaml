@@ -48,6 +48,7 @@ spec:
             - labelSelector:
                 matchLabels:
                   strimzi.io/cluster: {{ .Values.name }}
+                  strimzi.io/component-type: kafka
               topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
       {{- end }}
       {{- with .Values.topologySpreadConstraints }}

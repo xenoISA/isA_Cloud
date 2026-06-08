@@ -1,5 +1,7 @@
 # GPU Node Labels — apply after GPU Operator deployment
-# These are reference examples; GFD auto-labels most of these
+#
+# GFD/NVIDIA labels describe GPU hardware. The platform labels below describe
+# workload placement policy for the unified isA_Cloud production profile.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -9,7 +11,7 @@ metadata:
   labels:
     app: gpu-config
 data:
-  # Manual node labeling script (run if GFD doesn't detect properly)
+  # Generic GPU discovery labels (run if GFD doesn't detect properly).
   label-nodes.sh: |
     #!/bin/bash
     # Auto-detect and label GPU nodes
@@ -19,4 +21,54 @@ data:
         kubectl label ${node} gpu-enabled=true --overwrite
         echo "Labeled ${node}: gpu-enabled=true, ${gpu_count} GPUs"
       fi
+    done
+
+  # SN production role profile: 3 nodes x 2 physical Blackwell GPUs.
+  #
+  # The NVIDIA device plugin may advertise time-sliced logical GPUs
+  # (nvidia.com/gpu.replicas=10), so workload policy is expressed with node
+  # roles first. Engine Deployments then bind to these role labels.
+  #
+  # Usage:
+  #   kubectl -n <namespace> get cm gpu-node-config -o jsonpath='{.data.label-sn-3node-roles\.sh}' > /tmp/label-sn.sh
+  #   bash /tmp/label-sn.sh
+  label-sn-3node-roles.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    LLM_NODES="${LLM_NODES:-sn-prod-k8s-01 sn-prod-k8s-02}"
+    SPECIALTY_NODES="${SPECIALTY_NODES:-sn-prod-k8s-03}"
+    ELASTIC_NODES="${ELASTIC_NODES:-sn-prod-k8s-03}"
+
+    for node in ${LLM_NODES}; do
+      kubectl label node "${node}" \
+        isa.io/gpu-role-llm=true \
+        isa.io/gpu-physical-count=2 \
+        isa.node/gpu=true \
+        isa.node/gpu-count=2 \
+        sn.io/gpu-role=llm \
+        sn.node/gpu=true \
+        sn.node/gpu-count=2 \
+        --overwrite
+      echo "Labeled ${node}: llm"
+    done
+
+    for node in ${SPECIALTY_NODES}; do
+      kubectl label node "${node}" \
+        isa.io/gpu-role-specialty=true \
+        isa.io/gpu-physical-count=2 \
+        isa.node/gpu=true \
+        isa.node/gpu-count=2 \
+        sn.io/gpu-role=specialty \
+        sn.node/gpu=true \
+        sn.node/gpu-count=2 \
+        --overwrite
+      echo "Labeled ${node}: specialty"
+    done
+
+    for node in ${ELASTIC_NODES}; do
+      kubectl label node "${node}" \
+        isa.io/gpu-role-elastic=true \
+        --overwrite
+      echo "Labeled ${node}: elastic"
     done
