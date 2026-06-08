@@ -43,6 +43,7 @@ dependencies = [
     "duckdb>=0.10.0",  # DuckDB analytics database
     "aiohttp>=3.9.0",  # Async HTTP client (Loki)
     "pyyaml>=6.0",  # Plugin manifest (plugin.yaml) parsing — ADR 0006
+    "cryptography>=41.0.0",  # ed25519 offline license verification — ADR 0008
 ]
 
 [project.optional-dependencies]
