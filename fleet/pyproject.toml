@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fleet-console"
+version = "0.1.0"
+description = "Vendor-side Fleet / License Console — license-issuance ledger (ADR 0009)"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "isA Platform", email = "dev@isa-platform.com" }]
+dependencies = [
+    # The issuance workflow wraps the offline signer from the shared lib (ADR 0008/0009).
+    "isa-common>=0.6.0",
+    "SQLAlchemy>=2.0.0",
+    "cryptography>=41.0.0",  # ed25519 (transitively via isa-common; pinned for clarity)
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1.0"]  # production driver for the ledger DB
+test = ["pytest>=8.0.0"]
+
+[tool.setuptools]
+packages = ["fleet_console"]
