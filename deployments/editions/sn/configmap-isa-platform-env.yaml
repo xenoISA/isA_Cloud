@@ -13,6 +13,16 @@ data:
   ISA_CHARGING_ENABLED: 'false'
   ISA_DEFAULT_MODEL: qwen2.5
   ISA_EDITION: on-prem-full
+  # --- License & entitlement (ADR 0008 §3, §6) — SN on-prem-full ENFORCES. ---
+  # SCOPED TO SN: this ConfigMap is the SN edition's env source (configMapRef in
+  # isa-svc-base.yaml). SaaS/lite swap this whole ConfigMap and DO NOT set
+  # ISA_LICENSE_ENFORCE → their license stays UNLICENSED + enforcement off
+  # (isa_common/licensing.py: enforce reads ISA_LICENSE_ENFORCE; unset/false = off).
+  ISA_LICENSE_ENFORCE: 'true'
+  # Path to the signed license.json mounted read-only from the isa-license
+  # ConfigMap (see isa-svc-base.yaml volumes + the configmap-isa-license.yaml /
+  # offline-bundle handoff). Read by isa_common/license.py (ISA_LICENSE_FILE).
+  ISA_LICENSE_FILE: /etc/isa-license/license.json
   ISA_METERING_ENABLED: 'true'
   ISA_MODEL_PROVIDER: local
   ISA_MODEL_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
