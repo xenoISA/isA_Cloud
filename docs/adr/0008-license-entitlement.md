@@ -184,6 +184,18 @@ deployment boundary**, which is cheaper and stronger than per-request code gates
   `get_license().is_entitled("commercial_tower")` and refuse to start if absent —
   but the primary control is "don't render the app".
 
+> **Implementation (#369).** ArgoCD cannot read the signed `license.json`, so the
+> entitled list is projected into the GitOps layer at deploy time:
+> `deployments/editions/sn/values-entitled-modules.yaml` holds `sn.entitledModules`
+> — the single ops edit point, transcribed verbatim from the license's
+> `entitled_modules`. A customer-modules ApplicationSet
+> (`deployments/argocd/apps/production/sn-customer-modules-appset.yaml`, modeled on
+> `user-services-appset.yaml`) enumerates all 24 §B modules in its `list` generator,
+> each element carrying an `entitled: "true"|"false"` flag, and gates rendering with
+> `spec.selector.matchLabels: { entitled: "true" }`. Non-entitled modules produce no
+> Application and are never deployed. On renewal: re-issue the signed license, then
+> update the values file and flip the matching appset flags in lock-step.
+
 ### 6. Helm / deployment wiring (per-profile)
 
 Add to `deployments/editions/sn/` (and the `isa-*-env` overlay), alongside the
