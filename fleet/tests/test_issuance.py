@@ -113,7 +113,9 @@ def test_issue_writes_row_and_signs_valid_license(monkeypatch, tmp_path, session
     assert row.quota_tier == "enterprise"
     assert row.delivery == "offline-bundle"
     assert row.superseded_by is None
-    assert row.deployment_secret_id is None  # populated by #374
+    # #374: deployment_secret_id is now populated at issuance (was NULL pre-#374).
+    assert row.deployment_secret_id is not None
+    assert row.deployment_secret_id == result.credential.deployment_secret_id
     assert row.license_id == result.ledger_row.license_id
 
     # (a) signed artifact verifies VALID through the real verifier

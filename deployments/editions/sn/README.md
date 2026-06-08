@@ -77,5 +77,51 @@ these manifests before apply. The image-mirror CSV
 (`platform-vX.Y.Z.offline-bundle.csv`) is digest-pinned **container images only**;
 the license is per-namespace config that rides the editions overlay, not an image.
 
+## Telemetry credential (#374, ADR 0009 §3)
+
+At issuance the vendor-side Fleet Console (ADR 0009; `fleet/`) mints a
+**per-deployment telemetry HMAC credential** alongside the signed `license.json`:
+
+- `deployment_secret_id` (e.g. `dep-sn-7f3a1c0b`) — a NON-secret pointer, also
+  written onto the issuance-ledger row.
+- a random HMAC `secret` — SENSITIVE; this deployment uses it to **sign** the usage
+  bundles it pushes back to intake (#375/#376). Telemetry is metadata-only (ADR 0009
+  §5) — no business data, no PII.
+
+**This is a Secret, not a ConfigMap** — the opposite of `license.json`. The license
+is a *signed* public artifact (integrity from the signature ⇒ read-only ConfigMap is
+correct, see above). The telemetry secret is a *symmetric HMAC key*: whoever holds it
+can sign telemetry as this deployment, so it must be confidential at rest.
+
+**Delivery — rides the existing secret path, not a new mechanism.** The minted
+`secret` ships in the **SN offline delivery bundle** (same canonical offline-bundle
+path as the signed `license.json`, above) and is loaded into the cluster the same way
+every other SN secret is — **Vault → ExternalSecret → env**, exactly like
+`POSTGRES_PASSWORD` etc. in `externalsecret-isa-platform-secrets.yaml`. Concretely:
+
+1. Store the minted secret in Vault under the SN path, e.g.
+   `isa-cloud/production/telemetry` with properties `deployment-secret-id` and
+   `secret`.
+2. Add two keys to `externalsecret-isa-platform-secrets.yaml` (Vault→k8s mapping):
+   `ISA_DEPLOYMENT_SECRET_ID` ← `…/telemetry#deployment-secret-id` and
+   `ISA_TELEMETRY_SECRET` ← `…/telemetry#secret`. They land in the existing
+   `isa-platform-secrets` Secret and reach pods via the same `envFrom`/`secretRef`
+   the other platform secrets use.
+3. The deployment's usage-bundle signer (#376) reads `ISA_TELEMETRY_SECRET` +
+   `ISA_DEPLOYMENT_SECRET_ID` and HMAC-signs each bundle with the scheme defined in
+   `fleet/fleet_console/telemetry_credential.py` (HMAC-SHA256, lowercase hex, over
+   the raw bundle bytes); intake validates via `verify_telemetry_hmac`.
+
+For fully air-gapped customers the secret simply rides the manual offline bundle the
+operator already carries in; no new egress is introduced (FW-OUT-001 holds).
+
+**Rotation.** Re-minted automatically on license **renewal** (the new ledger row
+gets a fresh secret) — refresh the Vault entry from the new offline bundle and roll
+the pods, same cadence as the license swap above. On a suspected **leak**, the vendor
+rotates the secret out-of-band (`rotate_credential`) and ships a replacement; swap the
+Vault value and roll. **A leaked telemetry secret can only forge this customer's
+telemetry — never a license** (licenses need the offline ed25519 private key, which
+never enters any customer namespace; see `license-key-custody.md`).
+
 ## Porting to another edition (e.g. isA SaaS on GCP)
 Swap only the `configmap-isa-*-env.yaml` (managed endpoints + `ISA_EDITION=saas` + brand). The chart and per-service value files are edition-agnostic. **Do not** carry `ISA_LICENSE_ENFORCE` into a SaaS/lite env ConfigMap — those editions leave it unset (license stays UNLICENSED, enforcement off).

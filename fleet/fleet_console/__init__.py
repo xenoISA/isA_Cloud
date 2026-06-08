@@ -17,6 +17,10 @@ Public surface
   row atomically.
 - :mod:`fleet_console.queries` — read-side helpers backing the fleet UI (#377):
   roster, by-customer, expiring-soon.
+- :mod:`fleet_console.telemetry_credential` — per-deployment telemetry credential
+  (#374, ADR 0009 §3): minted at issuance, its id written to the ledger row and its
+  HMAC secret stored in an isolated ``deployment_secret`` table; defines the
+  ``verify_telemetry_hmac`` scheme the intake endpoint (#375) calls.
 """
 
 from .issuance import (
@@ -28,6 +32,17 @@ from .issuance import (
 )
 from .models import Base, IssuanceLedger
 from .queries import by_customer, expiring_soon, roster
+from .telemetry_credential import (
+    DeploymentSecret,
+    TelemetryCredential,
+    get_secret,
+    mint_credential,
+    persist_credential,
+    rotate_credential,
+    secret_for_license,
+    sign_telemetry,
+    verify_telemetry_hmac,
+)
 
 __all__ = [
     "Base",
@@ -40,4 +55,14 @@ __all__ = [
     "roster",
     "by_customer",
     "expiring_soon",
+    # #374 — telemetry credential
+    "DeploymentSecret",
+    "TelemetryCredential",
+    "mint_credential",
+    "persist_credential",
+    "get_secret",
+    "secret_for_license",
+    "sign_telemetry",
+    "verify_telemetry_hmac",
+    "rotate_credential",
 ]
