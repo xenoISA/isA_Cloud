@@ -32,7 +32,7 @@ metadata:
     engine: faster-whisper
 data:
   MODEL_ID: "openai/whisper-large-v3-turbo"
-  WHISPER_MODEL: "Systran/faster-whisper-large-v3-turbo"
+  WHISPER_MODEL: "h2oai/faster-whisper-large-v3-turbo"
   COMPUTE_TYPE: "float16"
   DEVICE: "cuda"
   BEAM_SIZE: "5"
