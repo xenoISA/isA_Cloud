@@ -1,0 +1,10 @@
+name: user-album
+image:
+  repository: isa/user-album
+  tag: "0.1.0"
+port: 8219
+env:
+  - {name: SERVICE_NAME, value: "album_service"}
+  - {name: SERVICE_PORT, value: "8219"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

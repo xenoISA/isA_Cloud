@@ -1,0 +1,10 @@
+name: user-vault
+image:
+  repository: isa/user-vault
+  tag: "0.1.0"
+port: 8214
+env:
+  - {name: SERVICE_NAME, value: "vault_service"}
+  - {name: SERVICE_PORT, value: "8214"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

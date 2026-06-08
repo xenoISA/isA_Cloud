@@ -1,0 +1,10 @@
+name: user-account
+image:
+  repository: isa/user-account
+  tag: "0.1.0"
+port: 8202
+env:
+  - {name: SERVICE_NAME, value: "account_service"}
+  - {name: SERVICE_PORT, value: "8202"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

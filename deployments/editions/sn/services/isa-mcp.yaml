@@ -1,0 +1,13 @@
+# isa_mcp — MCP tool server (FastAPI, :8081). Minimal per-service overrides;
+# all infra hosts+creds come from the standard configMapRef + secretRef (base).
+name: isa-mcp
+image:
+  repository: isa/isa-mcp
+  tag: "0.1.2"
+port: 8081
+replicas: 1
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  limits: {cpu: "2", memory: "2Gi"}
+health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 30, periodSeconds: 20}

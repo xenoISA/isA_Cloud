@@ -1,0 +1,10 @@
+name: user-subscription
+image:
+  repository: isa/user-subscription
+  tag: "0.1.0"
+port: 8228
+env:
+  - {name: SERVICE_NAME, value: "subscription_service"}
+  - {name: SERVICE_PORT, value: "8228"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

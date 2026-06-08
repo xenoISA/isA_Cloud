@@ -1,0 +1,22 @@
+# Base for isa_user microservices (same standard as /tmp/isa-svc-base.yaml,
+# but env from isa-user-env ConfigMap + isa-platform-secrets Secret).
+namespace: sn-cloud-production
+replicas: 1
+image:
+  registry: core.harbor.domain
+  pullPolicy: Always
+configMapRef: isa-user-env
+secretRef: isa-platform-secrets
+rollout: {enabled: false}
+autoscaling: {enabled: false}
+consul: {enabled: false}
+startupProbe: {enabled: false}
+podDisruptionBudget: {enabled: false}
+metrics: {enabled: false}
+networkPolicy: {enabled: false}
+observability: null
+securityContext: null
+podSecurityContext: null
+resources:
+  requests: {cpu: "50m", memory: "192Mi"}
+  limits: {cpu: "500m", memory: "512Mi"}

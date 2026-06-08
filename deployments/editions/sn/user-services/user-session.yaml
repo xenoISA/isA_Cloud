@@ -1,0 +1,10 @@
+name: user-session
+image:
+  repository: isa/user-session
+  tag: "0.1.0"
+port: 8203
+env:
+  - {name: SERVICE_NAME, value: "session_service"}
+  - {name: SERVICE_PORT, value: "8203"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

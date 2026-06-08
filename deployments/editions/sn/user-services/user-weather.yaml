@@ -1,0 +1,10 @@
+name: user-weather
+image:
+  repository: isa/user-weather
+  tag: "0.1.0"
+port: 8218
+env:
+  - {name: SERVICE_NAME, value: "weather_service"}
+  - {name: SERVICE_PORT, value: "8218"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

@@ -1,0 +1,10 @@
+name: user-storage
+image:
+  repository: isa/user-storage
+  tag: "0.1.0"
+port: 8209
+env:
+  - {name: SERVICE_NAME, value: "storage_service"}
+  - {name: SERVICE_PORT, value: "8209"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

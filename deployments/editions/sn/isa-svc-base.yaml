@@ -1,0 +1,45 @@
+# Unified base for ALL isa/* services on the isa-service chart (SN on-prem).
+# Per-service files override name/image/port/health/env. Infra+edition+brand
+# env comes from the isa-platform-env ConfigMap (configMapRef) — for GCP, swap
+# that ConfigMap only; this base + per-service files stay identical.
+namespace: sn-cloud-production
+replicas: 1
+
+image:
+  registry: core.harbor.domain
+  pullPolicy: IfNotPresent
+
+# STANDARD env injection (GCP-portable — swap these two objects for GCP):
+#   configMapRef = hosts + edition + brand + non-secret infra config
+#   secretRef    = infra credentials, ESO-synced from Vault, env-var-named keys
+configMapRef: isa-platform-env
+secretRef: isa-platform-secrets
+
+# toggles: operators/CRDs NOT installed in this cluster -> plain Deployment
+rollout:
+  enabled: false
+autoscaling:
+  enabled: false
+consul:
+  enabled: false        # app talks to Consul via env, not the connect sidecar
+startupProbe:
+  enabled: false
+podDisruptionBudget:
+  enabled: false
+metrics:
+  enabled: false
+networkPolicy:
+  enabled: false
+
+# chart's observability block injects LOKI_URL=loki.isa-cloud-local + TEMPO_* (a
+# local-dev default; Loki/Tempo not deployed here). null => skip it (no bad Loki
+# host, no duplicate LOKI_URL with per-service env). Re-enable in #348 w/ real obs.
+observability: null
+
+# Let each image run as ITS OWN Dockerfile USER (all isa/* images already set a
+# non-root USER and pre-chown their writable dirs e.g. /app/logs,/app/cache).
+# Forcing the chart's default runAsUser:1000 breaks those (PermissionError on
+# pre-chowned dirs). null => chart skips the securityContext blocks entirely.
+# Harden later (#348) per-image once each image's UID + writable mounts are known.
+securityContext: null
+podSecurityContext: null

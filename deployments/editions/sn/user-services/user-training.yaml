@@ -1,0 +1,10 @@
+name: user-training
+image:
+  repository: isa/user-training
+  tag: "0.1.0"
+port: 8262
+env:
+  - {name: SERVICE_NAME, value: "training_service"}
+  - {name: SERVICE_PORT, value: "8262"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}
