@@ -1,0 +1,43 @@
+# PgBouncer for SN edition (transaction pooling in front of single-node Postgres).
+# Prerequisite for scaling isA_user/platform services out (HPA) without
+# exhausting Postgres max_connections. Image mirrored to Harbor.
+namespace: sn-cloud-production
+name: pgbouncer
+image:
+  registry: core.harbor.domain
+  repository: isa/pgbouncer
+  tag: "v1.25.1-p0"
+  pullPolicy: IfNotPresent
+replicas: 1            # validation; raise with data-layer HA
+port: 6432
+postgres:
+  host: postgresql.sn-cloud-production.svc.cluster.local
+  port: 5432
+  sslmode: prefer      # bitnami postgresql chart; not 'require' (no client certs here)
+auth:
+  create: false
+  existingSecret: pgbouncer-auth   # provisioned via ESO from Vault (see externalsecret-pgbouncer-auth.yaml)
+  type: scram-sha-256
+config:
+  poolMode: transaction
+  defaultPoolSize: 25
+  minPoolSize: 0
+  reservePoolSize: 5
+  reservePoolTimeout: 3
+  maxClientConn: 5000
+  maxDbConnections: 0
+  serverIdleTimeout: 600
+  serverLifetime: 3600
+  queryWaitTimeout: 30
+  tcpKeepalive: 1
+  databases:
+    - name: isa_platform
+      dbname: isa_platform
+# operators/exporters not installed in this cluster -> keep off
+exporter: {enabled: false}
+serviceMonitor: {enabled: false}
+podDisruptionBudget: {enabled: false}
+networkPolicy: {enabled: false}
+resources:
+  requests: {cpu: "100m", memory: "128Mi"}
+  limits: {cpu: "1", memory: "256Mi"}
