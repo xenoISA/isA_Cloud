@@ -18,8 +18,8 @@ data:
   NEO4J_AVAILABLE: 'false'
   POD_REPLICA_COUNT: '1'
   POSTGRES_DB: isa_platform
-  POSTGRES_HOST: postgresql.sn-cloud-production.svc.cluster.local
-  POSTGRES_PORT: '5432'
+  POSTGRES_HOST: pgbouncer.sn-cloud-production.svc.cluster.local
+  POSTGRES_PORT: '6432'
   POSTGRES_USER: postgres
   PYTHONPATH: /app
   PYTHONUNBUFFERED: '1'
