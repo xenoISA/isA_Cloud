@@ -81,6 +81,11 @@ from .edition import EditionConfig, EditionType, get_edition
 # License (offline ed25519-signed entitlement contract — ADR 0008)
 # =============================================================================
 from .license import LicenseConfig, LicenseStatus, get_license
+from .licensing import (
+    LicenseError,
+    add_license_middleware,
+    setup_licensing,
+)
 
 # =============================================================================
 # Plugin / Extension SDK (ADR 0006)
@@ -178,6 +183,9 @@ __all__ = [
     "LicenseStatus",
     "LicenseConfig",
     "get_license",
+    "setup_licensing",
+    "add_license_middleware",
+    "LicenseError",
     # Plugin / Extension SDK (ADR 0006)
     "PluginKind",
     "PluginManifest",
