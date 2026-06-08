@@ -45,12 +45,41 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import TYPE_CHECKING, Dict, Optional, Union
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checking
+    from isa_common.license import LicenseConfig
 
 logger = logging.getLogger("isa_common.quota_enforcer")
 
 # A quota value of -1 means unlimited (matches isA_Data ProductSpecTier.UNLIMITED).
 UNLIMITED: int = -1
+
+
+# License quota_tier → concrete TierQuota limits (ADR 0008 §4).
+#
+# On-prem-full (SN) maps to "enterprise" → unlimited, so on that deployment the
+# license's quota role is a documented ceiling, not a hot path. The non-enterprise
+# tiers carry deliberately modest finite limits; an unknown/absent tier resolves
+# to the safe minimum (``_LICENSE_MIN_TIER``), never unlimited.
+_LICENSE_MIN_TIER = "free"
+
+# Finite limits for the bounded license tiers. "enterprise" is handled separately
+# (every limit → UNLIMITED) and so is intentionally absent here.
+_LICENSE_TIER_QUOTAS: Dict[str, Dict[str, int]] = {
+    "free": {
+        "tokens_per_hour": 10_000,
+        "gpu_minutes_per_day": 5,
+        "ray_workers": 1,
+        "mcp_calls_per_day": 100,
+    },
+    "pro": {
+        "tokens_per_hour": 1_000_000,
+        "gpu_minutes_per_day": 120,
+        "ray_workers": 8,
+        "mcp_calls_per_day": 10_000,
+    },
+}
 
 
 # =============================================================================
@@ -156,6 +185,49 @@ class TierQuota:
             gpu_minutes_per_day=int(orm_tier.gpu_minutes_per_day),
             ray_workers=int(orm_tier.ray_workers),
             mcp_calls_per_day=int(orm_tier.mcp_calls_per_day),
+        )
+
+    @classmethod
+    def from_license(cls, lic: "LicenseConfig") -> "TierQuota":
+        """Build a :class:`TierQuota` from a license's ``quota_tier`` (ADR 0008 §4).
+
+        Maps the offline license's coarse ``quota_tier`` string to concrete
+        per-resource limits:
+
+        - ``"enterprise"`` → every quota :data:`UNLIMITED` (``-1``). This is the
+          on-prem-full (SN) case, where the license quota is a documented
+          ceiling, not an enforced hot path.
+        - other known tiers (``"free"``, ``"pro"``) → modest finite limits.
+        - an unknown or ``None`` tier → the safe **minimum** tier
+          (``_LICENSE_MIN_TIER``), never unlimited.
+
+        Accepts any object exposing a ``quota_tier`` attribute (the relevant
+        surface of ``isa_common.license.LicenseConfig``); imported lazily under
+        ``TYPE_CHECKING`` so the enforcer carries no runtime dependency on the
+        license module.
+        """
+        raw_tier = getattr(lic, "quota_tier", None)
+        tier_name = str(raw_tier).strip().lower() if raw_tier else ""
+
+        if tier_name == "enterprise":
+            return cls(
+                tier="enterprise",
+                tokens_per_hour=UNLIMITED,
+                gpu_minutes_per_day=UNLIMITED,
+                ray_workers=UNLIMITED,
+                mcp_calls_per_day=UNLIMITED,
+            )
+
+        # Unknown / None falls back to the safe minimum tier (never unlimited).
+        limits = _LICENSE_TIER_QUOTAS.get(tier_name)
+        resolved_tier = tier_name if limits is not None else _LICENSE_MIN_TIER
+        limits = limits or _LICENSE_TIER_QUOTAS[_LICENSE_MIN_TIER]
+        return cls(
+            tier=resolved_tier,
+            tokens_per_hour=limits["tokens_per_hour"],
+            gpu_minutes_per_day=limits["gpu_minutes_per_day"],
+            ray_workers=limits["ray_workers"],
+            mcp_calls_per_day=limits["mcp_calls_per_day"],
         )
 
 

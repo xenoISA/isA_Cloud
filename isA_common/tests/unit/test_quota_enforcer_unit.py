@@ -125,6 +125,49 @@ class TestTierQuota:
         assert tier.quota(QuotaType.TOKENS_PER_HOUR) == 1_000_000
         assert tier.quota(QuotaType.RAY_WORKERS) == 8
 
+    def test_from_license_enterprise_is_unlimited(self):
+        """on-prem-full SN: quota_tier='enterprise' → every quota unlimited (-1)."""
+        lic = type("Lic", (), {"quota_tier": "enterprise"})()
+        tier = TierQuota.from_license(lic)
+        assert tier.tier == "enterprise"
+        for qt in QuotaType:
+            assert tier.quota(qt) == UNLIMITED
+            assert tier.is_unlimited(qt) is True
+
+    def test_from_license_enterprise_is_case_insensitive(self):
+        lic = type("Lic", (), {"quota_tier": "Enterprise"})()
+        tier = TierQuota.from_license(lic)
+        assert tier.tier == "enterprise"
+        assert tier.is_unlimited(QuotaType.TOKENS_PER_HOUR) is True
+
+    def test_from_license_finite_tier_maps_to_bounded_limits(self):
+        """A known non-enterprise tier maps to finite, enforceable limits."""
+        lic = type("Lic", (), {"quota_tier": "pro"})()
+        tier = TierQuota.from_license(lic)
+        assert tier.tier == "pro"
+        assert tier.quota(QuotaType.TOKENS_PER_HOUR) == 1_000_000
+        assert tier.quota(QuotaType.RAY_WORKERS) == 8
+        for qt in QuotaType:
+            assert tier.is_unlimited(qt) is False
+
+    def test_from_license_unknown_tier_falls_back_to_minimum(self):
+        """An unrecognized tier resolves to the smallest tier, never unlimited."""
+        lic = type("Lic", (), {"quota_tier": "platinum"})()
+        tier = TierQuota.from_license(lic)
+        assert tier.tier == "free"
+        assert tier.quota(QuotaType.TOKENS_PER_HOUR) == 10_000
+        assert tier.quota(QuotaType.RAY_WORKERS) == 1
+        for qt in QuotaType:
+            assert tier.is_unlimited(qt) is False
+
+    def test_from_license_none_tier_falls_back_to_minimum(self):
+        """quota_tier=None (e.g. UNLICENSED) → safe minimum, never unlimited."""
+        lic = type("Lic", (), {"quota_tier": None})()
+        tier = TierQuota.from_license(lic)
+        assert tier.tier == "free"
+        for qt in QuotaType:
+            assert tier.is_unlimited(qt) is False
+
 
 # ============================================================================
 # QuotaType — window semantics
