@@ -73,7 +73,9 @@ class IssuanceLedger(Base):
     # How the signed bundle was shipped (ADR 0007), e.g. "offline-bundle".
     delivery: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    # Populated by #374 — per-deployment telemetry credential id. Left NULL here.
+    # Per-deployment telemetry credential id (#374). Populated at issuance by
+    # IssuanceService; the secret itself lives in the isolated `deployment_secret`
+    # table (telemetry_credential.py). Nullable for pre-#374 rows / non-telemetry use.
     deployment_secret_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid

@@ -42,6 +42,11 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from isa_common.license_sign import sign_license
 
 from .models import IssuanceLedger
+from .telemetry_credential import (
+    TelemetryCredential,
+    mint_credential,
+    persist_credential,
+)
 
 # Imported lazily-as-needed; Session typing only.
 try:  # pragma: no cover - typing convenience
@@ -96,10 +101,18 @@ class IssuanceRequest:
 
 @dataclass
 class IssuanceResult:
-    """The output of an issuance: the signed artifact + the persisted ledger row."""
+    """The output of an issuance: the signed artifact + the persisted ledger row +
+    the per-deployment telemetry credential (#374, ADR 0009 §3).
+
+    ``credential.secret`` is the sensitive HMAC key the deployment will use to sign
+    its telemetry/usage bundles (#376); the caller bakes it into the deployment's
+    secret bundle (ADR 0007/0009 §3) and must not log it. ``deployment_secret_id``
+    is the non-secret pointer also written onto ``ledger_row``.
+    """
 
     license: dict  # the signed license.json body (with base64 `signature`)
     ledger_row: IssuanceLedger
+    credential: TelemetryCredential  # #374 telemetry HMAC credential
 
 
 def _load_private_key(key_pem: bytes) -> ed25519.Ed25519PrivateKey:
@@ -164,7 +177,13 @@ class IssuanceService:
         # (a) sign in memory — pure, side-effect-free.
         signed = sign_license(spec, self._priv)
 
-        # (b) write the ledger row in one transaction; artifact withheld until commit.
+        # (a') mint the telemetry credential in memory — pure, no DB side-effects.
+        cred = mint_credential(spec["customer_id"])
+
+        # (b) write the ledger row AND the secret in one transaction; artifact
+        # withheld until commit. Credential mint + ledger write are atomic (#374,
+        # ADR 0009 §1: "both or neither") — the deployment_secret_id is populated on
+        # the ledger row and the secret persisted to its isolated table together.
         row = IssuanceLedger(
             license_id=spec["license_id"],
             customer_id=spec["customer_id"],
@@ -176,12 +195,18 @@ class IssuanceService:
             expires_at=_parse_ts(spec.get("expires_at")),
             superseded_by=None,
             delivery=req.delivery,
-            deployment_secret_id=None,  # populated by #374
+            deployment_secret_id=cred.deployment_secret_id,  # #374
         )
         self._session.add(row)
+        persist_credential(
+            self._session,
+            cred,
+            customer_id=spec["customer_id"],
+            license_id=spec["license_id"],
+        )
         self._session.flush()  # surface PK/constraint errors before we vouch for it
         self._session.commit()
-        return IssuanceResult(license=signed, ledger_row=row)
+        return IssuanceResult(license=signed, ledger_row=row, credential=cred)
 
     def renew(self, prior_license_id: str, req: IssuanceRequest) -> IssuanceResult:
         """Issue a renewal and set ``superseded_by`` on the prior row, atomically.
@@ -215,6 +240,13 @@ class IssuanceService:
 
         signed = sign_license(spec, self._priv)
 
+        # Rotation on renewal (ADR 0009 §3 / Consequences): a renewal mints a FRESH
+        # telemetry credential for the new lineage row. The prior row keeps its own
+        # secret untouched (it is being superseded, not revoked), and the renewed
+        # deployment receives a new secret in its refreshed bundle — so a leaked old
+        # secret is naturally retired at the next renewal boundary.
+        cred = mint_credential(spec["customer_id"])
+
         new_row = IssuanceLedger(
             license_id=spec["license_id"],
             customer_id=spec["customer_id"],
@@ -226,13 +258,19 @@ class IssuanceService:
             expires_at=_parse_ts(spec.get("expires_at")),
             superseded_by=None,
             delivery=req.delivery,
-            deployment_secret_id=None,
+            deployment_secret_id=cred.deployment_secret_id,  # #374 (rotated)
         )
         self._session.add(new_row)
+        persist_credential(
+            self._session,
+            cred,
+            customer_id=spec["customer_id"],
+            license_id=spec["license_id"],
+        )
         self._session.flush()  # new row must exist before prior can FK-reference it
         prior.superseded_by = new_row.license_id
         self._session.commit()
-        return IssuanceResult(license=signed, ledger_row=new_row)
+        return IssuanceResult(license=signed, ledger_row=new_row, credential=cred)
 
 
 # --------------------------------------------------------------------------- #

@@ -35,26 +35,29 @@ fleet/
 │   ├── __init__.py                   # public surface (re-exports)
 │   ├── models.py                     # SQLAlchemy: Base + IssuanceLedger
 │   ├── issuance.py                   # IssuanceService / issue_license / renew_license
-│   └── queries.py                    # roster / by_customer / expiring_soon
+│   ├── queries.py                    # roster / by_customer / expiring_soon
+│   └── telemetry_credential.py       # #374: mint/verify per-deployment HMAC credential
 ├── migrations/
-│   └── 0001_issuance_ledger.sql      # CREATE TABLE issuance_ledger (Postgres DDL)
+│   ├── 0001_issuance_ledger.sql      # CREATE TABLE issuance_ledger (Postgres DDL)
+│   └── 0002_deployment_secret.sql    # CREATE TABLE deployment_secret (#374, sensitive)
 └── tests/
-    └── test_issuance.py              # sign->ledger round-trip, renewal, query filters
+    ├── test_issuance.py              # sign->ledger round-trip, renewal, query filters
+    └── test_telemetry_credential.py  # #374: mint, verify, rotation, migration DDL
 ```
 
 ### Package layout convention (for #374 / #375 / #377)
 
 `fleet_console/` is the package root. New vendor-side pieces go here:
 
-- **#374 telemetry credential** — mint a per-deployment HMAC secret at issuance and
-  write its id onto the ledger row. The column already exists:
-  `IssuanceLedger.deployment_secret_id` (nullable `TEXT`). Populate it inside the
-  issuance transaction (extend `IssuanceService.issue` / `.renew`) or via an
-  `UPDATE issuance_ledger SET deployment_secret_id = ... WHERE license_id = ...`.
-  Suggested new module: `fleet_console/telemetry_credential.py`.
+- **#374 telemetry credential** — DONE. `fleet_console/telemetry_credential.py`
+  mints a per-deployment HMAC secret at issuance, writes its `deployment_secret_id`
+  onto the ledger row, and stores the secret in an isolated `deployment_secret`
+  table. See "Telemetry credential" below.
 - **#375 intake endpoint** — the internet-facing, HMAC-authenticated, metadata-only
-  telemetry intake. Validates the HMAC against the ledger's `deployment_secret_id`.
-  Suggested: `fleet_console/intake.py` (+ an `app.py` / ASGI entry).
+  telemetry intake. Suggested: `fleet_console/intake.py` (+ an `app.py` / ASGI
+  entry). **Call `fleet_console.verify_telemetry_hmac(session,
+  deployment_secret_id, payload_bytes, signature)` to authenticate** — do not
+  re-implement the HMAC; the scheme is defined once in #374 (below).
 - **#377 fleet UI** — calls the query API in `fleet_console/queries.py` (`roster`,
   `by_customer`, `expiring_soon`). A separate Next.js deployment (ADR 0009 §4); it
   reads through these functions (or an HTTP layer wrapping them).
@@ -112,6 +115,77 @@ roster(session, include_superseded=True) # full historical ledger
 by_customer(session, "SN")               # one customer's current license(s)
 expiring_soon(session, within_days=30)   # current licenses expiring within N days
 ```
+
+## Telemetry credential (ADR 0009 §3, #374)
+
+Issuing a license also **mints a per-deployment telemetry credential** in the same
+transaction (`fleet_console/telemetry_credential.py`). `IssuanceResult` now carries
+it:
+
+```python
+result = svc.issue(IssuanceRequest(customer_id="SN", edition="on-prem-full", ...))
+result.credential.deployment_secret_id   # e.g. "dep-sn-7f3a1c0b" — NON-secret pointer
+result.credential.secret                 # the HMAC secret — SENSITIVE, bake into bundle
+result.ledger_row.deployment_secret_id   # == credential.deployment_secret_id
+```
+
+**Where the secret lives (security rationale).** HMAC is *symmetric*: intake (#375)
+must recompute the HMAC, so it needs the *same* secret the deployment signed with —
+unlike the *license* ed25519 key there is no public/private split. So the secret is
+retained vendor-side, but **isolated**:
+
+- `deployment_secret_id` → the **ledger** row (non-secret pointer).
+- the secret value → a **separate `deployment_secret` table** keyed by
+  `deployment_secret_id` (`migrations/0002_deployment_secret.sql`). Marked SENSITIVE:
+  the broad roster query never loads it, and it can be GRANT-restricted / encrypted
+  at-rest independently of the metadata ledger. We store the secret (not a hash)
+  because a hash cannot recompute an HMAC.
+
+**Blast radius.** A leaked deployment secret only forges *that one customer's*
+telemetry (metadata-only, §5) — **never a license**. Licenses need the offline
+ed25519 *private* key, which never enters this system
+([`docs/saas-deployment/license-key-custody.md`](../docs/saas-deployment/license-key-custody.md)).
+
+**The HMAC scheme (defined once here; #375/#376 use it verbatim).**
+
+| Aspect | Value |
+|---|---|
+| Algorithm | **HMAC-SHA256** |
+| Key | the per-deployment `secret` (UTF-8 bytes of the `token_urlsafe` string) |
+| Message | the **raw telemetry payload bytes**, signed exactly as transmitted (no imposed canonicalisation) |
+| Encoding | signature is **lowercase hex** (`hmac.hexdigest()`, 64 chars) |
+| Compare | constant-time (`hmac.compare_digest`) |
+
+```python
+from fleet_console import verify_telemetry_hmac, sign_telemetry
+
+# deployment side (#376) — sign the usage bundle bytes:
+sig = sign_telemetry(secret, payload_bytes)            # -> hex str
+
+# intake side (#375) — authenticate before accepting:
+ok = verify_telemetry_hmac(session, deployment_secret_id, payload_bytes, sig)  # -> bool
+```
+
+`verify_telemetry_hmac(session, deployment_secret_id, payload_bytes, signature) ->
+bool` returns True iff the signature is valid; unknown id → False.
+
+**Delivery to the deployment.** The `secret` rides the **same offline/secret bundle
+path as the rest of the deployment's secrets** — it is NOT committed to this repo.
+For the SN on-prem edition it is delivered as a Vault-backed k8s Secret
+(`ISA_TELEMETRY_SECRET` / `ISA_DEPLOYMENT_SECRET_ID`); see
+[`deployments/editions/sn/README.md`](../deployments/editions/sn/README.md)
+"Telemetry credential (#374)". The deployment uses it to sign usage bundles (#376);
+intake validates them here.
+
+**Rotation.**
+- *Implicit* — `IssuanceService.renew` mints a **fresh** credential for the new
+  lineage row, so a renewed deployment gets a new secret in its refreshed bundle and
+  the old secret retires at the renewal boundary.
+- *Explicit (leak)* — `rotate_credential(session, customer_id=..., license_id=...,
+  old_deployment_secret_id=...)` mints + persists a new secret, deletes the old, and
+  you repoint the active ledger row's `deployment_secret_id`. Rotation **never
+  touches the license** (no ed25519 key involved) — its blast radius is telemetry
+  only.
 
 ## Schema / migrations
 
