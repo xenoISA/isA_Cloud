@@ -46,6 +46,11 @@ dependencies = [
     "cryptography>=41.0.0",  # ed25519 offline license verification — ADR 0008
 ]
 
+[project.scripts]
+# Offline ed25519 license issuance tool (ADR 0008 §1). Issuance-side only — the
+# private key never ships; runtime images carry only the public key (license.py).
+isa-license-sign = "isa_common.license_sign:main"
+
 [project.optional-dependencies]
 metrics = [
     "prometheus-client>=0.20.0",
