@@ -78,6 +78,11 @@ from .brand import BrandConfig, get_brand
 from .edition import EditionConfig, EditionType, get_edition
 
 # =============================================================================
+# License (offline ed25519-signed entitlement contract — ADR 0008)
+# =============================================================================
+from .license import LicenseConfig, LicenseStatus, get_license
+
+# =============================================================================
 # Plugin / Extension SDK (ADR 0006)
 # =============================================================================
 from .plugin import (
@@ -169,6 +174,10 @@ __all__ = [
     "EditionType",
     "EditionConfig",
     "get_edition",
+    # License (offline ed25519-signed entitlement — ADR 0008)
+    "LicenseStatus",
+    "LicenseConfig",
+    "get_license",
     # Plugin / Extension SDK (ADR 0006)
     "PluginKind",
     "PluginManifest",
