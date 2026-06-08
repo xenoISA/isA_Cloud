@@ -21,8 +21,17 @@ Public surface
   (#374, ADR 0009 §3): minted at issuance, its id written to the ledger row and its
   HMAC secret stored in an isolated ``deployment_secret`` table; defines the
   ``verify_telemetry_hmac`` scheme the intake endpoint (#375) calls.
+- :mod:`fleet_console.intake`   — the telemetry intake endpoint (#375): HMAC-
+  authenticated, metadata-only, realtime/periodic POST + air-gapped file upload.
+- :mod:`fleet_console.telemetry_models`  — the ``TelemetryRecord`` store (#375).
+- :mod:`fleet_console.telemetry_queries` — honest-silence / last-seen reporting (#375).
 """
 
+from .intake import (
+    TelemetryPayload,
+    build_intake_router,
+    create_intake_app,
+)
 from .issuance import (
     IssuanceRequest,
     IssuanceResult,
@@ -42,6 +51,12 @@ from .telemetry_credential import (
     secret_for_license,
     sign_telemetry,
     verify_telemetry_hmac,
+)
+from .telemetry_models import TelemetryRecord
+from .telemetry_queries import (
+    DeploymentSilence,
+    last_seen_per_deployment,
+    latest_record,
 )
 
 __all__ = [
@@ -65,4 +80,12 @@ __all__ = [
     "sign_telemetry",
     "verify_telemetry_hmac",
     "rotate_credential",
+    # telemetry intake (#375)
+    "TelemetryPayload",
+    "build_intake_router",
+    "create_intake_app",
+    "TelemetryRecord",
+    "DeploymentSilence",
+    "last_seen_per_deployment",
+    "latest_record",
 ]

@@ -23,27 +23,79 @@ database and NEVER stores customer business data or PII. The ledger holds only w
 isA itself signed: `license_id / customer_id / edition / entitled_modules /
 quota_tier / dates / delivery`.
 
-## What's here (this story, #373)
+## What's here
 
 The **license-issuance ledger** + the **issuance workflow** + a **library-level
-query API**. No HTTP endpoint and no UI yet — those are later stories.
+query API** (#373), plus the **telemetry intake endpoint** (#375).
 
 ```
 fleet/
 ├── README.md                         # this file
 ├── fleet_console/                    # the Python package
 │   ├── __init__.py                   # public surface (re-exports)
-│   ├── models.py                     # SQLAlchemy: Base + IssuanceLedger
-│   ├── issuance.py                   # IssuanceService / issue_license / renew_license
-│   ├── queries.py                    # roster / by_customer / expiring_soon
-│   └── telemetry_credential.py       # #374: mint/verify per-deployment HMAC credential
+│   ├── models.py                     # SQLAlchemy: Base + IssuanceLedger (#373)
+│   ├── issuance.py                   # IssuanceService / issue_license / renew_license (#373)
+│   ├── queries.py                    # roster / by_customer / expiring_soon (#373)
+│   ├── telemetry_credential.py       # #374: mint/verify per-deployment HMAC credential
+│   ├── intake.py                     # telemetry intake: POST + file-upload, HMAC, strict schema (#375)
+│   ├── telemetry_models.py           # SQLAlchemy: TelemetryRecord store (#375)
+│   └── telemetry_queries.py          # honest-silence / last_seen_per_deployment (#375)
 ├── migrations/
 │   ├── 0001_issuance_ledger.sql      # CREATE TABLE issuance_ledger (Postgres DDL)
-│   └── 0002_deployment_secret.sql    # CREATE TABLE deployment_secret (#374, sensitive)
+│   ├── 0002_deployment_secret.sql    # CREATE TABLE deployment_secret (#374, sensitive)
+│   └── 0003_telemetry_record.sql     # CREATE TABLE telemetry_record (Postgres DDL, #375)
 └── tests/
-    ├── test_issuance.py              # sign->ledger round-trip, renewal, query filters
-    └── test_telemetry_credential.py  # #374: mint, verify, rotation, migration DDL
+    ├── test_issuance.py              # sign->ledger round-trip, renewal, query filters (#373)
+    ├── test_telemetry_credential.py  # #374: mint, verify, rotation, migration DDL
+    └── test_intake.py                # HMAC/401, strict-schema/422, file-upload, silence query (#375)
 ```
+
+## Telemetry intake (ADR 0009 §3, #375)
+
+`fleet_console/intake.py` is the single internet-facing intake for opt-in fleet
+telemetry. All three ADR 0009 §3 reachability tiers land in ONE store
+(`telemetry_record`):
+
+| Tier | Endpoint | `source` |
+|---|---|---|
+| realtime (SaaS) / periodic (connected on-prem) | `POST /telemetry` (JSON body) | `realtime` |
+| offline (air-gapped) | `POST /telemetry/upload` (multipart file) | `offline-upload` |
+
+Both entrypoints share ONE auth→validate→persist pipeline:
+
+1. **Auth first (401).** Each request carries `X-Deployment-Secret-Id` +
+   `X-Telemetry-Signature` (HMAC-SHA256 over the RAW body bytes). The signature is
+   verified via `verify_telemetry_hmac` (the #374 contract) BEFORE any parsing.
+2. **Metadata only (422).** The body is validated against `TelemetryPayload`, a
+   strict Pydantic model with `model_config = ConfigDict(extra="forbid")` — any
+   unknown field (smuggled business data / PII) is rejected. Fields:
+   `license_id`, `last_seen`, `active_edition`, `active_modules`, `module_usage`,
+   `showback_totals`, `over_license` (ADR 0008 §3).
+3. **Tied to the ledger.** `license_id` must exist in `issuance_ledger`; when the
+   ledger row pins a `deployment_secret_id` it must match the caller's credential.
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from fleet_console import Base, create_intake_app
+
+engine = create_engine("postgresql+psycopg://.../fleet")
+Base.metadata.create_all(engine)  # builds issuance_ledger AND telemetry_record
+app = create_intake_app(sessionmaker(bind=engine, class_=Session))  # FastAPI app
+# or: build_intake_router(session_factory) to mount into a larger app.
+```
+
+**Honest silence (ADR 0009 §4).** `last_seen_per_deployment(session, ...)` returns
+one row per current license joined to its newest telemetry — never-reported
+deployments come back with `last_seen=None`/`silent=True` (the explicit "no
+telemetry since X" the UI #377 must show for silent/air-gapped customers).
+
+> **#374 credential (now merged).** Intake authenticates via
+> `telemetry_credential.verify_telemetry_hmac(session, deployment_secret_id,
+> payload_bytes, signature)` — the #374 contract, now backed by its real
+> per-deployment secret store (the isolated `deployment_secret` table), not an env
+> stub. The session in the request path (from `session_factory`) is threaded into
+> the verify call so the secret is looked up from the DB before any parsing.
 
 ### Package layout convention (for #374 / #375 / #377)
 
