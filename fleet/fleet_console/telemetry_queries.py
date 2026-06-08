@@ -93,7 +93,10 @@ def last_seen_per_deployment(
         max_seen, max_seen.c.license_id == IssuanceLedger.license_id
     )
     if not include_superseded:
-        stmt = stmt.where(IssuanceLedger.superseded_by.is_(None))
+        stmt = stmt.where(
+            IssuanceLedger.superseded_by.is_(None),
+            IssuanceLedger.revoked_at.is_(None),
+        )
     stmt = stmt.order_by(IssuanceLedger.customer_id, IssuanceLedger.license_id)
 
     threshold = (

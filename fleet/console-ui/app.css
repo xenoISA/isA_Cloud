@@ -1,0 +1,40 @@
+:root { --bg:#0f1117; --panel:#181b24; --line:#2a2f3a; --ink:#e6e8ee; --muted:#9aa3b2;
+  --accent:#5b9dff; --ok:#3ecf8e; --warn:#f2c14e; --bad:#ef5b5b; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.5 -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+header { padding:16px 24px; border-bottom:1px solid var(--line); }
+header h1 { margin:0; font-size:20px; }
+.sub { color:var(--muted); margin:4px 0 12px; }
+nav button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+  padding:6px 12px; margin-right:6px; border-radius:6px; cursor:pointer; }
+nav button.active { border-color:var(--accent); color:var(--accent); }
+.apiconf { margin-top:10px; color:var(--muted); }
+.apiconf input { background:var(--panel); border:1px solid var(--line); color:var(--ink);
+  padding:4px 8px; border-radius:5px; }
+#status { margin-left:12px; }
+main { padding:24px; }
+.tab { display:none; }
+.tab.active { display:block; }
+h2 { font-size:16px; }
+.hint { color:var(--muted); font-size:13px; max-width:760px; }
+button { background:var(--accent); color:#08121f; border:0; padding:7px 14px;
+  border-radius:6px; cursor:pointer; font-weight:600; }
+table { width:100%; border-collapse:collapse; margin-top:12px; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); font-size:13px; }
+th { color:var(--muted); font-weight:600; }
+.badge { padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+.s-current { background:rgba(62,207,142,.16); color:var(--ok); }
+.s-expiring { background:rgba(242,193,78,.18); color:var(--warn); }
+.s-expired, .s-revoked { background:rgba(239,91,91,.18); color:var(--bad); }
+.s-perpetual { background:rgba(91,157,255,.16); color:var(--accent); }
+.s-none { color:var(--muted); font-style:italic; }
+fieldset { border:1px solid var(--line); border-radius:8px; margin:14px 0; padding:14px; }
+legend { color:var(--accent); padding:0 6px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
+label { display:flex; flex-direction:column; gap:3px; color:var(--muted); font-size:12px; }
+input, textarea { background:var(--panel); border:1px solid var(--line); color:var(--ink);
+  padding:6px 8px; border-radius:5px; font:inherit; }
+pre { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px;
+  overflow:auto; max-height:340px; }
+.err { color:var(--bad); }
+code { color:var(--accent); }

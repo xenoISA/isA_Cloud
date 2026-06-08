@@ -38,16 +38,22 @@ fleet/
 │   ├── queries.py                    # roster / by_customer / expiring_soon (#373)
 │   ├── telemetry_credential.py       # #374: mint/verify per-deployment HMAC credential
 │   ├── intake.py                     # telemetry intake: POST + file-upload, HMAC, strict schema (#375)
+│   ├── api.py                        # #377: operator-facing fleet API (roster/expiry/entitlement/showback/issue/renew/revoke)
 │   ├── telemetry_models.py           # SQLAlchemy: TelemetryRecord store (#375)
 │   └── telemetry_queries.py          # honest-silence / last_seen_per_deployment (#375)
+├── console-ui/                       # #377: the Fleet UI — a SEPARATE deployable SPA
+│   ├── server.py                     # mounts create_fleet_api(...) + serves the SPA
+│   ├── index.html / app.js / app.css # zero-build single-page console
 ├── migrations/
 │   ├── 0001_issuance_ledger.sql      # CREATE TABLE issuance_ledger (Postgres DDL)
 │   ├── 0002_deployment_secret.sql    # CREATE TABLE deployment_secret (#374, sensitive)
-│   └── 0003_telemetry_record.sql     # CREATE TABLE telemetry_record (Postgres DDL, #375)
+│   ├── 0003_telemetry_record.sql     # CREATE TABLE telemetry_record (Postgres DDL, #375)
+│   └── 0004_issuance_revocation.sql  # ALTER issuance_ledger ADD revoked_at/revoked_reason (#377)
 └── tests/
     ├── test_issuance.py              # sign->ledger round-trip, renewal, query filters (#373)
     ├── test_telemetry_credential.py  # #374: mint, verify, rotation, migration DDL
-    └── test_intake.py                # HMAC/401, strict-schema/422, file-upload, silence query (#375)
+    ├── test_intake.py                # HMAC/401, strict-schema/422, file-upload, silence query (#375)
+    └── test_api.py                   # #377: roster/expiry/issue/renew/revoke/showback + metadata-only
 ```
 
 ## Telemetry intake (ADR 0009 §3, #375)
@@ -110,9 +116,90 @@ telemetry since X" the UI #377 must show for silent/air-gapped customers).
   entry). **Call `fleet_console.verify_telemetry_hmac(session,
   deployment_secret_id, payload_bytes, signature)` to authenticate** — do not
   re-implement the HMAC; the scheme is defined once in #374 (below).
-- **#377 fleet UI** — calls the query API in `fleet_console/queries.py` (`roster`,
-  `by_customer`, `expiring_soon`). A separate Next.js deployment (ADR 0009 §4); it
-  reads through these functions (or an HTTP layer wrapping them).
+- **#377 fleet API + UI** — DONE. `fleet_console/api.py` is the HTTP layer over the
+  `queries.py` / `issuance.py` / `telemetry_queries.py` library functions
+  (`create_fleet_api(session_factory, signing_key_pem=...)`), and `console-ui/` is the
+  separate-deployable SPA over it. See "Fleet console API + UI" above.
+
+## Fleet console API + UI (ADR 0009 §2/§4, #377)
+
+The query / issuance / telemetry helpers above are a Python **library**. The Fleet
+UI (#377) needs them over HTTP, so this issue adds an **operator-facing API** and a
+**UI** — a coherent vertical slice. (This is distinct from `intake.py`, which is the
+internet-facing telemetry *push* from deployments, not the operator read/issue API.)
+
+### `fleet_console/api.py` — the operator API (FastAPI, `create_*` factory)
+
+```python
+from sqlalchemy.orm import Session, sessionmaker
+from fleet_console import Base, create_fleet_api
+app = create_fleet_api(sessionmaker(bind=engine, class_=Session))  # FastAPI app
+# or build_fleet_router(session_factory, signing_key_pem=...) to mount elsewhere.
+```
+
+| Endpoint | Wraps (#373/#375 library fn) | Notes |
+|---|---|---|
+| `GET /fleet/roster` | `queries.roster()` + `telemetry_queries.last_seen_per_deployment()` | each row gets a derived `status` (current / expiring / expired / perpetual / revoked) + honest `last_seen`/`silent` |
+| `GET /fleet/customers/{id}` | `queries.by_customer()` | + entitlement view (union of `entitled_modules`) |
+| `GET /fleet/expiring?within_days=N` | `queries.expiring_soon()` | expiry calendar / renewal alerts |
+| `GET /fleet/showback` | `telemetry_queries.last_seen_per_deployment()` + `latest_record()` | per-customer rollup; `telemetry_state` = `realtime` (SaaS) / `last-upload` (connected/offline) / `none` (silent → honest "no telemetry since X") |
+| `POST /fleet/issue` | `IssuanceService.issue()` | signs + writes ledger; returns the signed license + non-secret `deployment_secret_id` |
+| `POST /fleet/renew` | `IssuanceService.renew()` | supersedes the prior row |
+| `POST /fleet/revoke` | `IssuanceService.revoke()` | ledger flag (see below) |
+
+**Metadata-only (ADR 0009 §5).** Every response model is built ONLY from ledger
+columns + telemetry *metadata* (last_seen, active edition/modules, usage **counters**,
+showback totals, `over_license`). The API has no path to a customer DB at all. The
+issue/renew/revoke request bodies set `extra="forbid"`, so smuggled business data /
+PII is rejected (422) — the same guard intake uses.
+
+**Signing-key custody (ADR 0009 §2).** `issue`/`renew` need the offline ed25519
+private key. The API never holds it hot: `create_fleet_api(..., signing_key_pem=...)`
+is the dev/test pin, but in real ops the operator supplies `signing_key_pem` (PEM)
+**in the request body**, sourced from the offline keystore/HSM at issuance time, and
+it is dropped after the call. `revoke` needs no key (it does not sign).
+
+### Revoke model (ADR 0009: online revocation is a FUTURE extension)
+
+An offline-signed `license.json` **cannot be remotely killed** once shipped (least of
+all to an air-gapped deployment); ADR 0009 scopes online revocation / CRL as a future
+online extension. So at this layer **revoke is a vendor-side ledger flag**:
+`IssuanceService.revoke(license_id, reason=...)` stamps `revoked_at` (+ `revoked_reason`)
+on the ledger row (migration `0004_issuance_revocation.sql`). A revoked row is
+**retained for audit** but, like a superseded row, drops out of the active roster /
+expiry / showback (the queries now filter `revoked_at IS NULL` alongside
+`superseded_by IS NULL`). Revoking a superseded or already-revoked row is rejected.
+True kill-on-the-deployment is the future CRL/online extension.
+
+### UI — `fleet/console-ui/` (a SEPARATE deployable, NOT under `/admin`)
+
+A lean **single-page app** (static `index.html` + `app.js` + `app.css`, no build
+step) served by `console-ui/server.py`, which mounts `create_fleet_api(...)` and the
+static SPA into one **separate** vendor-side FastAPI app.
+
+**Why a FastAPI-served SPA instead of a full Next.js app?** ADR 0009 §4 allows reusing
+the isA_Admin Next.js stack, and #377 explicitly permits "a minimal Next app (or even
+a single-page app served by the FastAPI) … AS LONG AS it calls the real endpoints and
+is clearly a separate deployable." A full Next scaffold + build is heavy to provision
+and verify in this environment for what is a thin operator console; a zero-build SPA
+over the real API is faster to ship and trivially verifiable (booted in-process
+against the live endpoints). It remains a **distinct deployable** — its own
+`server.py`, its own trust zone, never co-hosted on the public intake and never under
+any `/admin` path (it is the inverse of isA_Admin, ADR 0009 §5). Swapping in a Next
+app later is purely a frontend change; the API contract is the boundary.
+
+Views: **Roster** (customer × edition × status + last-seen/silence), **Expiry /
+renewal alerts**, **Entitlements** (per customer), **Showback** (honest "no telemetry
+since X" for silent/air-gapped), and **Issue / Renew / Revoke** controls wired to the
+API. Run:
+
+```bash
+PYTHONPATH="$PWD/isA_common:$PWD/fleet:$PWD/fleet/console-ui" \
+    uvicorn server:app --app-dir fleet/console-ui --port 8077
+# or: python fleet/console-ui/server.py
+# FLEET_DATABASE_URL=postgresql+psycopg://.../fleet  (defaults to a local sqlite file)
+# FLEET_SIGNING_KEY_FILE=...  (optional dev pin; unset => operator pastes key per request)
+```
 
 ## The issuance workflow (ADR 0009 §1–2)
 

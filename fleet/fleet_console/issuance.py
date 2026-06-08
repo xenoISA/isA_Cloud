@@ -162,9 +162,16 @@ class IssuanceService:
     it does not run a hot key service.
     """
 
-    def __init__(self, session: "Session", signing_key_pem: bytes):
+    def __init__(self, session: "Session", signing_key_pem: Optional[bytes] = None):
         self._session = session
-        self._priv = _load_private_key(signing_key_pem)
+        # The key is only needed for issue/renew (signing). revoke() is a pure ledger
+        # flag (no signing), so the key may be omitted when only revoking.
+        self._priv = _load_private_key(signing_key_pem) if signing_key_pem else None
+
+    def _require_key(self) -> ed25519.Ed25519PrivateKey:
+        if self._priv is None:
+            raise ValueError("IssuanceService requires a signing key to issue/renew")
+        return self._priv
 
     def issue(self, req: IssuanceRequest) -> IssuanceResult:
         """Sign + ledger-write a NEW license atomically. Returns the signed artifact.
@@ -175,7 +182,7 @@ class IssuanceService:
         spec = _build_spec(req, issued_at)
 
         # (a) sign in memory — pure, side-effect-free.
-        signed = sign_license(spec, self._priv)
+        signed = sign_license(spec, self._require_key())
 
         # (a') mint the telemetry credential in memory — pure, no DB side-effects.
         cred = mint_credential(spec["customer_id"])
@@ -238,7 +245,7 @@ class IssuanceService:
                 f"({prior_license_id!r}); pass a distinct license_id"
             )
 
-        signed = sign_license(spec, self._priv)
+        signed = sign_license(spec, self._require_key())
 
         # Rotation on renewal (ADR 0009 §3 / Consequences): a renewal mints a FRESH
         # telemetry credential for the new lineage row. The prior row keeps its own
@@ -271,6 +278,35 @@ class IssuanceService:
         prior.superseded_by = new_row.license_id
         self._session.commit()
         return IssuanceResult(license=signed, ledger_row=new_row, credential=cred)
+
+    def revoke(self, license_id: str, *, reason: Optional[str] = None) -> IssuanceLedger:
+        """Revoke a license by FLAGGING its ledger row (ADR 0009 §4 revoke action).
+
+        ADR 0009 scopes online revocation / CRL as a FUTURE extension: an offline-
+        signed ``license.json`` cannot be remotely killed once shipped (especially to
+        an air-gapped deployment). So at this layer "revoke" is a vendor-side ledger
+        flag — it stamps ``revoked_at`` (server clock) + an optional ``reason`` so the
+        fleet roster / showback stop treating the row as a live, in-good-standing
+        deployment. The row is RETAINED for audit; this is NOT a delete.
+
+        No signing happens — there is no anti-license to mint. Revoking an already-
+        revoked or a superseded row is rejected (a superseded row is already inactive;
+        revoke its current successor instead). Returns the updated ledger row.
+        """
+        row = self._session.get(IssuanceLedger, license_id)
+        if row is None:
+            raise ValueError(f"unknown license_id: {license_id!r}")
+        if row.superseded_by is not None:
+            raise ValueError(
+                f"license {license_id!r} is already superseded by "
+                f"{row.superseded_by!r}; revoke its successor instead"
+            )
+        if row.revoked_at is not None:
+            raise ValueError(f"license {license_id!r} is already revoked")
+        row.revoked_at = _now()
+        row.revoked_reason = reason
+        self._session.commit()
+        return row
 
 
 # --------------------------------------------------------------------------- #
