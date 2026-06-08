@@ -15,6 +15,35 @@ image:
 configMapRef: isa-platform-env
 secretRef: isa-platform-secrets
 
+# License & entitlement wiring (ADR 0008 §6, #370) — SN on-prem-full only.
+#   * ISA_LICENSE_ENFORCE + ISA_LICENSE_FILE come from the isa-platform-env
+#     ConfigMap above (envFrom). For GCP/SaaS that ConfigMap is swapped and does
+#     NOT set ISA_LICENSE_ENFORCE → enforcement stays off there.
+#   * ISA_LICENSE_PUBKEY is the ed25519 PUBLIC key PEM, injected per-key from the
+#     dedicated (non-secret) isa-license-pubkey ConfigMap — exactly per ADR §6.
+#     (envFrom can't pull a single key from a second ConfigMap, so it's an
+#     explicit env entry; the chart renders .Values.env verbatim.)
+#   * license.json is mounted READ-ONLY at /etc/isa-license/license.json from the
+#     isa-license ConfigMap (path matches ISA_LICENSE_FILE). Signed → no Secret
+#     needed; readOnly per ADR §6. Swapped on renewal (license-operator.md §4).
+env:
+  - name: ISA_LICENSE_PUBKEY
+    valueFrom:
+      configMapKeyRef:
+        name: isa-license-pubkey
+        key: ed25519.pub
+volumes:
+  - name: isa-license
+    configMap:
+      name: isa-license
+      items:
+        - key: license.json
+          path: license.json
+volumeMounts:
+  - name: isa-license
+    mountPath: /etc/isa-license
+    readOnly: true
+
 # toggles: operators/CRDs NOT installed in this cluster -> plain Deployment
 rollout:
   enabled: false

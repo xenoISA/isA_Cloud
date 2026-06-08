@@ -33,6 +33,7 @@ Standard chart `deployments/charts/isa-service` + a base values overlay + per-se
 3. **HPA / scale-out** — all services `replicas: 1`, autoscaling off.
 4. **Integration / e2e / load testing** — only smoke done; inter-service (Consul discovery), auth-protected flows, NATS events, and load are untested.
 5. **Edition portability** — isA SaaS edition on GCP (ns `isa-cloud-production`); Dataphin/bigdata track.
+6. **License install** (#370, ADR 0008) — env contract + read-only `license.json` mount are wired into the SN edition (`deployments/editions/sn/`: `configmap-isa-license{,-pubkey}.yaml`, platform-env sets `ISA_LICENSE_ENFORCE=true` + `ISA_LICENSE_FILE`). Before go-live, drop the **real** signed `license.json` + ed25519 public key (from the SN offline bundle) into those placeholder ConfigMaps and apply. Install/renew steps: [`deployments/editions/sn/README.md`](../../deployments/editions/sn/README.md) "License & entitlement"; runbook [`docs/runbooks/license-operator.md`](../runbooks/license-operator.md).
 
 ## Known repo debt surfaced & fixed during this deploy
 See `isA_user` PRs #505–#513 (lowercase GHCR prefix, base migration tooling, missing base deps, URL-encoded DB creds + alembic `%%`, ship `tests/contracts`, SERVICE_PORT build-arg, order_service migration ordering). The 8 alembic services still carry conflicting legacy raw SQL (skipped at deploy; should be removed upstream).

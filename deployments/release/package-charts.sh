@@ -77,6 +77,24 @@ echo ">> bundle edition overlays"
 mkdir -p "$OUT_DIR/editions"
 cp "$EDITIONS_DIR"/*.yaml "$OUT_DIR/editions/" 2>/dev/null || true
 
+# License & entitlement manifests (ADR 0008 §6, #370) — the SN edition's
+# license ConfigMap manifests (pubkey + license.json mount) + the entitled-modules
+# values file ride the offline delivery bundle alongside the chart, exactly like
+# the brand/edition overlays. They are NOT chart values (the SN deploy applies them
+# directly: `kubectl apply -f editions/sn/configmap-isa-license*.yaml`).
+#
+# NOTE: the bundled configmap-isa-license{,-pubkey}.yaml carry PLACEHOLDER bodies.
+# The REAL per-customer signed license.json + matching ed25519 public key are
+# delivered via the SN offline bundle (sn_cloud fork:
+# docs/implementation-delivery/production/assets/offline-bundle/) and dropped into
+# these manifests before apply — see editions/sn/README.md "License install / renew".
+echo ">> bundle SN license manifests (ADR 0008 §6)"
+mkdir -p "$OUT_DIR/editions/sn"
+cp "$EDITIONS_DIR"/sn/configmap-isa-license.yaml \
+   "$EDITIONS_DIR"/sn/configmap-isa-license-pubkey.yaml \
+   "$EDITIONS_DIR"/sn/values-entitled-modules.yaml \
+   "$OUT_DIR/editions/sn/" 2>/dev/null || true
+
 echo ">> packaged artifacts:"
 ls -1 "$OUT_DIR"/*.tgz
 

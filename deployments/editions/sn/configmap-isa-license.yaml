@@ -1,0 +1,48 @@
+# =============================================================================
+# isa-license — the signed license.json, mounted read-only            (#370)
+# =============================================================================
+# The customer's signed license document (ADR 0008 §1). Mounted read-only at
+# /etc/isa-license/license.json into every platform service (volume + volumeMount
+# in isa-svc-base.yaml); read by isa_common/license.py via ISA_LICENSE_FILE.
+#
+# WHY A CONFIGMAP (not a Secret): the body is ed25519-SIGNED, so integrity is
+# self-evident — tampering invalidates the signature and license.py returns
+# INVALID (→ refuse-to-start under ISA_LICENSE_ENFORCE=true). It is also not a
+# secret (it only states edition / entitled_modules / expiry). A read-only mount
+# is the correct posture per ADR 0008 §6.
+#
+# RENEWAL (ADR 0008 §3, runbook docs/runbooks/license-operator.md §4): isA
+# re-issues a new signed license.json offline → swap the `license.json` value
+# here → re-apply this ConfigMap → roll the platform pods so they re-read it.
+# Also re-transcribe entitled_modules into values-entitled-modules.yaml (#369).
+#
+# DELIVERY: the REAL signed license.json is per-customer and ships in the SN
+# offline delivery bundle (ADR 0007) — it is NOT committed here. The body below
+# is a PLACEHOLDER skeleton (matches ADR 0008 §1 shape) so the manifest renders;
+# replace it wholesale with the signed document from the bundle before apply.
+# The signed JSON carries its own `signature`; do not hand-edit it.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: isa-license
+  namespace: sn-cloud-production
+data:
+  # REPLACE with the real signed license.json delivered in the offline bundle.
+  license.json: |
+    {
+      "license_id": "REPLACE-sn-prod-YYYY",
+      "customer_id": "SN",
+      "edition": "on-prem-full",
+      "issued_at": "REPLACE",
+      "not_before": "REPLACE",
+      "expires_at": "REPLACE",
+      "grace_days": 30,
+      "entitled_modules": [
+        "erp", "mes", "plm", "srm", "scm_tower", "finance", "commerce",
+        "commercial_tower", "mdm", "maestro", "feishu", "seeyon"
+      ],
+      "quota_tier": "enterprise",
+      "seats": -1,
+      "signature": "REPLACE_WITH_ED25519_SIGNATURE_BASE64"
+    }
