@@ -20,6 +20,8 @@ Columns map 1:1 to the ADR 0009 §1 ledger row:
     superseded_by        text FK->self (nullable) — set when a renewal supersedes this row
     delivery             text       — how it was shipped (ADR 0007), e.g. "offline-bundle"
     deployment_secret_id text       (nullable) — populated by #374 (telemetry credential)
+    revoked_at           timestamptz (nullable) — set by #377 revoke action (ledger flag)
+    revoked_reason       text       (nullable) — operator-supplied revoke reason
 
 `deployment_secret_id` is intentionally left nullable and unpopulated here: #374
 mints a per-deployment HMAC credential at issuance and writes its id back onto the
@@ -77,6 +79,19 @@ class IssuanceLedger(Base):
     # IssuanceService; the secret itself lives in the isolated `deployment_secret`
     # table (telemetry_credential.py). Nullable for pre-#374 rows / non-telemetry use.
     deployment_secret_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Revocation marker (#377, ADR 0009 §4 "revoke" action). ADR 0009 scopes online
+    # revocation / CRL distribution as a FUTURE extension — an offline-signed license
+    # cannot be remotely killed once shipped. So at this layer "revoke" is a vendor-
+    # side LEDGER FLAG: it records that isA has revoked the entitlement (e.g. contract
+    # terminated, key compromise) so the fleet roster/showback stop counting the row
+    # as a live, in-good-standing deployment. A revoked row is still retained (audit),
+    # is excluded from the active roster, and — like supersession — drops out of the
+    # current-fleet view. NULL revoked_at == not revoked.
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return (

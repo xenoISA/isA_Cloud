@@ -3,9 +3,11 @@
 Library-level (no HTTP yet) — these back the fleet UI (#377). All functions take a
 SQLAlchemy ``Session`` and return ``IssuanceLedger`` rows.
 
-"Current" / "active" == ``superseded_by IS NULL`` (a renewed row points its
-``superseded_by`` at its successor, so the lineage's live row is the one with no
-successor).
+"Current" / "active" == ``superseded_by IS NULL AND revoked_at IS NULL`` (a renewed
+row points its ``superseded_by`` at its successor, so the lineage's live row is the
+one with no successor; a revoked row (#377) is flagged ``revoked_at`` and also drops
+out of the active set). ``include_superseded=True`` returns the full historical
+ledger, INCLUDING superseded and revoked rows.
 """
 
 from __future__ import annotations
@@ -31,7 +33,10 @@ def roster(session: "Session", *, include_superseded: bool = False) -> List[Issu
     """
     stmt = select(IssuanceLedger)
     if not include_superseded:
-        stmt = stmt.where(IssuanceLedger.superseded_by.is_(None))
+        stmt = stmt.where(
+            IssuanceLedger.superseded_by.is_(None),
+            IssuanceLedger.revoked_at.is_(None),
+        )
     stmt = stmt.order_by(IssuanceLedger.customer_id, IssuanceLedger.issued_at)
     return list(session.scalars(stmt).all())
 
@@ -47,7 +52,10 @@ def by_customer(
     """
     stmt = select(IssuanceLedger).where(IssuanceLedger.customer_id == customer_id)
     if not include_superseded:
-        stmt = stmt.where(IssuanceLedger.superseded_by.is_(None))
+        stmt = stmt.where(
+            IssuanceLedger.superseded_by.is_(None),
+            IssuanceLedger.revoked_at.is_(None),
+        )
     stmt = stmt.order_by(IssuanceLedger.issued_at.desc())
     return list(session.scalars(stmt).all())
 
@@ -76,7 +84,10 @@ def expiring_soon(
         IssuanceLedger.expires_at <= window_end,
     )
     if not include_superseded:
-        stmt = stmt.where(IssuanceLedger.superseded_by.is_(None))
+        stmt = stmt.where(
+            IssuanceLedger.superseded_by.is_(None),
+            IssuanceLedger.revoked_at.is_(None),
+        )
     stmt = stmt.order_by(IssuanceLedger.expires_at)
     return list(session.scalars(stmt).all())
 

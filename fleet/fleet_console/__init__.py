@@ -27,6 +27,18 @@ Public surface
 - :mod:`fleet_console.telemetry_queries` — honest-silence / last-seen reporting (#375).
 """
 
+from .api import (
+    CustomerView,
+    IssueBody,
+    IssueResponse,
+    RenewBody,
+    RevokeBody,
+    RosterRow,
+    ShowbackRow,
+    build_fleet_router,
+    create_fleet_api,
+    derive_status,
+)
 from .intake import (
     TelemetryPayload,
     build_intake_router,
@@ -88,4 +100,15 @@ __all__ = [
     "DeploymentSilence",
     "last_seen_per_deployment",
     "latest_record",
+    # fleet console operator API (#377)
+    "create_fleet_api",
+    "build_fleet_router",
+    "derive_status",
+    "RosterRow",
+    "CustomerView",
+    "ShowbackRow",
+    "IssueBody",
+    "RenewBody",
+    "RevokeBody",
+    "IssueResponse",
 ]
