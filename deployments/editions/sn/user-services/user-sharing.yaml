@@ -1,0 +1,10 @@
+name: user-sharing
+image:
+  repository: isa/user-sharing
+  tag: "0.1.0"
+port: 8255
+env:
+  - {name: SERVICE_NAME, value: "sharing_service"}
+  - {name: SERVICE_PORT, value: "8255"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

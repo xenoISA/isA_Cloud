@@ -1,0 +1,12 @@
+# isa_data — data platform service (FastAPI, :8084). Standard infra via base.
+name: isa-data
+image:
+  repository: isa/isa-data
+  tag: "0.1.3"
+port: 8084
+replicas: 1
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  limits: {cpu: "2", memory: "4Gi"}
+health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}

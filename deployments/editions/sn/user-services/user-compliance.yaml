@@ -1,0 +1,10 @@
+name: user-compliance
+image:
+  repository: isa/user-compliance
+  tag: "0.1.0"
+port: 8226
+env:
+  - {name: SERVICE_NAME, value: "compliance_service"}
+  - {name: SERVICE_PORT, value: "8226"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

@@ -1,0 +1,11 @@
+name: isa-console
+image:
+  repository: isa/isa-console
+  tag: "0.1.1"
+port: 4200
+replicas: 1
+resources:
+  requests: {cpu: "100m", memory: "256Mi"}
+  limits: {cpu: "1", memory: "1Gi"}
+health: {path: /console/api/health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /console/api/health, initialDelaySeconds: 40, periodSeconds: 20}

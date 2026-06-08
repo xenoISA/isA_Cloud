@@ -1,0 +1,10 @@
+name: user-inventory
+image:
+  repository: isa/user-inventory
+  tag: "0.1.0"
+port: 8252
+env:
+  - {name: SERVICE_NAME, value: "inventory_service"}
+  - {name: SERVICE_PORT, value: "8252"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

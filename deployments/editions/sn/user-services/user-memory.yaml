@@ -1,0 +1,16 @@
+name: user-memory
+image:
+  repository: isa/user-memory
+  tag: "0.1.0"
+port: 8223
+env:
+  - {name: SERVICE_NAME, value: "memory_service"}
+  - {name: SERVICE_PORT, value: "8223"}
+# Actual usage ~209Mi; exit137 was the liveness probe killing it (its /health
+# stalls intermittently on the unreachable FalkorDB), NOT OOM. Right-size RAM
+# and make the probes tolerant of transient slow /health.
+resources:
+  requests: {cpu: "100m", memory: "256Mi"}
+  limits: {cpu: "1", memory: "1Gi"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 15, timeoutSeconds: 10, failureThreshold: 6}
+liveness: {path: /health, initialDelaySeconds: 90, periodSeconds: 30, timeoutSeconds: 10, failureThreshold: 6}

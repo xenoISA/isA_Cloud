@@ -1,0 +1,55 @@
+apiVersion: v1
+data:
+  BRAND_DISPLAY_NAME: SN Platform
+  BRAND_NAME: SN
+  BRAND_ORG_NAME: SN
+  CONSUL_ENABLED: 'true'
+  CONSUL_HOST: consul-server.sn-cloud-production.svc.cluster.local
+  CONSUL_PORT: '8500'
+  FALKOR_HOST: falkordb.sn-cloud-production.svc.cluster.local
+  FALKOR_PORT: '6379'
+  ISA_BACKEND_PREFERENCE: local_gpu,modal,local
+  ISA_BIGDATA_ENABLED: 'true'
+  ISA_CHARGING_ENABLED: 'false'
+  ISA_DEFAULT_MODEL: qwen2.5
+  ISA_EDITION: on-prem-full
+  ISA_METERING_ENABLED: 'true'
+  ISA_MODEL_PROVIDER: local
+  ISA_MODEL_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  ISA_MULTI_TENANT: 'false'
+  LOCAL_GPU_DISPATCH_MODE: vllm
+  LOKI_ENABLED: 'false'
+  LOKI_URL: ''
+  MINIO_ENDPOINT: minio.sn-cloud-production.svc.cluster.local:9000
+  MINIO_HOST: minio.sn-cloud-production.svc.cluster.local
+  MINIO_PORT: '9000'
+  MINIO_SECURE: 'false'
+  NATS_HOST: nats.sn-cloud-production.svc.cluster.local
+  NATS_PORT: '4222'
+  NATS_URL: nats://nats.sn-cloud-production.svc.cluster.local:4222
+  NEO4J_AVAILABLE: 'false'
+  POSTGRES_DB: postgres
+  POSTGRES_HOST: postgresql.sn-cloud-production.svc.cluster.local
+  POSTGRES_PORT: '5432'
+  POSTGRES_USER: postgres
+  QDRANT_HOST: qdrant.sn-cloud-production.svc.cluster.local
+  QDRANT_PORT: '6333'
+  RAY_ADDRESS: ray://ray-head-svc.sn-cloud-production.svc.cluster.local:10001
+  RAY_IGNORE_VERSION_MISMATCH: '1'
+  RAY_NAMESPACE: isa-model
+  RAY_SERVE_ENABLED: 'true'
+  RAY_SERVE_HTTP_URL: http://ray-head-svc.sn-cloud-production.svc.cluster.local:8000
+  REDIS_HOST: redis-cluster.sn-cloud-production.svc.cluster.local
+  REDIS_PORT: '6379'
+  REDIS_URL: redis://redis-cluster.sn-cloud-production.svc.cluster.local:6379
+  VLLM_BASE_URL: http://vllm.sn-cloud-production.svc.cluster.local:8000
+  VLLM_DEFAULT_MODEL: qwen3.6-27b
+  VLLM_ENABLED: 'true'
+  VLLM_GPU_COUNT: '1'
+  VLLM_MODEL_ALIASES: Qwen/Qwen3.6-27B-FP8=qwen3.6-27b,Qwen/Qwen3.6-27B=qwen3.6-27b,qwen3.6-27b-fp8=qwen3.6-27b
+  VLLM_SERVED_MODEL_NAME: qwen3.6-27b
+kind: ConfigMap
+metadata:
+  name: isa-platform-env
+  namespace: sn-cloud-production
+

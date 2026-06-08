@@ -1,0 +1,10 @@
+name: user-campaign
+image:
+  repository: isa/user-campaign
+  tag: "0.1.0"
+port: 8251
+env:
+  - {name: SERVICE_NAME, value: "campaign_service"}
+  - {name: SERVICE_PORT, value: "8251"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}
