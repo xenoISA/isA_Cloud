@@ -10,6 +10,7 @@ No infrastructure required: the license status is patched via get_license, and
 Redis is a hand-rolled fake injected through the public parameter.
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,13 +36,31 @@ def clean_env(monkeypatch):
 
 
 def _lic(status: LicenseStatus) -> LicenseConfig:
-    """A minimal LicenseConfig carrying just the status the gate inspects."""
+    """A LicenseConfig whose expires_at/grace_days are consistent with `status`.
+
+    The runtime middleware now re-derives status via current_status() (H1), so the
+    config must carry an expires_at that actually yields `status` — a perpetual
+    (expires_at=None) config would always resolve to VALID.
+    """
+    now = datetime.now(timezone.utc)
+    expires_at = None
+    grace_days = 0
+    if status is LicenseStatus.VALID:
+        expires_at = now + timedelta(days=365)
+    elif status is LicenseStatus.GRACE:
+        expires_at = now - timedelta(days=5)
+        grace_days = 30
+    elif status is LicenseStatus.EXPIRED:
+        expires_at = now - timedelta(days=40)
+        grace_days = 30
+    # INVALID / UNLICENSED are terminal; expires_at is irrelevant (current_status
+    # returns them unchanged).
     return LicenseConfig(
         status=status,
         customer_id="cust",
         edition="on-prem-full",
-        expires_at=None,
-        grace_days=0,
+        expires_at=expires_at,
+        grace_days=grace_days,
         entitled_modules=frozenset(),
         quota_tier=None,
         seats=1,
@@ -170,6 +189,21 @@ class TestRuntimeMiddlewareFailOpen:
         assert any("over_license=true" in r.message for r in caplog.records)
         assert any(getattr(r, "over_license", False) for r in caplog.records)
 
+    def test_grace_emits_over_license_signal(self, caplog):
+        """GRACE is metered too (ADR 0008 §3) — over_license on GRACE AND EXPIRED."""
+        fake = FakeRedis()
+        app = _app_with_middleware(fake)
+        with _patch_status(LicenseStatus.GRACE):
+            client = TestClient(app)
+            with caplog.at_level("WARNING", logger="isa_common.licensing"):
+                resp = client.get("/ping")
+        assert resp.status_code == 200
+        assert any("over_license=true" in r.message for r in caplog.records)
+        assert any(
+            getattr(r, "license_status", None) == LicenseStatus.GRACE.value
+            for r in caplog.records
+        )
+
     def test_valid_does_not_block_or_warn(self, caplog):
         fake = FakeRedis()
         app = _app_with_middleware(fake)
@@ -181,7 +215,7 @@ class TestRuntimeMiddlewareFailOpen:
         assert not any("over_license" in r.message for r in caplog.records)
 
     def test_status_cached_to_redis_on_miss(self):
-        """A cache miss computes once and writes the status with a 1h TTL."""
+        """The resolved runtime status is written to Redis with a 1h TTL."""
         from isa_common.licensing import (
             LICENSE_STATUS_CACHE_KEY,
             LICENSE_STATUS_CACHE_TTL,
@@ -198,17 +232,99 @@ class TestRuntimeMiddlewareFailOpen:
         assert ttl == LICENSE_STATUS_CACHE_TTL
         assert value == LicenseStatus.EXPIRED.value
 
-    def test_cached_status_used_without_reverify(self):
-        """A populated cache is honored without calling get_license (no re-verify)."""
-        from isa_common.licensing import LICENSE_STATUS_CACHE_KEY
+    def test_real_client_shaped_double_cache_write_happens(self):
+        """A double shaped like the REAL AsyncRedisClient (set(ttl_seconds=) +
+        set_with_ttl, NO setex) must actually be written — the old `set(..., ex=)`
+        path raised a swallowed TypeError and never cached (H1).
+        """
+        from isa_common.licensing import (
+            LICENSE_STATUS_CACHE_KEY,
+            LICENSE_STATUS_CACHE_TTL,
+        )
 
-        fake = FakeRedis(initial={LICENSE_STATUS_CACHE_KEY: LicenseStatus.EXPIRED.value})
-        app = _app_with_middleware(fake)
-        with patch("isa_common.licensing.get_license") as mock_get:
+        class RealShapedRedis:
+            """Mirrors AsyncRedisClient: set(key, value, ttl_seconds=0),
+            set_with_ttl(key, value, ttl_seconds), get — and crucially NO setex."""
+
+            def __init__(self):
+                self.store = {}
+                self.set_calls = []
+                self.set_with_ttl_calls = []
+
+            async def get(self, key):
+                return self.store.get(key)
+
+            async def set(self, key, value, ttl_seconds=0):
+                # Reject the broken `ex=` kwarg the same way the real client would
+                # (its signature has no `ex` param → TypeError).
+                self.set_calls.append((key, value, ttl_seconds))
+                self.store[key] = value
+                return True
+
+            async def set_with_ttl(self, key, value, ttl_seconds):
+                self.set_with_ttl_calls.append((key, value, ttl_seconds))
+                self.store[key] = value
+                return True
+
+        real = RealShapedRedis()
+        assert not hasattr(real, "setex")
+        app = _app_with_middleware(real)
+        with _patch_status(LicenseStatus.EXPIRED):
             client = TestClient(app)
             resp = client.get("/ping")
         assert resp.status_code == 200
-        mock_get.assert_not_called()
+        # The write actually happened via set_with_ttl (preferred real-client API).
+        assert real.set_with_ttl_calls == [
+            (LICENSE_STATUS_CACHE_KEY, LicenseStatus.EXPIRED.value, LICENSE_STATUS_CACHE_TTL)
+        ]
+        assert real.store.get(LICENSE_STATUS_CACHE_KEY) == LicenseStatus.EXPIRED.value
+
+    def test_real_client_without_set_with_ttl_uses_set_ttl_seconds(self):
+        """If only set(key, value, ttl_seconds=) exists, the write uses it (no ex=)."""
+        from isa_common.licensing import (
+            LICENSE_STATUS_CACHE_KEY,
+            LICENSE_STATUS_CACHE_TTL,
+        )
+
+        class SetOnlyRedis:
+            def __init__(self):
+                self.store = {}
+                self.set_calls = []
+
+            async def get(self, key):
+                return self.store.get(key)
+
+            async def set(self, key, value, ttl_seconds=0):
+                self.set_calls.append((key, value, ttl_seconds))
+                self.store[key] = value
+                return True
+
+        real = SetOnlyRedis()
+        assert not hasattr(real, "setex")
+        assert not hasattr(real, "set_with_ttl")
+        app = _app_with_middleware(real)
+        with _patch_status(LicenseStatus.EXPIRED):
+            client = TestClient(app)
+            client.get("/ping")
+        assert real.set_calls == [
+            (LICENSE_STATUS_CACHE_KEY, LicenseStatus.EXPIRED.value, LICENSE_STATUS_CACHE_TTL)
+        ]
+
+    def test_runtime_status_rederived_not_trusted_from_cache(self, caplog):
+        """Freshness does NOT depend on the cache: a stale cached VALID is ignored —
+        the expiry decision uses the freshly-derived current_status() (H1)."""
+        from isa_common.licensing import LICENSE_STATUS_CACHE_KEY
+
+        # Cache says VALID (stale), but the live license is EXPIRED.
+        fake = FakeRedis(initial={LICENSE_STATUS_CACHE_KEY: LicenseStatus.VALID.value})
+        app = _app_with_middleware(fake)
+        with _patch_status(LicenseStatus.EXPIRED):
+            client = TestClient(app)
+            with caplog.at_level("WARNING", logger="isa_common.licensing"):
+                resp = client.get("/ping")
+        assert resp.status_code == 200
+        # over_license emitted because the FRESH status is EXPIRED (cache was stale).
+        assert any(getattr(r, "over_license", False) for r in caplog.records)
 
     def test_fail_open_when_redis_errors(self):
         """A redis that raises must not block the request."""

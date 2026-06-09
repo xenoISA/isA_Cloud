@@ -86,6 +86,35 @@ def _canonical_body(obj: dict) -> bytes:
     return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+# Statuses that are NOT time-derived: once resolved they cannot be re-trusted at
+# runtime (there is no signature to re-verify on a cheap datetime compare).
+_TERMINAL_STATUSES = (LicenseStatus.INVALID, LicenseStatus.UNLICENSED)
+
+
+def _derive_time_status(
+    expires_at: Optional[datetime],
+    grace_days: int,
+    now: datetime,
+) -> LicenseStatus:
+    """Derive the VALID/GRACE/EXPIRED *time* status from the signature-verified
+    static fields (`expires_at`, `grace_days`) vs `now`.
+
+    This is the ONLY part of a license's status that changes over wall-clock time;
+    every other field is fixed by the signature. It is a pure datetime comparison —
+    NO signature verification — so it is safe to call per-request.
+
+    Perpetual licenses (`expires_at is None`) are always VALID.
+    """
+    if expires_at is None:
+        return LicenseStatus.VALID
+    if now <= expires_at:
+        return LicenseStatus.VALID
+    grace_end = expires_at + timedelta(days=max(grace_days, 0))
+    if now <= grace_end:
+        return LicenseStatus.GRACE
+    return LicenseStatus.EXPIRED
+
+
 @dataclass(frozen=True)
 class LicenseConfig:
     """Offline-verified license state + entitlements. NEVER editable at runtime."""
@@ -102,6 +131,33 @@ class LicenseConfig:
     def is_entitled(self, module_key: str) -> bool:
         """True if `module_key` is in the license's entitled_modules set."""
         return module_key in self.entitled_modules
+
+    def current_status(self, now: Optional[datetime] = None) -> LicenseStatus:
+        """Re-derive the VALID/GRACE/EXPIRED *time* status as of `now`.
+
+        The signature-verified static fields (`expires_at`, `grace_days`, ...) are
+        frozen at boot by `from_env()`; only the time-derived status drifts as the
+        clock advances. A long-running pod must re-evaluate that drift per request
+        instead of freezing the boot status — otherwise an expiry that happens while
+        the pod stays up is never observed (H1, ADR 0008 §3).
+
+        This is a cheap datetime comparison: the signature was already trusted ONCE
+        at boot, so there is NOTHING to re-verify here. Terminal statuses
+        (INVALID/UNLICENSED) are returned unchanged — there is no signed window to
+        re-derive. Perpetual licenses (`expires_at is None`) are always VALID.
+
+        Args:
+            now: Override for the current time (UTC). Defaults to
+                `datetime.now(timezone.utc)`. Injectable for tests.
+
+        Returns:
+            The license status as of `now`.
+        """
+        if self.status in _TERMINAL_STATUSES:
+            return self.status
+        if now is None:
+            now = datetime.now(timezone.utc)
+        return _derive_time_status(self.expires_at, self.grace_days, now)
 
     @classmethod
     def unlicensed(cls) -> "LicenseConfig":
@@ -239,19 +295,15 @@ class LicenseConfig:
             logger.warning("license: not yet valid (not_before=%s)", not_before)
             return _invalid()
 
-        status = LicenseStatus.VALID
-        if expires_at is not None and now > expires_at:
-            grace_end = expires_at + timedelta(days=max(grace_days, 0))
-            if now <= grace_end:
-                status = LicenseStatus.GRACE
-                logger.warning(
-                    "license: in GRACE window (expired %s, grace_days=%d)",
-                    expires_at,
-                    grace_days,
-                )
-            else:
-                status = LicenseStatus.EXPIRED
-                logger.warning("license: EXPIRED (expired %s)", expires_at)
+        status = _derive_time_status(expires_at, grace_days, now)
+        if status is LicenseStatus.GRACE:
+            logger.warning(
+                "license: in GRACE window (expired %s, grace_days=%d)",
+                expires_at,
+                grace_days,
+            )
+        elif status is LicenseStatus.EXPIRED:
+            logger.warning("license: EXPIRED (expired %s)", expires_at)
 
         return cls(
             status=status,
