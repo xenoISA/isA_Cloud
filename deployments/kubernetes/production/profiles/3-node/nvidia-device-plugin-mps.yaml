@@ -132,3 +132,33 @@ config:
           resources:
             - name: nvidia.com/gpu
               replicas: 4
+
+    # --- time-slicing variants (no mps-control-daemon required) -------------
+    # MPS on device-plugin v0.18.2 crashes the mps-control-daemon config-manager
+    # sidecar (ADR 0010 activation blocker). time-slicing needs NO control
+    # daemon — the main plugin just advertises replicas×physical units and pods
+    # share via CUDA default time-slicing. No hard VRAM isolation, so co-tenant
+    # vLLM engines MUST cap gpu_memory_utilization; small fixed-footprint engines
+    # (whisper/kokoro/rerank) are safe. Used as the working sharing path until
+    # the MPS bug is resolved.
+    ts-r2: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        timeSlicing:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 2
+
+    ts-r4: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        timeSlicing:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 4
