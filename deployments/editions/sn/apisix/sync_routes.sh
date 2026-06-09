@@ -1,0 +1,771 @@
+#!/bin/bash
+# Dynamic Route Synchronization from Consul to APISIX (K8s Version)
+#
+# Designed for Kubernetes environment where services use DNS names instead of IPs
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Configuration
+CONSUL_URL="${CONSUL_URL:-http://consul-ui.isa-cloud-staging.svc.cluster.local}"
+APISIX_ADMIN_URL="${APISIX_ADMIN_URL:-http://apisix-admin.isa-cloud-staging.svc.cluster.local:9180}"
+ADMIN_KEY="${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set via K8s Secret}"
+REDIS_HOST="${REDIS_HOST:-redis-master.isa-cloud-staging.svc.cluster.local}"
+
+# Cookie domain for cross-zone SSO (/, /console, /docs share auth)
+# Set to the root domain so all zones can access the refresh token cookie.
+# Must be the parent domain (e.g., .example.com) for cross-zone cookie sharing.
+COOKIE_DOMAIN="${COOKIE_DOMAIN:?.isa-cloud.example.com}"
+
+# Functions
+print_success() { echo -e "${GREEN}OK  $1${NC}"; }
+print_error() { echo -e "${RED}ERR $1${NC}"; }
+print_warning() { echo -e "${YELLOW}WARN $1${NC}"; }
+print_info() { echo -e "${BLUE}INFO $1${NC}"; }
+
+# Get service metadata from Consul
+get_service_meta() {
+    local service_name=$1
+    local meta=$(curl -s "${CONSUL_URL}/v1/catalog/service/${service_name}" | \
+        jq '.[0].ServiceMeta // {}')
+    echo "$meta"
+}
+
+# Create or update route in APISIX
+create_or_update_route() {
+    local service_name=$1
+    local api_path=$2
+    local auth_required=${3:-false}
+    local rate_limit=${4:-100}
+
+    local route_name="${service_name}_route"
+    # Support both root path and sub-paths using uris array
+    # e.g., ["/api/v1/accounts", "/api/v1/accounts/*"]
+    local uri_root="${api_path}"
+    local uri_pattern="${api_path}/*"
+
+    print_info "Syncing route: $route_name ($uri_root + $uri_pattern -> $service_name)"
+
+    # Check if service needs proxy-rewrite by detecting path mismatch
+    # Services like mcp_service expose routes at root (/) but are accessed via /api/v1/mcp
+    local needs_rewrite=false
+    local meta=$(get_service_meta "$service_name")
+
+    # Check for services that need path rewriting (e.g., mcp_service)
+    if [[ "$service_name" == "mcp_service" ]]; then
+        needs_rewrite=true
+    fi
+
+    # Build plugins
+    # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+    # Example: CORS_ALLOWED_ORIGINS="https://app.example.com,https://staging.example.com"
+    # WARNING: Wildcard (*) with credentials is dangerous and allows any site to make authenticated requests
+    local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+    local plugins=$(jq -n \
+        --arg rate_limit "$rate_limit" \
+        --arg cors_origins "$cors_origins" \
+        --arg redis_host "$REDIS_HOST" \
+        --arg redis_password "${REDIS_PASSWORD:-}" \
+        '{
+            "cors": {
+                "allow_origins": $cors_origins,
+                "allow_methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+                "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                "expose_headers": "X-Request-ID,X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset",
+                "max_age": 86400,
+                "allow_credentials": true
+            },
+            "limit-count": {
+                "count": ($rate_limit | tonumber),
+                "time_window": 60,
+                "rejected_code": 429,
+                "rejected_msg": "Rate limit exceeded",
+                "policy": "redis",
+                "redis_host": $redis_host,
+                "redis_port": 6379,
+                "redis_password": $redis_password,
+                "redis_database": 1
+            },
+            "request-id": {
+                "algorithm": "uuid",
+                "include_in_response": true
+            },
+            "prometheus": {}
+        }')
+
+    # Add proxy rewrite if needed
+    if [ "$needs_rewrite" = true ]; then
+        local rewrite_pattern="^${api_path}(/.*)\\$"
+        local rewrite_replacement="\\$1"
+        plugins=$(echo "$plugins" | jq --arg pattern "$rewrite_pattern" --arg replacement "$rewrite_replacement" '. + {"proxy-rewrite": {"regex_uri": [$pattern, $replacement]}}')
+        print_info "  Added proxy-rewrite: $api_path/* -> /*"
+    fi
+
+    # Add auth plugin if required
+    if [ "$auth_required" = "true" ]; then
+        plugins=$(echo "$plugins" | jq ". + {\"jwt-auth\": {}}")
+        print_info "  Added JWT auth requirement"
+    fi
+
+    # Add circuit breaker for critical services to prevent cascading failures
+    if [[ "$service_name" == "model_service" ]]; then
+        plugins=$(echo "$plugins" | jq '. + {
+            "api-breaker": {
+                "break_response_code": 502,
+                "max_breaker_sec": 15,
+                "unhealthy": {
+                    "http_statuses": [500, 502, 503, 504],
+                    "failures": 3
+                },
+                "healthy": {
+                    "successes": 2
+                }
+            }
+        }')
+        print_info "  Added api-breaker circuit breaker (max_breaker_sec=15)"
+    elif [[ "$service_name" == "mcp_service" ]]; then
+        plugins=$(echo "$plugins" | jq '. + {
+            "api-breaker": {
+                "break_response_code": 502,
+                "max_breaker_sec": 30,
+                "unhealthy": {
+                    "http_statuses": [500, 502, 503],
+                    "failures": 3
+                },
+                "healthy": {
+                    "successes": 2
+                }
+            }
+        }')
+        print_info "  Added api-breaker circuit breaker (max_breaker_sec=30)"
+    fi
+
+    # Create/Update route with uris array (supports both root and wildcard)
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\
+            \"name\": \"${route_name}\",\
+            \"uris\": [\"${uri_root}\", \"${uri_pattern}\"],\
+            \"priority\": 10,\
+            \"status\": 1,\
+            \"plugins\": ${plugins},\
+            \"upstream\": {\
+                \"type\": \"roundrobin\",\
+                \"service_name\": \"${service_name}\",\
+                \"discovery_type\": \"consul\",\
+                \"scheme\": \"http\",\
+                \"pass_host\": \"pass\",\
+                \"retries\": 2,\
+                \"retry_timeout\": 6,\
+                \"timeout\": {\
+                    \"connect\": 6,\
+                    \"send\": 6,\
+                    \"read\": 10\
+                },\
+                \"keepalive_pool\": {\
+                    \"size\": 320,\
+                    \"idle_timeout\": 60,\
+                    \"requests\": 1000\
+                }\
+            }\
+        }")
+
+    local http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Route synced: $route_name"
+        return 0
+    else
+        print_error "Failed to sync route: $route_name (HTTP $http_code)"
+        echo "$response" | head -n -1
+        return 1
+    fi
+}
+
+# Create or update health alias route in APISIX
+create_or_update_health_route() {
+    local service_name=$1
+    local api_path=$2
+
+    local route_name="${service_name}_health_route"
+    local health_uri="${api_path}/health"
+
+    print_info "Syncing health route: $route_name ($health_uri -> $service_name:/health)"
+
+    # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+    local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+    local plugins=$(jq -n --arg cors_origins "$cors_origins" '{
+        "cors": {
+            "allow_origins": $cors_origins,
+            "allow_methods": "GET,OPTIONS,HEAD",
+            "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+            "expose_headers": "X-Request-ID",
+            "max_age": 86400,
+            "allow_credentials": true
+        },
+        "request-id": {
+            "algorithm": "uuid",
+            "include_in_response": true
+        },
+        "prometheus": {},
+        "proxy-rewrite": {
+            "regex_uri": ["^'"${api_path}"'/health$", "/health"]
+        }
+    }')
+
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\
+            \"name\": \"${route_name}\",\
+            \"uris\": [\"${health_uri}\"],\
+            \"priority\": 20,\
+            \"status\": 1,\
+            \"plugins\": ${plugins},\
+            \"upstream\": {\
+                \"type\": \"roundrobin\",\
+                \"service_name\": \"${service_name}\",\
+                \"discovery_type\": \"consul\",\
+                \"scheme\": \"http\",\
+                \"pass_host\": \"pass\",\
+                \"retries\": 2,\
+                \"retry_timeout\": 6,\
+                \"timeout\": {\
+                    \"connect\": 6,\
+                    \"send\": 6,\
+                    \"read\": 10\
+                }\
+            }\
+        }")
+
+    local http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Health route synced: $route_name"
+        return 0
+    else
+        print_error "Failed to sync health route: $route_name (HTTP $http_code)"
+        echo "$response" | head -n -1
+        return 1
+    fi
+}
+
+# Delete route from APISIX
+delete_route() {
+    local route_name=$1
+    curl -s -X DELETE \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" > /dev/null
+    print_success "Deleted route: $route_name"
+}
+
+# Create static route for frontend zones (not Consul-discovered)
+create_frontend_zone_route() {
+    local route_name=$1
+    local uri_path=$2
+    local upstream_host=$3
+    local upstream_port=$4
+    local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+    local uris_json="[\"${uri_path}\", \"${uri_path}/*\"]"
+
+    if [ "$uri_path" = "/" ]; then
+        uris_json='["/", "/*"]'
+    fi
+
+    print_info "Syncing frontend zone: $route_name → ${upstream_host}:${upstream_port}${uri_path}"
+
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"name\": \"${route_name}\",
+            \"uris\": ${uris_json},
+            \"priority\": 5,
+            \"status\": 1,
+            \"plugins\": {
+                \"cors\": {
+                    \"allow_origins\": \"${cors_origins}\",
+                    \"allow_methods\": \"GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD\",
+                    \"allow_headers\": \"DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID\",
+                    \"expose_headers\": \"X-Request-ID\",
+                    \"max_age\": 86400,
+                    \"allow_credential\": true
+                },
+                \"request-id\": {
+                    \"algorithm\": \"uuid\",
+                    \"include_in_response\": true
+                },
+                \"prometheus\": {}
+            },
+            \"upstream\": {
+                \"type\": \"roundrobin\",
+                \"scheme\": \"http\",
+                \"nodes\": {
+                    \"${upstream_host}:${upstream_port}\": 1
+                },
+                \"timeout\": {
+                    \"connect\": 5,
+                    \"send\": 30,
+                    \"read\": 30
+                }
+            }
+        }")
+
+    local http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Frontend zone synced: $route_name"
+        return 0
+    else
+        print_error "Failed to sync frontend zone: $route_name (HTTP $http_code)"
+        echo "$response" | head -n -1
+        return 1
+    fi
+}
+
+# Create auth cookie routes for cross-zone SSO
+# These high-priority routes overlay the auth_service login/refresh endpoints
+# with a response-rewrite plugin that sets the refresh_token as an HttpOnly
+# cookie on the root COOKIE_DOMAIN, so all zones (/, /console, /docs) share auth.
+create_auth_cookie_routes() {
+    local cookie_domain="${COOKIE_DOMAIN:-.isa-cloud.example.com}"
+
+    print_info "Syncing auth cookie routes (domain=${cookie_domain})..."
+
+    local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+    local redis_host="${REDIS_HOST:-redis-master.isa-cloud-staging.svc.cluster.local}"
+
+    # Auth login route — sets refresh_token cookie on successful login
+    local auth_login_route_name="auth_service_login_cookie_route"
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_login_route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+            --arg route_name "$auth_login_route_name" \
+            --arg cors_origins "$cors_origins" \
+            --arg cookie_domain "$cookie_domain" \
+            --arg redis_host "$redis_host" \
+            --arg redis_password "${REDIS_PASSWORD:-}" \
+            '{
+                "name": $route_name,
+                "uris": ["/api/v1/auth/login"],
+                "methods": ["POST", "OPTIONS"],
+                "priority": 30,
+                "status": 1,
+                "plugins": {
+                    "cors": {
+                        "allow_origins": $cors_origins,
+                        "allow_methods": "POST,OPTIONS",
+                        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                        "expose_headers": "X-Request-ID,Set-Cookie",
+                        "max_age": 86400,
+                        "allow_credentials": true
+                    },
+                    "request-id": {
+                        "algorithm": "uuid",
+                        "include_in_response": true
+                    },
+                    "limit-count": {
+                        "count": 20,
+                        "time_window": 60,
+                        "rejected_code": 429,
+                        "rejected_msg": "Rate limit exceeded",
+                        "policy": "redis",
+                        "redis_host": $redis_host,
+                        "redis_port": 6379,
+                "redis_password": $redis_password,
+                        "redis_database": 1
+                    },
+                    "response-rewrite": {
+                        "headers": {
+                            "set": {
+                                "X-Auth-Cookie-Domain": $cookie_domain
+                            }
+                        }
+                    },
+                    "prometheus": {}
+                },
+                "upstream": {
+                    "type": "roundrobin",
+                    "service_name": "auth_service",
+                    "discovery_type": "consul",
+                    "scheme": "http",
+                    "pass_host": "pass",
+                    "retries": 2,
+                    "retry_timeout": 6,
+                    "timeout": {
+                        "connect": 6,
+                        "send": 6,
+                        "read": 10
+                    }
+                }
+            }'
+        )")
+
+    local http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Auth login cookie route synced: $auth_login_route_name"
+    else
+        print_error "Failed to sync auth login cookie route (HTTP $http_code)"
+        echo "$response" | head -n -1
+    fi
+
+    # Auth refresh route — sets updated refresh_token cookie on token refresh
+    local auth_refresh_route_name="auth_service_refresh_cookie_route"
+    response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_refresh_route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+            --arg route_name "$auth_refresh_route_name" \
+            --arg cors_origins "$cors_origins" \
+            --arg cookie_domain "$cookie_domain" \
+            '{
+                "name": $route_name,
+                "uris": ["/api/v1/auth/refresh"],
+                "methods": ["POST", "OPTIONS"],
+                "priority": 30,
+                "status": 1,
+                "plugins": {
+                    "cors": {
+                        "allow_origins": $cors_origins,
+                        "allow_methods": "POST,OPTIONS",
+                        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                        "expose_headers": "X-Request-ID,Set-Cookie",
+                        "max_age": 86400,
+                        "allow_credentials": true
+                    },
+                    "request-id": {
+                        "algorithm": "uuid",
+                        "include_in_response": true
+                    },
+                    "response-rewrite": {
+                        "headers": {
+                            "set": {
+                                "X-Auth-Cookie-Domain": $cookie_domain
+                            }
+                        }
+                    },
+                    "prometheus": {}
+                },
+                "upstream": {
+                    "type": "roundrobin",
+                    "service_name": "auth_service",
+                    "discovery_type": "consul",
+                    "scheme": "http",
+                    "pass_host": "pass",
+                    "retries": 2,
+                    "retry_timeout": 6,
+                    "timeout": {
+                        "connect": 6,
+                        "send": 6,
+                        "read": 10
+                    }
+                }
+            }'
+        )")
+
+    http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Auth refresh cookie route synced: $auth_refresh_route_name"
+    else
+        print_error "Failed to sync auth refresh cookie route (HTTP $http_code)"
+        echo "$response" | head -n -1
+    fi
+
+    # Auth registration verify route — sets refresh_token cookie on successful registration
+    local auth_verify_route_name="auth_service_verify_cookie_route"
+    response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${auth_verify_route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+            --arg route_name "$auth_verify_route_name" \
+            --arg cors_origins "$cors_origins" \
+            --arg cookie_domain "$cookie_domain" \
+            '{
+                "name": $route_name,
+                "uris": ["/api/v1/auth/verify"],
+                "methods": ["POST", "OPTIONS"],
+                "priority": 30,
+                "status": 1,
+                "plugins": {
+                    "cors": {
+                        "allow_origins": $cors_origins,
+                        "allow_methods": "POST,OPTIONS",
+                        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                        "expose_headers": "X-Request-ID,Set-Cookie",
+                        "max_age": 86400,
+                        "allow_credentials": true
+                    },
+                    "request-id": {
+                        "algorithm": "uuid",
+                        "include_in_response": true
+                    },
+                    "response-rewrite": {
+                        "headers": {
+                            "set": {
+                                "X-Auth-Cookie-Domain": $cookie_domain
+                            }
+                        }
+                    },
+                    "prometheus": {}
+                },
+                "upstream": {
+                    "type": "roundrobin",
+                    "service_name": "auth_service",
+                    "discovery_type": "consul",
+                    "scheme": "http",
+                    "pass_host": "pass",
+                    "retries": 2,
+                    "retry_timeout": 6,
+                    "timeout": {
+                        "connect": 6,
+                        "send": 6,
+                        "read": 10
+                    }
+                }
+            }'
+        )")
+
+    http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "Auth verify cookie route synced: $auth_verify_route_name"
+    else
+        print_error "Failed to sync auth verify cookie route (HTTP $http_code)"
+        echo "$response" | head -n -1
+    fi
+}
+
+# Create OAuth .well-known discovery routes (public, no auth)
+# These endpoints are required by RFC 9728 (OAuth Protected Resource Metadata)
+# and RFC 8414 (OAuth Authorization Server Metadata) for OAuth/MCP discovery.
+create_oauth_wellknown_routes() {
+    print_info "Syncing OAuth .well-known discovery routes..."
+
+    # SECURITY: Configure CORS_ALLOWED_ORIGINS env var with your actual domains
+    local cors_origins="${CORS_ALLOWED_ORIGINS:-https://app.isa-cloud.example.com,https://staging.isa-cloud.example.com}"
+
+    # Route 1: /.well-known/oauth-protected-resource → mcp_service
+    local pr_route_name="oauth_protected_resource_route"
+    local response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${pr_route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+            --arg route_name "$pr_route_name" \
+            --arg cors_origins "$cors_origins" \
+            '{
+                "name": $route_name,
+                "uris": ["/.well-known/oauth-protected-resource"],
+                "methods": ["GET", "OPTIONS"],
+                "priority": 20,
+                "status": 1,
+                "plugins": {
+                    "cors": {
+                        "allow_origins": $cors_origins,
+                        "allow_methods": "GET,OPTIONS",
+                        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                        "expose_headers": "X-Request-ID",
+                        "max_age": 86400,
+                        "allow_credentials": true
+                    },
+                    "request-id": {
+                        "algorithm": "uuid",
+                        "include_in_response": true
+                    },
+                    "proxy-rewrite": {
+                        "uri": "/.well-known/oauth-protected-resource"
+                    },
+                    "prometheus": {}
+                },
+                "upstream": {
+                    "type": "roundrobin",
+                    "service_name": "mcp_service",
+                    "discovery_type": "consul",
+                    "scheme": "http",
+                    "pass_host": "pass",
+                    "retries": 2,
+                    "retry_timeout": 6,
+                    "timeout": {
+                        "connect": 6,
+                        "send": 6,
+                        "read": 10
+                    }
+                }
+            }'
+        )")
+
+    local http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "OAuth route synced: $pr_route_name"
+    else
+        print_error "Failed to sync OAuth route: $pr_route_name (HTTP $http_code)"
+        echo "$response" | head -n -1
+    fi
+
+    # Route 2: /.well-known/oauth-authorization-server → auth_service
+    local as_route_name="oauth_authorization_server_route"
+    response=$(curl -s -w "\n%{http_code}" -X PUT \
+        "${APISIX_ADMIN_URL}/apisix/admin/routes/${as_route_name}" \
+        -H "X-API-KEY: ${ADMIN_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -n \
+            --arg route_name "$as_route_name" \
+            --arg cors_origins "$cors_origins" \
+            '{
+                "name": $route_name,
+                "uris": ["/.well-known/oauth-authorization-server"],
+                "methods": ["GET", "OPTIONS"],
+                "priority": 20,
+                "status": 1,
+                "plugins": {
+                    "cors": {
+                        "allow_origins": $cors_origins,
+                        "allow_methods": "GET,OPTIONS",
+                        "allow_headers": "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-API-Key,X-Request-ID",
+                        "expose_headers": "X-Request-ID",
+                        "max_age": 86400,
+                        "allow_credentials": true
+                    },
+                    "request-id": {
+                        "algorithm": "uuid",
+                        "include_in_response": true
+                    },
+                    "proxy-rewrite": {
+                        "uri": "/.well-known/oauth-authorization-server"
+                    },
+                    "prometheus": {}
+                },
+                "upstream": {
+                    "type": "roundrobin",
+                    "service_name": "auth_service",
+                    "discovery_type": "consul",
+                    "scheme": "http",
+                    "pass_host": "pass",
+                    "retries": 2,
+                    "retry_timeout": 6,
+                    "timeout": {
+                        "connect": 6,
+                        "send": 6,
+                        "read": 10
+                    }
+                }
+            }'
+        )")
+
+    http_code=$(echo "$response" | tail -n1)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        print_success "OAuth route synced: $as_route_name"
+    else
+        print_error "Failed to sync OAuth route: $as_route_name (HTTP $http_code)"
+        echo "$response" | head -n -1
+    fi
+}
+
+# Main sync function
+main() {
+    print_info "Starting Consul → APISIX route synchronization (K8s)..."
+
+    # Get all services from Consul
+    local services=$(curl -s "${CONSUL_URL}/v1/catalog/services" | jq -r 'keys[]' | grep -v consul || true)
+
+    if [ -z "$services" ]; then
+        print_warning "No services found in Consul"
+        exit 0
+    fi
+
+    # Track processed routes
+    local processed_services=()
+
+    # Process each service
+    for service_name in $services; do
+        # Get service metadata
+        local meta=$(get_service_meta "$service_name")
+        local api_path=$(echo "$meta" | jq -r '.api_path // .base_path // empty')
+
+        # Skip if no api_path
+        if [ -z "$api_path" ] || [ "$api_path" = "null" ]; then
+            print_info "Skipping $service_name (no api_path/base_path in metadata)"
+            continue
+        fi
+
+        local auth_required=$(echo "$meta" | jq -r '.auth_required // "false"')
+        local rate_limit=$(echo "$meta" | jq -r '.rate_limit // "100"')
+
+        # Create/Update route
+        if create_or_update_route "$service_name" "$api_path" "$auth_required" "$rate_limit"; then
+            processed_services+=("${service_name}_route")
+        fi
+        if create_or_update_health_route "$service_name" "$api_path"; then
+            processed_services+=("${service_name}_health_route")
+        fi
+    done
+
+    # Sync Mate service route (static upstream, not Consul-discovered)
+    local MATE_HOST="${MATE_HOST:-isa-mate.isa-cloud-staging.svc.cluster.local}"
+    create_frontend_zone_route "mate_service_route" "/mate" "$MATE_HOST" "18789"
+    processed_services+=("mate_service_route")
+
+    # Sync frontend zone routes (static upstreams, not Consul-discovered)
+    local FRONTEND_HOST="${FRONTEND_HOST:-isa-app.isa-cloud-staging.svc.cluster.local}"
+    local CONSOLE_HOST="${CONSOLE_HOST:-isa-console.isa-cloud-staging.svc.cluster.local}"
+    local DOCS_HOST="${DOCS_HOST:-isa-docs.isa-cloud-staging.svc.cluster.local}"
+
+    create_frontend_zone_route "frontend_app_route" "/" "$FRONTEND_HOST" "4100"
+    processed_services+=("frontend_app_route")
+
+    create_frontend_zone_route "frontend_console_route" "/console" "$CONSOLE_HOST" "4200"
+    processed_services+=("frontend_console_route")
+
+    create_frontend_zone_route "frontend_docs_route" "/docs" "$DOCS_HOST" "4300"
+    processed_services+=("frontend_docs_route")
+
+    # Sync auth cookie routes for cross-zone SSO
+    # These override auth login/refresh/verify with cookie domain headers
+    create_auth_cookie_routes
+    processed_services+=("auth_service_login_cookie_route")
+    processed_services+=("auth_service_refresh_cookie_route")
+    processed_services+=("auth_service_verify_cookie_route")
+
+    # Sync OAuth .well-known discovery routes (public, no auth)
+    create_oauth_wellknown_routes
+    processed_services+=("oauth_protected_resource_route")
+    processed_services+=("oauth_authorization_server_route")
+
+    print_info "Cleaning up stale routes..."
+
+    # Get all managed routes from APISIX
+    local apisix_routes=$(curl -s "${APISIX_ADMIN_URL}/apisix/admin/routes" \
+        -H "X-API-KEY: ${ADMIN_KEY}" | jq -r '.list[]?.value.name' | grep '_route$' || true)
+
+    # Delete routes that no longer exist in Consul
+    for route_name in $apisix_routes; do
+        local found=false
+        for processed in "${processed_services[@]}"; do
+            if [ "$processed" = "$route_name" ]; then
+                found=true
+                break
+            fi
+        done
+
+        if [ "$found" = false ]; then
+            delete_route "$route_name"
+        fi
+    done
+
+    local total_routes=$(curl -s "${APISIX_ADMIN_URL}/apisix/admin/routes" \
+        -H "X-API-KEY: ${ADMIN_KEY}" | jq -r '.total // 0')
+    print_success "Sync complete! Total active routes: ${total_routes}"
+}
+
+# Run
+main
