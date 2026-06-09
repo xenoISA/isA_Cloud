@@ -1,20 +1,48 @@
-# Triton Engine — Qwen Image 2.0 on `specialty` GPU group (GPU 4) (#956)
+# Triton Engine — Qwen Image 2.0 on `generative` GPU group (k8s-02) (#956)
+#
+# DRAFT / UNVERIFIED — Blackwell-safe rework authored from web research
+# (June 2026), NOT yet applied or smoke-tested on any cluster. The Blackwell
+# compatibility below is reasoned from NVIDIA/PyTorch/diffusers docs, not from a
+# live run. Smoke-test on a real RTX PRO 6000 (sm_120) node before relying on it.
+#
+# !!! BLACKWELL HARD REQUIREMENT (sm_120) !!!
+#   The SN production GPUs are NVIDIA RTX PRO 6000 Blackwell (compute
+#   capability sm_120). ANY torch/CUDA that touches the GPU — baked into the
+#   base image OR pip-installed by this python backend at startup — MUST carry
+#   sm_120 kernels (CUDA 12.8+ / torch 2.7+cu128). An older torch (e.g. the one
+#   in tritonserver:24.01-py3) crashes at first CUDA call with
+#   "CUDA error: no kernel image is available for execution on the device".
+#   This manifest addresses that two ways, belt-and-suspenders:
+#     1. Base image bumped 24.01 -> 25.12-py3. The 25.x Triton line supports
+#        Blackwell (since 25.01) and 25.12 ships CUDA 13.1 — sm_120 capable.
+#     2. The startup pip install PINS torch/torchvision to a cu128 build from
+#        the PyTorch cu128 index, so the diffusion pipeline runs on a torch
+#        that definitely has sm_120 kernels regardless of what the base bundles.
+#   Sources:
+#     - Triton 25.12 release notes (CUDA 13.1, Blackwell / cc 7.5+):
+#       https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-12.html
+#     - Triton 25.01 added Blackwell support:
+#       https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-02.html
+#     - CUDA 12.8 adds sm_120 (Blackwell):
+#       https://forums.developer.nvidia.com/t/cuda-toolkit-12-8-what-gpu-is-sm-120/322128
+#     - torch cu128 for sm_120 (RTX Blackwell):
+#       https://download.pytorch.org/whl/cu128
 #
 # Replaces Replicate-hosted image generation (flux-schnell, flux-kontext-pro,
 # sticker-maker, face-swap) with a self-managed Qwen Image 2.0 pod served via
 # Triton's Python backend over the `diffusers` library. Qwen Image is the
 # current open-weight SOTA for text-to-image (Apache 2.0, DPG-Bench 88.32 vs
 # FLUX.1 83.84, leads AI Arena, and notably renders in-image text — its
-# headline differentiator over FLUX). FLUX.2 Schnell co-tenants on the same
-# GPU for the speed/preview tier (see triton-flux-2-schnell.yaml).
+# headline differentiator over FLUX). FLUX.2 klein co-tenants on the same
+# generative node for the speed/preview tier (see triton-flux-2-schnell.yaml).
 #
-# Sizing notes (GPU 4, 96 GB A6000):
-#   - Qwen Image 2.0 weights: ~24 GB at fp16.
-#   - Co-tenants on GPU 4: Qwen3-Embedding-8B (~16 GB, #954) + FLUX.2 Schnell
-#     (~16 GB). Total VRAM budget: 24 + 16 + 16 = 56 GB / 96 GB.
-#   - Memory limit 32 Gi RAM is sized for fp16 weights + working set; the GPU
-#     request of "1" reserves a whole card by the k8s contract but co-tenancy
-#     is achieved at the deployment-group level (specialty), not via MIG/MPS.
+# Sizing notes (k8s-02 generative, 96 GB RTX PRO 6000 Blackwell, MPS):
+#   - Qwen Image 2.0 weights: ~24 GB at bf16 (ADR 0010 budgets ~40 GB working).
+#   - Placement is one 48 GB MPS slice on k8s-02 (2 slices/card per ADR 0010).
+#     Co-tenants on k8s-02: FLUX.2 klein + Wan2.2 (each its own 48 GB slice).
+#   - Memory limit 32 Gi RAM is sized for bf16 weights + working set; the GPU
+#     request of "1" maps to ONE MPS slice (renameByDefault=false), not a whole
+#     card — co-tenancy is via MPS, NOT MIG/NVLink.
 #   - INSTANCE_COUNT=1 — diffusion pipelines are not safe to share a CUDA
 #     context across workers. Throughput comes from batching latents inside
 #     the pipeline, not from parallel instances.
@@ -25,15 +53,24 @@
 #   once at startup, then expose a standard Triton inference signature:
 #     in:  prompt (BYTES), height/width (INT32), steps (INT32), guidance (FP32)
 #     out: image (BYTES — PNG or WEBP encoded)
+#   diffusers has shipped Qwen-Image (QwenImagePipeline) since day 0; the model
+#   card's own example uses it. DiffusionPipeline.from_pretrained auto-resolves
+#   to QwenImagePipeline for Qwen/Qwen-Image. Verify the pinned diffusers
+#   release actually contains QwenImagePipeline before baking an image. Sources:
+#     - https://huggingface.co/docs/diffusers/main/en/api/pipelines/qwenimage
+#     - https://huggingface.co/Qwen/Qwen-Image
 #   The model.py wrapper is materialised from CONFIG_PY at pod startup;
 #   weights download lazily on first request from the HF cache mounted at
 #   /root/.cache/huggingface (PVC-backed for warm restarts).
 #
-# Container strategy: base `nvcr.io/nvidia/tritonserver:24.01-py3` image +
-# pip install diffusers/transformers/accelerate at startup. A custom-built
-# image with the deps baked in is faster on cold boot but harder to roll;
-# the startup pip install adds ~30s once per pod lifetime and trades cold
-# boot speed for image hygiene. Production should bake a versioned image.
+# Container strategy: base `nvcr.io/nvidia/tritonserver:25.12-py3` (CUDA 13.1,
+# Blackwell-capable) + a startup pip install that PINS a cu128 torch plus the
+# diffusers stack. A custom-built image with the deps + weights baked in is
+# faster on cold boot and is what production should ship; the startup pip
+# install is the bootstrap/portable form and trades cold-boot speed for image
+# hygiene. NOTE: the 25.12-py3 base must be mirrored into Harbor first
+# (see /tmp/mirror-qwen-image-base.yaml) — the cluster pulls from
+# core.harbor.domain/isa, not nvcr.io.
 #
 # Model repository layout:
 #   /models/qwen-image-2.0/
@@ -57,7 +94,7 @@ metadata:
   namespace: isa-cloud-production
   labels:
     isa-model/model-id: "qwen-image-2.0"
-    isa-model/instance-group: "specialty"
+    isa-model/instance-group: "generative"
 data:
   MODEL_ID: "Qwen/Qwen-Image"
   MODEL_NAME: "qwen-image-2.0"
@@ -272,10 +309,10 @@ metadata:
     app: triton-qwen-image-2-0
     engine: triton
     isa-model/model-id: "qwen-image-2.0"
-    isa-model/instance-group: "specialty"
+    isa-model/instance-group: "generative"
 spec:
-  # One pod on GPU 4 of the specialty group. Co-tenants on GPU 4 are
-  # Qwen3-Embedding-8B (#954) and FLUX.2 Schnell (this PR).
+  # One pod on the generative node (k8s-02) per ADR 0010, one 48 GB MPS slice.
+  # Co-tenants on k8s-02: FLUX.2 klein (triton-flux-2-schnell) and Wan2.2.
   replicas: 1
   selector:
     matchLabels:
@@ -286,13 +323,20 @@ spec:
         app: triton-qwen-image-2-0
         engine: triton
         isa-model/model-id: "qwen-image-2.0"
-        isa-model/instance-group: "specialty"
+        isa-model/instance-group: "generative"
     spec:
+      # Harbor pull secret — the base image is mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
       securityContext:
         runAsNonRoot: false
       containers:
         - name: triton
-          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          # Blackwell-safe base: Triton 25.12-py3 ships CUDA 13.1 (sm_120).
+          # Mirrored into Harbor (see /tmp/mirror-qwen-image-base.yaml); the
+          # cluster cannot pull nvcr.io directly. Upstream:
+          # nvcr.io/nvidia/tritonserver:25.12-py3
+          image: core.harbor.domain/isa/tritonserver:25.12-py3
           securityContext:
             allowPrivilegeEscalation: false
           ports:
@@ -401,11 +445,26 @@ spec:
                 cp /etc/triton-config/model.py \
                   "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
               fi
-              # Install diffusers stack into the Triton Python backend's
-              # interpreter. Production should bake a versioned image.
+              # BLACKWELL (sm_120) — install a cu128 torch FIRST, from the
+              # PyTorch cu128 index, so the GPU kernels exist for RTX PRO 6000.
+              # This must run before diffusers so pip does not pull a default
+              # (non-cu128) torch wheel as a transitive dep. The 25.12 base is
+              # already CUDA 13.x; pinning cu128 torch here is the belt to the
+              # base image's suspenders and makes the GPU contract explicit.
+              # Verify these exact pins resolve on the cu128 index before baking
+              # a production image (torch/torchvision cu128 availability moves).
               pip install --no-cache-dir \
-                "diffusers>=0.30" \
-                "transformers>=4.44" \
+                --index-url https://download.pytorch.org/whl/cu128 \
+                "torch==2.7.1+cu128" \
+                "torchvision==0.22.1+cu128"
+              # diffusers stack from PyPI. diffusers must be recent enough to
+              # contain QwenImagePipeline (shipped day-0 for Qwen-Image); >=0.34
+              # is a safe floor — verify against the release in use. --no-deps
+              # is NOT used, but torch is already satisfied by the cu128 install
+              # above so pip will not replace it.
+              pip install --no-cache-dir \
+                "diffusers>=0.34" \
+                "transformers>=4.49" \
                 "accelerate>=0.33" \
                 "safetensors>=0.4" \
                 "Pillow>=10.0"
@@ -468,18 +527,32 @@ spec:
                 path: config.pbtxt
               - key: CONFIG_PY
                 path: model.py
+      # GENERATIVE-node affinity (k8s-02) per ADR 0010 — qwen-image lives on
+      # the generative group, NOT specialty (k8s-03). The two nodeSelectorTerms
+      # are OR'd, matching either label scheme (isa.io/* or sn.io/*).
+      #
+      # !!! RELABEL DEPENDENCY — k8s-02 is NOT relabeled generative yet !!!
+      #   As of 2026-06-09 sn-prod-k8s-02 still carries sn.io/gpu-role=llm /
+      #   isa.io/gpu-role-llm=true (it was an LLM pool member). This affinity
+      #   will NOT schedule until k8s-02 is freed of the chat LLM and relabeled:
+      #     kubectl label node sn-prod-k8s-02 \
+      #       sn.io/gpu-role=generative isa.io/gpu-role-generative=true \
+      #       isa.io/gpu-role-llm- --overwrite
+      #   That relabel + LLM-consolidation-onto-k8s-01 is the gated step in
+      #   ADR 0010 §Rollout and docs/runbooks/mps-fleet-repack.md. Do NOT apply
+      #   this Deployment before k8s-02 is relabeled, or the pod stays Pending.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: isa.io/gpu-role-specialty
+                  - key: isa.io/gpu-role-generative
                     operator: In
                     values: ["true"]
               - matchExpressions:
                   - key: sn.io/gpu-role
                     operator: In
-                    values: ["specialty"]
+                    values: ["generative"]
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
@@ -493,7 +566,7 @@ metadata:
   labels:
     app: triton-qwen-image-2-0
     isa-model/model-id: "qwen-image-2.0"
-    isa-model/instance-group: "specialty"
+    isa-model/instance-group: "generative"
 spec:
   selector:
     app: triton-qwen-image-2-0
@@ -516,7 +589,7 @@ metadata:
   namespace: isa-cloud-production
   labels:
     isa-model/model-id: "qwen-image-2.0"
-    isa-model/instance-group: "specialty"
+    isa-model/instance-group: "generative"
 spec:
   accessModes:
     - ReadWriteOnce
@@ -532,7 +605,7 @@ metadata:
   namespace: isa-cloud-production
   labels:
     isa-model/model-id: "qwen-image-2.0"
-    isa-model/instance-group: "specialty"
+    isa-model/instance-group: "generative"
 spec:
   accessModes:
     - ReadWriteOnce

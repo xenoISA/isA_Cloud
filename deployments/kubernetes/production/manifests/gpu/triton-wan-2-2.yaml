@@ -1,48 +1,77 @@
 # Triton Engine — Wan2.2 text/image-to-video on `elastic` GPU group
 #
-# DRAFT / UNVERIFIED — authored from web research (June 2026), not yet applied
-# or smoke-tested on any cluster.
+# DRAFT / UNVERIFIED — authored from web research (June 2026), NOT yet applied
+# or smoke-tested on any cluster. The synchronous scaffold below is a SHAPE
+# PLACEHOLDER: real use needs an async/queue front end (see ASYNC note).
+#
+# !!! HARD CONSTRAINT: BLACKWELL sm_120 !!!
+#   Nodes are NVIDIA RTX PRO 6000 Blackwell (sm_120, compute cap 12.0). torch +
+#   CUDA MUST be CUDA 12.8+/sm_120-capable or kernels die with "no kernel image
+#   is available for execution on the device".
+#   - Base image is a CUDA-13 Triton tag (nvcr.io/nvidia/tritonserver:25.10-py3,
+#     CUDA 13.0.2, Ubuntu 24.04, Python 3.12, compute cap 7.5+ incl. Blackwell).
+#     The OLD 24.01-py3 (CUDA 12.3) has NO Blackwell kernels and MUST NOT be used.
+#   - The startup pip step force-installs torch from the cu128 wheel index so the
+#     diffusers install cannot pull a non-Blackwell torch. cu128 = sm_120 floor.
+#   Source: https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-10.html
+#           https://download.pytorch.org/whl/cu128
+#
+# !!! ASYNC SHAPE REQUIRED FOR REAL USE !!!
+#   Wan2.2-TI2V-5B generates a 5s 720p@24fps clip in ~9 min on a single 4090
+#   (longer with no optimization). A synchronous Triton /v2/.../infer call WILL
+#   exceed normal HTTP/gRPC client timeouts. This manifest keeps the synchronous
+#   wrapper only as a working scaffold — production MUST front it with a job
+#   queue (submit -> poll -> fetch MP4), e.g. a request table + worker, or route
+#   video jobs through the platform's async task path. Do NOT wire this to a
+#   synchronous user-facing route as-is.
 #
 # SERVING PATH: NO turnkey OpenAI/Triton image exists for Wan2.2. There is,
-# however, a clean, officially-supported diffusers path: Wan2.2 (T2V, I2V,
-# TI2V) was integrated into HuggingFace `diffusers` on 2025-07-28 via the
-# `WanPipeline` / `WanImageToVideoPipeline` classes. We reuse the same Triton
-# Python-backend + diffusers strategy as triton-qwen-image-2-0, swapping the
-# image output for an MP4 (frames -> diffusers.utils.export_to_video, returned
-# base64-encoded). This is a DRAFT scaffold, not a vendored production server.
+# however, a clean officially-supported diffusers path: Wan2.2 (T2V, I2V, TI2V)
+# is integrated into HuggingFace `diffusers` via `WanPipeline` /
+# `WanImageToVideoPipeline`. We reuse the Triton Python-backend + diffusers
+# strategy from triton-qwen-image-2-0, swapping the image output for an MP4
+# (frames -> diffusers.utils.export_to_video, returned base64). NOTE: the VAE
+# (AutoencoderKLWan) must be loaded SEPARATELY in float32 — loading it at
+# bf16 with the transformer produces garbage / NaNs. DRAFT scaffold only.
 #   Sources:
 #     - https://github.com/Wan-Video/Wan2.2
 #     - https://huggingface.co/docs/diffusers/api/pipelines/wan
 #     - https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers
 #     - https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers
 #
-# VARIANT CHOICE: defaults to Wan-AI/Wan2.2-TI2V-5B-Diffusers — the 5B TI2V
-# model runs in ~24 GB VRAM (RTX 4090 class) and does both text- and
-# image-to-video at 720p. The A14B MoE (T2V/I2V) is higher quality but needs
-# 40-80 GB depending on resolution/precision; switch MODEL_ID + pipeline class
-# if quality is prioritised over fit. See research note in
-# docs/runbooks/new-model-runtimes-research.md.
+# VARIANT CHOICE: defaults to Wan-AI/Wan2.2-TI2V-5B-Diffusers — the 5B dense
+# TI2V model does both text- and image-to-video at 720p@24fps. Model card says
+# 27+ GB VRAM for basic generation (24 GB recommended floor). The A14B MoE
+# (T2V/I2V) is higher quality but needs 40-80 GB depending on res/precision and
+# will NOT fit. See docs/runbooks/new-model-runtimes-research.md. License is
+# Apache-2.0; the repo is NOT gated, so HF_TOKEN is optional here.
 #
 # PLACEMENT: elastic group (ADR 0010, residency: preemptible). Video is batch /
 # overflow capacity and must NOT keep a specialty card resident. The node
 # affinity targets the elastic role label only; this pod is expected to be
 # preempted. Pod requests nvidia.com/gpu: 1.
+#   DEPENDENCY: the elastic role label (isa.io/gpu-role-elastic) currently lands
+#   on k8s-03 only (gpu-node-labels.yaml). If video should run on a generative
+#   card, that needs the k8s-02 relabel (see flux manifest header) — reconcile
+#   with the ADR owner.
 #
 # The production deploy script rewrites namespace: isa-cloud-production to the
 # requested NAMESPACE, e.g. sn-cloud-production.
 #
 # RISK / UNKNOWN:
-#   - Video generation is slow (a 5s 480p clip is ~4 min on H100); Triton
-#     request timeouts + client expectations must be tuned for long jobs — this
-#     is really an async/batch job shape, not a sync inference one. Consider a
-#     queue in front rather than synchronous /v2/.../infer.
-#   - 5B TI2V VRAM fit on a shared MPS slice is unverified; the A14B variant
-#     will not fit a 24 GB slice.
-#   - export_to_video needs ffmpeg/imageio-ffmpeg present in the Python backend
-#     env (added to the startup pip install below) — verify it resolves a
-#     working ffmpeg binary inside the Triton image.
-#   - The diffusers Wan pipeline signature (num_frames, fps, guidance) should be
-#     pinned against the diffusers release in use before baking an image.
+#   - BLACKWELL: unverified until a pod renders on sm_120. cu128 torch install
+#     below is the guard; confirm device_capability (12, 0) in pod logs.
+#   - ASYNC: synchronous infer will time out for real clips — see ASYNC note.
+#   - VRAM: 27+ GB on a 24 GB MPS slice means TI2V-5B likely OOMs at default
+#     704x1280x121f. Mitigations baked into the wrapper: VAE float32 +
+#     enable_model_cpu_offload + vae.enable_tiling(). May still need a larger
+#     (48 GB) slice or fewer frames. The A14B variant will NOT fit a 24 GB slice.
+#   - diffusers Wan2.2 TI2V-5B needs features that (as of the model card) live on
+#     the diffusers MAIN branch — a tagged release may lag. Pin/verify before
+#     baking; the manifest installs a recent tagged diffusers and will need a
+#     git-main fallback if the pipeline import fails.
+#   - export_to_video needs ffmpeg — imageio-ffmpeg is added to the startup pip
+#     install; verify it resolves a working ffmpeg binary in the Triton image.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -59,11 +88,13 @@ data:
   BACKEND: "python"
   INSTANCE_COUNT: "1"
   INSTANCE_KIND: "KIND_GPU"
+  # Model-card defaults for TI2V-5B: 720p (704x1280), 121 frames, 24 fps,
+  # 50 steps, guidance 5.0. Lower num_frames if VRAM forces it (see header).
   DEFAULT_HEIGHT: "704"
   DEFAULT_WIDTH: "1280"
-  DEFAULT_NUM_FRAMES: "81"
-  DEFAULT_FPS: "16"
-  DEFAULT_NUM_INFERENCE_STEPS: "40"
+  DEFAULT_NUM_FRAMES: "121"
+  DEFAULT_FPS: "24"
+  DEFAULT_NUM_INFERENCE_STEPS: "50"
   DEFAULT_GUIDANCE_SCALE: "5.0"
   DTYPE: "bfloat16"
   LOG_VERBOSE: "1"
@@ -158,7 +189,7 @@ data:
     import numpy as np
     import torch
     import triton_python_backend_utils as pb_utils
-    from diffusers import WanPipeline
+    from diffusers import AutoencoderKLWan, WanPipeline
     from diffusers.utils import export_to_video
 
 
@@ -167,12 +198,18 @@ data:
             self.model_id = os.environ.get(
                 "MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
             )
+            # BLACKWELL: surface torch/cuda/device capability immediately.
+            if torch.cuda.is_available():
+                cap = torch.cuda.get_device_capability()
+                print(f"[wan2.2] torch {torch.__version__} "
+                      f"cuda {torch.version.cuda} device_capability {cap}",
+                      flush=True)
             self.default_height = int(os.environ.get("DEFAULT_HEIGHT", "704"))
             self.default_width = int(os.environ.get("DEFAULT_WIDTH", "1280"))
-            self.default_frames = int(os.environ.get("DEFAULT_NUM_FRAMES", "81"))
-            self.default_fps = int(os.environ.get("DEFAULT_FPS", "16"))
+            self.default_frames = int(os.environ.get("DEFAULT_NUM_FRAMES", "121"))
+            self.default_fps = int(os.environ.get("DEFAULT_FPS", "24"))
             self.default_steps = int(
-                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "40")
+                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "50")
             )
             self.default_guidance = float(
                 os.environ.get("DEFAULT_GUIDANCE_SCALE", "5.0")
@@ -182,9 +219,21 @@ data:
                 if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
                 else torch.float16
             )
+            # The Wan VAE MUST be loaded in float32 — bf16 produces NaNs/garbage.
+            vae = AutoencoderKLWan.from_pretrained(
+                self.model_id, subfolder="vae", torch_dtype=torch.float32
+            )
             self.pipe = WanPipeline.from_pretrained(
-                self.model_id, torch_dtype=dtype
-            ).to("cuda")
+                self.model_id, vae=vae, torch_dtype=dtype
+            )
+            # VRAM mitigations for the 27+ GB model on a tight slice (see header):
+            # CPU offload keeps only the active module resident; tiled VAE decode
+            # avoids a large decode-time spike. Trades latency for headroom.
+            self.pipe.enable_model_cpu_offload()
+            try:
+                self.pipe.vae.enable_tiling()
+            except Exception:
+                pass
             self.pipe.set_progress_bar_config(disable=True)
 
         def _scalar(self, request, name, default, cast):
@@ -280,7 +329,13 @@ spec:
         runAsNonRoot: false
       containers:
         - name: triton
-          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          # Blackwell sm_120 needs CUDA 12.8+. 25.10-py3 ships CUDA 13.0.2 +
+          # Ubuntu 24.04 + Python 3.12, supports compute cap 7.5+ (incl.
+          # Blackwell). The old 24.01-py3 (CUDA 12.3) has NO Blackwell kernels.
+          # Mirror to Harbor first (see /tmp/mirror-wan-base.yaml — shares the
+          # same Triton base as flux), then flip to
+          # core.harbor.domain/isa/tritonserver:25.10-py3.
+          image: nvcr.io/nvidia/tritonserver:25.10-py3
           securityContext:
             allowPrivilegeEscalation: false
           ports:
@@ -362,12 +417,19 @@ spec:
                 cp /etc/triton-config/model.py \
                   "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
               fi
-              # diffusers Wan support landed 2025-07; pin against the release in
-              # use before baking. imageio-ffmpeg provides export_to_video's mux.
+              # BLACKWELL sm_120: force the cu128 torch wheel FIRST so diffusers
+              # cannot drag in a CPU/old-CUDA torch. cu128 carries sm_120 kernels.
               pip install --no-cache-dir \
-                "diffusers>=0.35" \
-                "transformers>=4.49" \
-                "accelerate>=0.34" \
+                --index-url https://download.pytorch.org/whl/cu128 \
+                "torch>=2.7" "torchvision>=0.22"
+              # Wan2.2 TI2V-5B may require diffusers main; install a recent tag
+              # and fall back to git-main if WanPipeline/AutoencoderKLWan import
+              # or model load fails (verify against the model card before baking).
+              # imageio-ffmpeg provides export_to_video's mux backend.
+              pip install --no-cache-dir \
+                "diffusers>=0.36" \
+                "transformers>=4.57" \
+                "accelerate>=1.0" \
                 "safetensors>=0.4" \
                 "imageio-ffmpeg>=0.5" \
                 "ftfy>=6.1"

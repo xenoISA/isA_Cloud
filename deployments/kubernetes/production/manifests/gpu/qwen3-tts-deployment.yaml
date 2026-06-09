@@ -1,0 +1,248 @@
+# Qwen3-TTS Production Runtime — multilingual HD TTS (tts-1-hd)
+#
+# OpenAI-compatible TTS runtime for `provider=isa, service_type=audio,
+# task=synthesize`, HD/multilingual tier. Backs the model-service `tts-1-hd`
+# alias; kokoro stays the fast `tts-1` default. The production deploy script
+# rewrites namespace isa-cloud-production to the requested NAMESPACE
+# (e.g. sn-cloud-production).
+#
+# Image is the custom FastAPI shim built from deployments/runtimes/qwen3-tts/
+# (no turnkey Qwen3-TTS OpenAI server image is published as of mid-2026; vLLM-Omni
+# is still offline-inference-only). MUST be a cu128/sm_120 (Blackwell) torch build.
+#
+# Placement: specialty group on sn-prod-k8s-03 (audio pack), one MPS slice
+# (nvidia.com/gpu: 1, renameByDefault=false). 1.7B at bf16 is ~4-5 GB VRAM and
+# fits a 24 GB specialty slice alongside the rest of the audio bundle.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    isa-model/model-id: qwen3-tts
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-tts-config
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: qwen-tts
+data:
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  LOG_LEVEL: INFO
+  # Concrete repo (the catalog's `Qwen/Qwen3-TTS` is a family alias, not loadable).
+  TTS_MODEL_ID: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+  DEVICE: "cuda:0"
+  TTS_DTYPE: bfloat16
+  TTS_DEFAULT_LANGUAGE: "Auto"
+  TTS_DEFAULT_SPEAKER: "Ryan"
+  # SDPA avoids needing a prebuilt flash-attn wheel; flip to flash_attention_2
+  # only if the image bakes one in.
+  TTS_ATTN_IMPL: sdpa
+  # Leave empty to trust the sample rate qwen-tts returns; set e.g. "24000" only
+  # if a variant reports an unexpected rate.
+  TTS_SAMPLE_RATE: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: qwen-tts
+    isa-model/instance-group: specialty
+    isa-model/model-id: qwen3-tts
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-tts
+  template:
+    metadata:
+      labels:
+        app: qwen3-tts
+        engine: qwen-tts
+        isa-model/instance-group: specialty
+        isa-model/model-id: qwen3-tts
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      # Specialty audio pack pins to the specialty GPU node (sn-prod-k8s-03).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: qwen3-tts
+          image: core.harbor.domain/isa/qwen3-tts:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: PORT
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: LOG_LEVEL
+            - name: TTS_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_MODEL_ID
+            - name: DEVICE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: DEVICE
+            - name: TTS_DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DTYPE
+            - name: TTS_DEFAULT_LANGUAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DEFAULT_LANGUAGE
+            - name: TTS_DEFAULT_SPEAKER
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DEFAULT_SPEAKER
+            - name: TTS_ATTN_IMPL
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_ATTN_IMPL
+            - name: TTS_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_SAMPLE_RATE
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: 8Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "4000m"
+              memory: 16Gi
+              nvidia.com/gpu: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            # First boot downloads weights into the PVC; allow up to ~20 min.
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 240
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            # Qwen3-TTS + transformers can spill large temporaries; back /dev/shm
+            # with RAM so dataloaders/codec buffers don't hit the 64 MB default.
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-qwen3-tts
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: qwen-tts
+spec:
+  type: ClusterIP
+  selector:
+    app: qwen3-tts
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: qwen3-tts

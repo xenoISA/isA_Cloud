@@ -1,40 +1,65 @@
 # Triton Engine — FLUX.2 fast text-to-image on `generative` GPU group (k8s-02)
 #
-# DRAFT / UNVERIFIED — authored from web research (June 2026), not yet applied
-# or smoke-tested on any cluster.
+# DRAFT / UNVERIFIED — authored from web research (June 2026), NOT yet applied
+# or smoke-tested on any cluster. Treat every pin below as unverified until a
+# pod actually loads weights and renders an image on a Blackwell card.
+#
+# !!! HARD CONSTRAINT: BLACKWELL sm_120 !!!
+#   Nodes are NVIDIA RTX PRO 6000 Blackwell (sm_120, compute cap 12.0). torch +
+#   CUDA MUST be CUDA 12.8+/sm_120-capable or every kernel dies with
+#   "CUDA error: no kernel image is available for execution on the device".
+#   - Base image is a CUDA-13 Triton tag (nvcr.io/nvidia/tritonserver:25.10-py3
+#     ships CUDA 13.0.2, Ubuntu 24.04, Python 3.12, supports compute cap 7.5+
+#     incl. Blackwell). The OLD 24.01-py3 tag (CUDA 12.3, no Blackwell) MUST NOT
+#     be used here. Mirror the tag to Harbor (see /tmp/mirror-flux-base.yaml).
+#   - The startup pip step force-installs torch from the cu128 wheel index so
+#     diffusers does not silently pull a CPU/old-CUDA torch. cu128 wheels carry
+#     sm_120 kernels. cu129/cu130 wheels also work; cu128 is the floor.
+#   Source: https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-10.html
+#           https://download.pytorch.org/whl/cu128
 #
 # !!! NAMING CORRECTION (verify before merge) !!!
 #   The catalog/service name is `flux-2-schnell` (carried over from FLUX.1's
 #   "schnell" distilled tier), but as of June 2026 BLACK FOREST LABS HAS NOT
 #   SHIPPED A "FLUX.2-schnell" REPO. The FLUX.2 line is:
-#     - black-forest-labs/FLUX.2-dev      (32B, ~32 GB fp8 / >80 GB bf16)
-#     - black-forest-labs/FLUX.2-klein-9B (distilled, ~29 GB VRAM)   <-- fast tier
-#     - black-forest-labs/FLUX.2-klein-4B (distilled, ~13 GB VRAM)
+#     - black-forest-labs/FLUX.2-dev           (32B, Mistral3 text enc; huge)
+#     - black-forest-labs/FLUX.2-klein-base-9B (distilled, ~29 GB VRAM) <- fast tier
+#     - black-forest-labs/FLUX.2-klein-base-4B (distilled, ~13 GB VRAM; Apache-2.0)
+#     - black-forest-labs/FLUX.2-klein-9b-kv   (KV-cached reference-image variant)
 #   "klein" is FLUX.2's fast/distilled family — the functional replacement for
-#   FLUX.1 [schnell]. This manifest serves FLUX.2-klein-9B as the speed/preview
-#   co-tenant beside Qwen-Image on the generative node. The k8s service name is
-#   kept as triton-flux-2-schnell to honor the existing catalog/route contract
-#   (and the comment in qwen-image-deployment.yaml), but MODEL_ID points at the
-#   real artifact. Confirm the intended variant (klein-9B vs klein-4B) with the
-#   ADR owner before applying.
+#   FLUX.1 [schnell], and uses a Qwen3 text encoder (NOT Mistral3 like dev).
+#   This manifest serves FLUX.2-klein-base-9B as the speed/preview co-tenant
+#   beside Qwen-Image on the generative node. The k8s service name is kept as
+#   triton-flux-2-schnell to honor the existing catalog/route contract (and the
+#   comment in qwen-image-deployment.yaml), but MODEL_ID points at the real
+#   artifact. Confirm the intended variant (9B vs the Apache-2.0 4B) with the
+#   ADR owner before applying — see licensing note in RISK below.
 #   Sources:
 #     - https://huggingface.co/blog/flux-2
-#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-9B
-#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-4B
+#     - https://huggingface.co/docs/diffusers/api/pipelines/flux2
+#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B
+#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B
 #     - https://github.com/black-forest-labs/flux2
 #
 # SERVING PATH: NO turnkey Triton image exists. Same strategy as Qwen-Image —
-# Triton Python backend wrapping HuggingFace `diffusers` (Flux2Pipeline). The
-# nvcr.io/nvidia/tritonserver base + a startup pip install of the diffusers
-# stack is reused verbatim from triton-qwen-image-2-0 so the two co-tenants
-# share an operational shape. Production should bake a versioned image with the
-# diffusers stack + weights pre-staged. See research note in
-# docs/runbooks/new-model-runtimes-research.md for the build-it-yourself detail.
+# Triton Python backend wrapping HuggingFace `diffusers`, but using
+# `Flux2KleinPipeline` (the klein-specific class; `Flux2Pipeline` is for
+# FLUX.2-dev). The CUDA-13 Triton base + a startup pip install of cu128 torch +
+# the diffusers stack keeps the two co-tenants on a shared operational shape.
+# Production should bake a versioned image with cu128 torch + diffusers + weights
+# pre-staged. See docs/runbooks/new-model-runtimes-research.md.
 #
 # PLACEMENT: generative group, k8s-02, 48 GB MPS slice (ADR 0010). klein-9B is
 # ~29 GB; co-tenant Qwen-Image is ~24 GB — together they exceed one 48 GB slice,
 # so they each take a slice on k8s-02 (2 x 48 GB = 96 GB card). Pod requests
 # nvidia.com/gpu: 1 (MPS renameByDefault=false -> one slice).
+#   DEPENDENCY: this manifest's nodeAffinity targets the `specialty` role label
+#   (isa.io/gpu-role-specialty / sn.io/gpu-role=specialty) to match the existing
+#   qwen-image co-tenant. The catalog places flux-2-schnell on the GENERATIVE
+#   node k8s-02; promoting "generative" to a first-class role requires a k8s-02
+#   RELABEL (gpu-node-labels.yaml currently labels k8s-03 specialty, k8s-01/02
+#   llm). Until that relabel lands, flux co-tenants Qwen-Image on the specialty
+#   node. Reconcile the role label with the ADR owner before applying.
 #
 # Model repository layout (materialised at startup from the ConfigMap):
 #   /models/flux-2-schnell/{config.pbtxt, 1/model.py}
@@ -43,13 +68,18 @@
 # requested NAMESPACE, e.g. sn-cloud-production.
 #
 # RISK / UNKNOWN:
-#   - Flux2Pipeline support + the FLUX.2 text encoder (Mistral3) need a recent
-#     diffusers (>=0.36 / FLUX.2 release line). The pinned version below is a
-#     guess — verify against the diffusers release that landed Flux2Pipeline.
-#   - klein-9B is gated on HF; HF_TOKEN secret is required (not optional in
-#     practice) for the weight download to succeed.
-#   - VRAM headroom on a 48 GB slice for klein-9B + text encoder at bf16 is
-#     tight; group offloading or fp8 may be needed. Smoke-test memory first.
+#   - BLACKWELL: unverified until a pod renders on sm_120. If diffusers pulls a
+#     non-cu128 torch, expect "no kernel image available". The explicit cu128
+#     torch install below is the guard; confirm `torch.cuda.get_device_capability`
+#     reports (12, 0) in pod logs.
+#   - Flux2KleinPipeline + the Qwen3 text encoder need diffusers >= 0.38 (the
+#     release that shipped the flux2 pipelines). Pin verified to v0.38.0 docs.
+#   - GATING/LICENSE: FLUX.2-klein-base-9B is gated on HF under the FLUX
+#     Non-Commercial License — HF_TOKEN is REQUIRED (not optional) and commercial
+#     use is NOT permitted. FLUX.2-klein-base-4B is Apache-2.0 — prefer it if
+#     this serves commercial traffic.
+#   - VRAM headroom on a 48 GB slice for klein-9B + Qwen3 text encoder at bf16 is
+#     tight; enable_model_cpu_offload or fp8 may be needed. Smoke-test first.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -61,7 +91,9 @@ metadata:
     isa-model/instance-group: "generative"
 data:
   # Real servable artifact — see naming-correction note in the header.
-  MODEL_ID: "black-forest-labs/FLUX.2-klein-9B"
+  # NOTE: 9B is gated + non-commercial; switch to FLUX.2-klein-base-4B (Apache-2.0)
+  # for commercial traffic.
+  MODEL_ID: "black-forest-labs/FLUX.2-klein-base-9B"
   MODEL_NAME: "flux-2-schnell"
   MODEL_REPOSITORY: "/models"
   BACKEND: "python"
@@ -69,9 +101,11 @@ data:
   INSTANCE_KIND: "KIND_GPU"
   DEFAULT_HEIGHT: "1024"
   DEFAULT_WIDTH: "1024"
-  # klein is distilled for few-step generation — fast tier defaults low.
-  DEFAULT_NUM_INFERENCE_STEPS: "4"
-  DEFAULT_GUIDANCE_SCALE: "0.0"
+  # klein is distilled for few-step generation. The diffusers Flux2KleinPipeline
+  # default is 50 steps / guidance 4.0; the KV variant uses ~4 steps. Keep the
+  # fast tier low but non-trivial — tune against the model card after smoke test.
+  DEFAULT_NUM_INFERENCE_STEPS: "8"
+  DEFAULT_GUIDANCE_SCALE: "4.0"
   OUTPUT_FORMAT: "PNG"
   MAX_HEIGHT: "1536"
   MAX_WIDTH: "1536"
@@ -140,8 +174,13 @@ data:
   CONFIG_PY: |
     """Triton Python backend wrapper for FLUX.2 (klein) via diffusers.
 
-    DRAFT: requires a diffusers release that ships Flux2Pipeline. Confirm the
-    pipeline class + few-step defaults against the FLUX.2 model card before use.
+    DRAFT: requires diffusers >= 0.38 (ships Flux2KleinPipeline). klein uses the
+    Flux2KleinPipeline class — Flux2Pipeline is for FLUX.2-dev. Confirm the
+    few-step defaults against the FLUX.2-klein model card before use.
+
+    BLACKWELL: torch must be the cu128 (sm_120) build — the deployment's startup
+    pip step force-installs it. We log device capability at init so a non-cu128
+    torch surfaces immediately rather than as a cryptic kernel error mid-render.
     """
     import base64
     import io
@@ -151,22 +190,28 @@ data:
     import numpy as np
     import torch
     import triton_python_backend_utils as pb_utils
-    from diffusers import Flux2Pipeline
+    from diffusers import Flux2KleinPipeline
 
 
     class TritonPythonModel:
         def initialize(self, args):
             json.loads(args["model_config"])
             self.model_id = os.environ.get(
-                "MODEL_ID", "black-forest-labs/FLUX.2-klein-9B"
+                "MODEL_ID", "black-forest-labs/FLUX.2-klein-base-9B"
             )
+            # Fail loud if torch can't see the Blackwell card with sm_120 kernels.
+            if torch.cuda.is_available():
+                cap = torch.cuda.get_device_capability()
+                print(f"[flux2-klein] torch {torch.__version__} "
+                      f"cuda {torch.version.cuda} device_capability {cap}",
+                      flush=True)
             self.default_height = int(os.environ.get("DEFAULT_HEIGHT", "1024"))
             self.default_width = int(os.environ.get("DEFAULT_WIDTH", "1024"))
             self.default_steps = int(
-                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "4")
+                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "8")
             )
             self.default_guidance = float(
-                os.environ.get("DEFAULT_GUIDANCE_SCALE", "0.0")
+                os.environ.get("DEFAULT_GUIDANCE_SCALE", "4.0")
             )
             self.max_height = int(os.environ.get("MAX_HEIGHT", "1536"))
             self.max_width = int(os.environ.get("MAX_WIDTH", "1536"))
@@ -176,7 +221,7 @@ data:
                 if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
                 else torch.float16
             )
-            self.pipe = Flux2Pipeline.from_pretrained(
+            self.pipe = Flux2KleinPipeline.from_pretrained(
                 self.model_id, torch_dtype=dtype
             ).to("cuda")
             self.pipe.set_progress_bar_config(disable=True)
@@ -270,7 +315,12 @@ spec:
         runAsNonRoot: false
       containers:
         - name: triton
-          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          # Blackwell sm_120 needs CUDA 12.8+. 25.10-py3 ships CUDA 13.0.2 +
+          # Ubuntu 24.04 + Python 3.12 and supports compute cap 7.5+ (incl.
+          # Blackwell). The old 24.01-py3 (CUDA 12.3) has NO Blackwell kernels.
+          # Mirror to Harbor first (see /tmp/mirror-flux-base.yaml), then flip to
+          # core.harbor.domain/isa/tritonserver:25.10-py3 for the air-gapped pull.
+          image: nvcr.io/nvidia/tritonserver:25.10-py3
           securityContext:
             allowPrivilegeEscalation: false
           ports:
@@ -338,13 +388,15 @@ spec:
                   key: DTYPE
             - name: HF_HOME
               value: "/root/.cache/huggingface"
-            # FLUX.2-klein is gated — token is effectively REQUIRED here.
+            # FLUX.2-klein-base-9B is gated (FLUX Non-Commercial License) —
+            # token is REQUIRED. optional:false so the pod fails fast if the
+            # secret is missing rather than 401-ing mid weight-download.
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: huggingface-token
                   key: token
-                  optional: true
+                  optional: false
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -358,12 +410,17 @@ spec:
                 cp /etc/triton-config/model.py \
                   "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
               fi
-              # FLUX.2 needs a diffusers release that ships Flux2Pipeline.
-              # Pin verified against the FLUX.2 release line before baking.
+              # BLACKWELL sm_120: force the cu128 torch wheel FIRST so the
+              # diffusers install below cannot drag in a CPU/old-CUDA torch.
+              # cu128 wheels carry sm_120 kernels (cu129/cu130 also fine).
               pip install --no-cache-dir \
-                "diffusers>=0.36" \
-                "transformers>=4.49" \
-                "accelerate>=0.34" \
+                --index-url https://download.pytorch.org/whl/cu128 \
+                "torch>=2.7" "torchvision>=0.22"
+              # Flux2KleinPipeline + Qwen3 text encoder need diffusers >= 0.38.
+              pip install --no-cache-dir \
+                "diffusers>=0.38" \
+                "transformers>=4.57" \
+                "accelerate>=1.0" \
                 "safetensors>=0.4" \
                 "sentencepiece>=0.2" \
                 "Pillow>=10.0"
