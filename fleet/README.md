@@ -67,18 +67,28 @@ telemetry. All three ADR 0009 §3 reachability tiers land in ONE store
 | realtime (SaaS) / periodic (connected on-prem) | `POST /telemetry` (JSON body) | `realtime` |
 | offline (air-gapped) | `POST /telemetry/upload` (multipart file) | `offline-upload` |
 
-Both entrypoints share ONE auth→validate→persist pipeline:
+Both entrypoints consume the SAME signed **envelope** the deployment-side
+producer (#376) emits — `{payload, deployment_secret_id, signature}` — and share
+ONE parse→auth→validate→persist pipeline:
 
-1. **Auth first (401).** Each request carries `X-Deployment-Secret-Id` +
-   `X-Telemetry-Signature` (HMAC-SHA256 over the RAW body bytes). The signature is
-   verified via `verify_telemetry_hmac` (the #374 contract) BEFORE any parsing.
-2. **Metadata only (422).** The body is validated against `TelemetryPayload`, a
-   strict Pydantic model with `model_config = ConfigDict(extra="forbid")` — any
-   unknown field (smuggled business data / PII) is rejected. Fields:
-   `license_id`, `last_seen`, `active_edition`, `active_modules`, `module_usage`,
-   `showback_totals`, `over_license` (ADR 0008 §3).
-3. **Tied to the ledger.** `license_id` must exist in `issuance_ledger`; when the
-   ledger row pins a `deployment_secret_id` it must match the caller's credential.
+1. **Parse the envelope (422).** The request body (`POST /telemetry`) or the
+   uploaded file bytes (`POST /telemetry/upload`) is the envelope JSON; malformed
+   JSON or a missing `payload`/`deployment_secret_id`/`signature` key → 422.
+2. **Auth first (401).** The `signature` is HMAC-SHA256 (the #374 contract) over
+   the CANONICAL payload bytes, re-derived EXACTLY as the producer did:
+   `json.dumps(envelope["payload"], sort_keys=True, separators=(",", ":")).encode()`.
+   It is verified via `verify_telemetry_hmac` against the secret for the envelope's
+   `deployment_secret_id` BEFORE the payload schema is validated or persisted. The
+   credential + signature ride INSIDE the envelope (no transport headers), so the
+   air-gapped file upload works with the file alone.
+3. **Metadata only (422).** The `payload` sub-dict is validated against
+   `TelemetryPayload`, a strict Pydantic model with
+   `model_config = ConfigDict(extra="forbid")` — any unknown field (smuggled
+   business data / PII) is rejected. Fields: `license_id`, `last_seen`,
+   `active_edition`, `active_modules`, `module_usage`, `showback_totals`,
+   `over_license` (ADR 0008 §3).
+4. **Tied to the ledger.** `license_id` must exist in `issuance_ledger`; when the
+   ledger row pins a `deployment_secret_id` it must match the envelope's credential.
 
 ```python
 from sqlalchemy import create_engine

@@ -5,6 +5,12 @@ HMAC-SHA256 signature (the #374 contract, exercised through the canonical
 DB-backed ``verify_telemetry_hmac(session, ...)`` against a seeded
 ``deployment_secret`` row — same pattern as ``test_telemetry_credential.py``).
 
+Both intake paths consume the SAME signed ENVELOPE the #376 producer emits:
+``{payload, deployment_secret_id, signature}``, where the signature is
+HMAC-SHA256 over ``json.dumps(payload, sort_keys=True, separators=(",",":"))``.
+The credential + signature ride INSIDE the envelope (no transport headers), so
+the air-gapped file upload works with the file alone.
+
 Covers the issue's required cases:
   - valid HMAC + valid metadata payload  -> 201, persists a telemetry_record
   - bad / missing HMAC                    -> 401, nothing persisted
@@ -106,19 +112,34 @@ def _payload(**overrides) -> dict:
     return base
 
 
-def _signed_headers(raw: bytes, *, secret: str = SECRET, secret_id: str = DEPLOYMENT_SECRET_ID):
-    return {
-        "X-Deployment-Secret-Id": secret_id,
-        "X-Telemetry-Signature": sign_telemetry(secret, raw),
-    }
+def _canonical(payload: dict) -> bytes:
+    """The EXACT bytes the #376 producer signs (and intake re-MACs)."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _envelope(
+    payload: dict,
+    *,
+    secret: str = SECRET,
+    secret_id: str = DEPLOYMENT_SECRET_ID,
+    signature: str | None = None,
+) -> bytes:
+    """Build a signed ``{payload, deployment_secret_id, signature}`` envelope (bytes).
+
+    The signature is over the canonical payload bytes (matching the producer). Pass
+    ``signature=`` to override (e.g. to simulate tampering / a bad MAC).
+    """
+    sig = signature if signature is not None else sign_telemetry(secret, _canonical(payload))
+    return json.dumps(
+        {"payload": payload, "deployment_secret_id": secret_id, "signature": sig}
+    ).encode()
 
 
 # --------------------------------------------------------------------------- #
 # valid HMAC + valid metadata -> 201 + persists
 # --------------------------------------------------------------------------- #
 def test_post_valid_hmac_and_metadata_persists(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
-    resp = client.post("/telemetry", content=raw, headers=_signed_headers(raw))
+    resp = client.post("/telemetry", content=_envelope(_payload()))
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["status"] == "accepted"
@@ -139,8 +160,7 @@ def test_post_valid_hmac_and_metadata_persists(client, seeded_ledger):
 
 
 def test_over_license_flag_persisted(client, seeded_ledger):
-    raw = json.dumps(_payload(over_license=True)).encode()
-    resp = client.post("/telemetry", content=raw, headers=_signed_headers(raw))
+    resp = client.post("/telemetry", content=_envelope(_payload(over_license=True)))
     assert resp.status_code == 201, resp.text
     with Session(seeded_ledger) as s:
         rec = s.scalars(select(TelemetryRecord)).one()
@@ -151,29 +171,37 @@ def test_over_license_flag_persisted(client, seeded_ledger):
 # bad / missing HMAC -> 401, nothing persisted
 # --------------------------------------------------------------------------- #
 def test_bad_hmac_rejected_401(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
-    headers = {
-        "X-Deployment-Secret-Id": DEPLOYMENT_SECRET_ID,
-        "X-Telemetry-Signature": "deadbeef",  # wrong signature
-    }
-    resp = client.post("/telemetry", content=raw, headers=headers)
+    # Wrong signature in the envelope -> 401, nothing persisted.
+    resp = client.post("/telemetry", content=_envelope(_payload(), signature="deadbeef"))
+    assert resp.status_code == 401
+    with Session(seeded_ledger) as s:
+        assert s.scalars(select(TelemetryRecord)).all() == []
+
+
+def test_tampered_payload_rejected_401(client, seeded_ledger):
+    # Sign one payload, then mutate it after signing -> MAC no longer matches -> 401.
+    payload = _payload()
+    sig = sign_telemetry(SECRET, _canonical(payload))
+    payload["module_usage"] = {"erp": 999999}  # tamper after signing
+    raw = json.dumps(
+        {"payload": payload, "deployment_secret_id": DEPLOYMENT_SECRET_ID, "signature": sig}
+    ).encode()
+    resp = client.post("/telemetry", content=raw)
     assert resp.status_code == 401
     with Session(seeded_ledger) as s:
         assert s.scalars(select(TelemetryRecord)).all() == []
 
 
 def test_missing_hmac_rejected_401(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
-    resp = client.post("/telemetry", content=raw)  # no auth headers
+    # Empty signature in the envelope -> 401 (no header path anymore).
+    resp = client.post("/telemetry", content=_envelope(_payload(), signature=""))
     assert resp.status_code == 401
     with Session(seeded_ledger) as s:
         assert s.scalars(select(TelemetryRecord)).all() == []
 
 
 def test_unknown_secret_id_rejected_401(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
-    headers = _signed_headers(raw, secret_id="dep-unknown")
-    resp = client.post("/telemetry", content=raw, headers=headers)
+    resp = client.post("/telemetry", content=_envelope(_payload(), secret_id="dep-unknown"))
     assert resp.status_code == 401
 
 
@@ -181,11 +209,11 @@ def test_unknown_secret_id_rejected_401(client, seeded_ledger):
 # unknown / extra field -> 422 (metadata-only guard, ADR 0009 §5)
 # --------------------------------------------------------------------------- #
 def test_extra_field_rejected_422(client, seeded_ledger):
-    # HMAC is VALID — the rejection is purely the strict schema (extra="forbid").
+    # HMAC is VALID over the (extra-bearing) payload — rejection is purely the
+    # strict schema (extra="forbid") AFTER auth succeeds.
     payload = _payload()
     payload["customer_email"] = "alice@example.com"  # smuggled PII
-    raw = json.dumps(payload).encode()
-    resp = client.post("/telemetry", content=raw, headers=_signed_headers(raw))
+    resp = client.post("/telemetry", content=_envelope(payload))
     assert resp.status_code == 422, resp.text
     with Session(seeded_ledger) as s:
         assert s.scalars(select(TelemetryRecord)).all() == []
@@ -194,14 +222,19 @@ def test_extra_field_rejected_422(client, seeded_ledger):
 def test_missing_required_field_rejected_422(client):
     payload = _payload()
     del payload["license_id"]
-    raw = json.dumps(payload).encode()
-    resp = client.post("/telemetry", content=raw, headers=_signed_headers(raw))
+    resp = client.post("/telemetry", content=_envelope(payload))
+    assert resp.status_code == 422
+
+
+def test_malformed_envelope_rejected_422(client):
+    # Missing the signature key entirely -> malformed envelope -> 422.
+    raw = json.dumps({"payload": _payload(), "deployment_secret_id": DEPLOYMENT_SECRET_ID}).encode()
+    resp = client.post("/telemetry", content=raw)
     assert resp.status_code == 422
 
 
 def test_unknown_license_id_404(client):
-    raw = json.dumps(_payload(license_id="does-not-exist")).encode()
-    resp = client.post("/telemetry", content=raw, headers=_signed_headers(raw))
+    resp = client.post("/telemetry", content=_envelope(_payload(license_id="does-not-exist")))
     assert resp.status_code == 404
 
 
@@ -209,12 +242,11 @@ def test_unknown_license_id_404(client):
 # file-upload path persists IDENTICALLY (offline air-gapped tier)
 # --------------------------------------------------------------------------- #
 def test_file_upload_path_persists_identically(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
-    headers = _signed_headers(raw)  # SAME HMAC over the SAME raw bytes
+    # The uploaded file IS the signed envelope; no transport headers (air-gapped).
+    raw = _envelope(_payload())
     resp = client.post(
         "/telemetry/upload",
         files={"file": ("usage_bundle.json", raw, "application/json")},
-        headers=headers,
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["source"] == "offline-upload"
@@ -227,14 +259,10 @@ def test_file_upload_path_persists_identically(client, seeded_ledger):
 
 
 def test_file_upload_bad_hmac_rejected_401(client, seeded_ledger):
-    raw = json.dumps(_payload()).encode()
+    raw = _envelope(_payload(), signature="deadbeef")
     resp = client.post(
         "/telemetry/upload",
         files={"file": ("usage_bundle.json", raw, "application/json")},
-        headers={
-            "X-Deployment-Secret-Id": DEPLOYMENT_SECRET_ID,
-            "X-Telemetry-Signature": "deadbeef",
-        },
     )
     assert resp.status_code == 401
     with Session(seeded_ledger) as s:
@@ -244,11 +272,10 @@ def test_file_upload_bad_hmac_rejected_401(client, seeded_ledger):
 def test_file_upload_extra_field_rejected_422(client):
     payload = _payload()
     payload["secret_business_data"] = {"orders": 42}
-    raw = json.dumps(payload).encode()
+    raw = _envelope(payload)
     resp = client.post(
         "/telemetry/upload",
         files={"file": ("usage_bundle.json", raw, "application/json")},
-        headers=_signed_headers(raw),
     )
     assert resp.status_code == 422
 
@@ -274,8 +301,7 @@ def test_silence_query_reports_no_telemetry(client, seeded_ledger):
         s.commit()
 
     # SN reports; ACME stays silent.
-    raw = json.dumps(_payload()).encode()
-    assert client.post("/telemetry", content=raw, headers=_signed_headers(raw)).status_code == 201
+    assert client.post("/telemetry", content=_envelope(_payload())).status_code == 201
 
     with Session(seeded_ledger) as s:
         statuses = {d.license_id: d for d in last_seen_per_deployment(s)}
@@ -290,8 +316,7 @@ def test_silence_query_reports_no_telemetry(client, seeded_ledger):
 def test_silence_query_staleness_threshold(client, seeded_ledger):
     # Report with an OLD last_seen, then assert it is flagged silent past threshold.
     old = (datetime.now(timezone.utc) - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    raw = json.dumps(_payload(last_seen=old)).encode()
-    assert client.post("/telemetry", content=raw, headers=_signed_headers(raw)).status_code == 201
+    assert client.post("/telemetry", content=_envelope(_payload(last_seen=old))).status_code == 201
 
     with Session(seeded_ledger) as s:
         statuses = {d.license_id: d for d in last_seen_per_deployment(s, silent_after_days=30)}

@@ -9,13 +9,30 @@ three reachability tiers that ALL land in one store (``telemetry_record``):
 
 Both entrypoints feed ONE persistence path (``_persist``), validate the SAME
 strict metadata-only schema (``TelemetryPayload``), and require the SAME
-per-deployment HMAC (#374) over the RAW payload bytes BEFORE any parsing.
+per-deployment HMAC (#374) over the canonical payload bytes BEFORE any persisting.
+
+The wire contract — the ENVELOPE (matches the #376 producer)
+-----------------------------------------------------------
+Both paths accept the SAME signed envelope the deployment-side producer
+(``usage_bundle.py``, #376) emits::
+
+    {"payload": {...}, "deployment_secret_id": "...", "signature": "..."}
+
+The signature is HMAC-SHA256 over the CANONICAL payload bytes, derived EXACTLY as
+the producer derives them::
+
+    json.dumps(envelope["payload"], sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+We MAC the RAW ``payload`` sub-dict from the envelope (NOT a pydantic-coerced
+view — coercion could reorder/retype fields and break the MAC). The
+``deployment_secret_id`` and ``signature`` come from the ENVELOPE, not a header,
+so the offline file path works with the file alone (no transport headers).
 
 Security posture (ADR 0009 §3, §5):
-  - **Auth first.** Every request carries ``deployment_secret_id`` + an HMAC
-    signature over the raw body bytes; we verify it BEFORE parsing/persisting and
-    reject with 401 on bad/missing HMAC. (Verification = #374's
-    ``verify_telemetry_hmac``; see telemetry_credential.py for the stub note.)
+  - **Auth first.** The envelope carries ``deployment_secret_id`` + an HMAC
+    signature over the canonical payload bytes; we verify it BEFORE validating the
+    payload schema or persisting, and reject with 401 on bad/missing HMAC.
+    (Verification = #374's ``verify_telemetry_hmac``.)
   - **Metadata only.** ``TelemetryPayload`` sets ``extra="forbid"`` so any unknown
     field (i.e. smuggled business data / PII) is rejected with 422.
   - **Tied to the ledger.** The reported ``license_id`` must exist in the issuance
@@ -35,7 +52,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from .models import IssuanceLedger
@@ -48,10 +65,6 @@ except Exception:  # pragma: no cover
     Session = object  # type: ignore
 
 logger = logging.getLogger("fleet_console.intake")
-
-# Header names carrying the auth credential (ADR 0009 §3).
-HEADER_SECRET_ID = "X-Deployment-Secret-Id"
-HEADER_SIGNATURE = "X-Telemetry-Signature"
 
 # A session factory: called with no args, returns a context-manager SQLAlchemy
 # Session (e.g. ``lambda: Session(engine)``). Mirrors how a service injects its DB.
@@ -91,13 +104,47 @@ class TelemetryPayload(BaseModel):
     over_license: bool = False
 
 
+def _parse_envelope_or_422(raw: bytes) -> dict:
+    """Parse the signed envelope JSON; raise 422 on malformed JSON / missing keys.
+
+    The envelope is ``{payload, deployment_secret_id, signature}`` as emitted by the
+    #376 producer (``usage_bundle.py``). We require all three keys and a dict
+    ``payload`` before any auth/validation; anything else is a malformed upload (422).
+    """
+    try:
+        envelope = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise HTTPException(status_code=422, detail=f"invalid JSON envelope: {e}") from e
+    if not isinstance(envelope, dict):
+        raise HTTPException(status_code=422, detail="envelope must be a JSON object")
+    missing = [
+        k for k in ("payload", "deployment_secret_id", "signature") if k not in envelope
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422, detail=f"envelope missing required key(s): {missing}"
+        )
+    if not isinstance(envelope["payload"], dict):
+        raise HTTPException(status_code=422, detail="envelope.payload must be a JSON object")
+    return envelope
+
+
+def _canonical_payload_bytes(payload: dict) -> bytes:
+    """Re-derive the EXACT bytes the producer signed (#376 ``canonical_payload_bytes``).
+
+    Over the RAW payload sub-dict from the envelope — NOT a pydantic-coerced view,
+    whose retyping/reordering could change the bytes and break the MAC.
+    """
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 def _verify_or_401(
     session: "Session",
     deployment_secret_id: Optional[str],
-    raw: bytes,
+    signed: bytes,
     signature: Optional[str],
 ) -> str:
-    """HMAC-verify the raw bytes BEFORE any parsing; raise 401 on any failure.
+    """HMAC-verify the canonical payload bytes BEFORE validating/persisting; 401 on failure.
 
     Uses #374's canonical ``verify_telemetry_hmac(session, ...)``: the
     per-deployment secret is looked up from the ``deployment_secret`` table via the
@@ -105,19 +152,13 @@ def _verify_or_401(
     """
     if not deployment_secret_id or not signature:
         raise HTTPException(status_code=401, detail="missing telemetry credential")
-    if not verify_telemetry_hmac(session, deployment_secret_id, raw, signature):
+    if not verify_telemetry_hmac(session, deployment_secret_id, signed, signature):
         raise HTTPException(status_code=401, detail="invalid telemetry signature")
     return deployment_secret_id
 
 
-def _parse_payload_or_422(raw: bytes) -> TelemetryPayload:
-    """Parse + strictly validate the raw bytes into a TelemetryPayload (422 on bad)."""
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise HTTPException(status_code=422, detail=f"invalid JSON payload: {e}") from e
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=422, detail="payload must be a JSON object")
+def _validate_payload_or_422(data: dict) -> TelemetryPayload:
+    """Strictly validate the (already-authenticated) payload dict (422 on bad)."""
     # model_validate enforces extra="forbid" → unknown fields raise ValidationError.
     from pydantic import ValidationError
 
@@ -177,13 +218,24 @@ def _ingest(
     session: "Session",
     raw: bytes,
     *,
-    deployment_secret_id: Optional[str],
-    signature: Optional[str],
     source: str,
 ) -> dict:
-    """Full auth→validate→persist pipeline shared by POST and file-upload."""
-    sid = _verify_or_401(session, deployment_secret_id, raw, signature)
-    payload = _parse_payload_or_422(raw)
+    """Full parse→auth→validate→persist pipeline shared by POST and file-upload.
+
+    Both transports carry the SAME signed envelope; ``raw`` is the request body
+    (POST) or the uploaded file bytes (upload). Ordering: envelope-parse (422) →
+    HMAC over canonical payload bytes (401) → strict schema (422) → persist.
+    """
+    envelope = _parse_envelope_or_422(raw)
+    payload_dict = envelope["payload"]
+    signed = _canonical_payload_bytes(payload_dict)
+    sid = _verify_or_401(
+        session,
+        envelope["deployment_secret_id"],
+        signed,
+        envelope["signature"],
+    )
+    payload = _validate_payload_or_422(payload_dict)
     record = _persist(session, payload, deployment_secret_id=sid, source=source)
     return {
         "status": "accepted",
@@ -204,46 +256,29 @@ def build_intake_router(session_factory: SessionFactory) -> APIRouter:
     router = APIRouter(tags=["telemetry"])
 
     @router.post("/telemetry", status_code=201)
-    async def post_telemetry(  # noqa: D401 - FastAPI handler
-        request: Request,
-        x_deployment_secret_id: Optional[str] = Header(default=None),
-        x_telemetry_signature: Optional[str] = Header(default=None),
-    ) -> dict:
+    async def post_telemetry(request: Request) -> dict:  # noqa: D401 - FastAPI handler
         """Realtime/periodic telemetry push (ADR 0009 §3 tiers realtime + periodic).
 
-        HMAC is verified over the RAW request body before any parsing.
+        The request body is the signed envelope
+        ``{payload, deployment_secret_id, signature}``; the HMAC (over the canonical
+        payload bytes) is verified before the payload schema is validated.
         """
         raw = await request.body()
         with session_factory() as session:
-            return _ingest(
-                session,
-                raw,
-                deployment_secret_id=x_deployment_secret_id,
-                signature=x_telemetry_signature,
-                source="realtime",
-            )
+            return _ingest(session, raw, source="realtime")
 
     @router.post("/telemetry/upload", status_code=201)
-    async def upload_telemetry(  # noqa: D401 - FastAPI handler
-        file: UploadFile,
-        x_deployment_secret_id: Optional[str] = Header(default=None),
-        x_telemetry_signature: Optional[str] = Header(default=None),
-    ) -> dict:
+    async def upload_telemetry(file: UploadFile) -> dict:  # noqa: D401 - FastAPI handler
         """Air-gapped signed-bundle upload (ADR 0009 §3 offline tier).
 
-        SAME schema + SAME HMAC validation as the POST path — only the transport
-        (a multipart file) and the recorded ``source`` differ. The uploaded file's
-        RAW bytes are exactly what the deployment's exporter HMAC-signed.
+        SAME envelope + SAME HMAC validation as the POST path — only the transport
+        (a multipart file) and the recorded ``source`` differ. The uploaded file IS
+        the producer's signed bundle; the credential + signature ride INSIDE it, so
+        no transport headers are needed (true air-gapped hand-carry).
         """
         raw = await file.read()
         with session_factory() as session:
-            return _ingest(
-                session,
-                raw,
-                deployment_secret_id=x_deployment_secret_id,
-                signature=x_telemetry_signature,
-                source="offline-upload",
-            )
+            return _ingest(session, raw, source="offline-upload")
 
     return router
 
@@ -268,6 +303,4 @@ __all__ = [
     "TelemetryPayload",
     "build_intake_router",
     "create_intake_app",
-    "HEADER_SECRET_ID",
-    "HEADER_SIGNATURE",
 ]
