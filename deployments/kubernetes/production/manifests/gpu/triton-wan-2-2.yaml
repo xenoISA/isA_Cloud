@@ -335,7 +335,7 @@ spec:
           # Mirror to Harbor first (see /tmp/mirror-wan-base.yaml — shares the
           # same Triton base as flux), then flip to
           # core.harbor.domain/isa/tritonserver:25.10-py3.
-          image: nvcr.io/nvidia/tritonserver:25.10-py3
+          image: core.harbor.domain/isa/tritonserver:25.12-py3
           securityContext:
             allowPrivilegeEscalation: false
           ports:
@@ -493,9 +493,13 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: isa.io/gpu-role-elastic
+                  - key: isa.io/gpu-role-generative
                     operator: In
                     values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["generative"]
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
