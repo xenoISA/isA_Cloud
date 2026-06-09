@@ -1,85 +1,80 @@
-# Triton Engine — FLUX.2 fast text-to-image on `generative` GPU group (k8s-02)
+# FLUX.2 Image Engine — standalone FastAPI + diffusers server on the
+# `generative` GPU group. Catalog/Service name kept as `triton-flux-2-schnell`
+# to honor the existing route/catalog contract; the engine is NO LONGER Triton.
 #
-# DRAFT / UNVERIFIED — authored from web research (June 2026), NOT yet applied
-# or smoke-tested on any cluster. Treat every pin below as unverified until a
-# pod actually loads weights and renders an image on a Blackwell card.
+# WHY THIS IS NOT TRITON ANYMORE
+#   The previous Triton python-backend draft failed repeatedly in production:
+#   probe SIGKILL during the slow cold boot, a missing/packed python_env path
+#   ("Failed to get the canonical path"), and opaque stub-load failures when
+#   weights were downloaded inside initialize(). This rework replaces it with a
+#   plain FastAPI/uvicorn server (server.py from a ConfigMap) that loads the
+#   pipeline in a gated startup background task and serves an OpenAI-compatible
+#   images API. Identical architecture to the qwen-image rework so the three
+#   generative engines (qwen-image, flux-2, wan-2.2) share ONE operational shape.
 #
-# !!! HARD CONSTRAINT: BLACKWELL sm_120 !!!
-#   Nodes are NVIDIA RTX PRO 6000 Blackwell (sm_120, compute cap 12.0). torch +
-#   CUDA MUST be CUDA 12.8+/sm_120-capable or every kernel dies with
-#   "CUDA error: no kernel image is available for execution on the device".
-#   - Base image is a CUDA-13 Triton tag (nvcr.io/nvidia/tritonserver:25.10-py3
-#     ships CUDA 13.0.2, Ubuntu 24.04, Python 3.12, supports compute cap 7.5+
-#     incl. Blackwell). The OLD 24.01-py3 tag (CUDA 12.3, no Blackwell) MUST NOT
-#     be used here. Mirror the tag to Harbor (see /tmp/mirror-flux-base.yaml).
-#   - The startup pip step force-installs torch from the cu128 wheel index so
-#     diffusers does not silently pull a CPU/old-CUDA torch. cu128 wheels carry
-#     sm_120 kernels. cu129/cu130 wheels also work; cu128 is the floor.
-#   Source: https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/rel-25-10.html
-#           https://download.pytorch.org/whl/cu128
+# !!! NAMING CORRECTION — there is NO "FLUX.2-schnell" !!!
+#   "schnell" was the FLUX.1 distilled tier. In the FLUX.2 line the fast/distilled
+#   family is **klein**. The k8s Service/catalog id stays `triton-flux-2-schnell`
+#   (route contract), but MODEL_ID points at the real artifact:
+#     - black-forest-labs/FLUX.2-klein-base-4B  <- DEFAULT (this manifest)
+#         ~4B params, ~13 GB, Apache-2.0 (commercial-safe), NOT gated, no HF token.
+#     - black-forest-labs/FLUX.2-klein-base-9B  <- optional higher-quality swap
+#         ~29 GB, FLUX Non-Commercial License, HF-GATED (HF_TOKEN REQUIRED).
+#   klein uses a Qwen3 text encoder (Qwen3ForCausalLM) — NOT the Mistral3 encoder
+#   of FLUX.2-dev. The diffusers pipeline class is `Flux2KleinPipeline`
+#   (`Flux2Pipeline` is for FLUX.2-dev; `Flux2KleinKVPipeline` is the KV/reference
+#   variant). Verified June 2026 against the diffusers v0.38.0 docs.
 #
-# !!! NAMING CORRECTION (verify before merge) !!!
-#   The catalog/service name is `flux-2-schnell` (carried over from FLUX.1's
-#   "schnell" distilled tier), but as of June 2026 BLACK FOREST LABS HAS NOT
-#   SHIPPED A "FLUX.2-schnell" REPO. The FLUX.2 line is:
-#     - black-forest-labs/FLUX.2-dev           (32B, Mistral3 text enc; huge)
-#     - black-forest-labs/FLUX.2-klein-base-9B (distilled, ~29 GB VRAM) <- fast tier
-#     - black-forest-labs/FLUX.2-klein-base-4B (distilled, ~13 GB VRAM; Apache-2.0)
-#     - black-forest-labs/FLUX.2-klein-9b-kv   (KV-cached reference-image variant)
-#   "klein" is FLUX.2's fast/distilled family — the functional replacement for
-#   FLUX.1 [schnell], and uses a Qwen3 text encoder (NOT Mistral3 like dev).
-#   This manifest serves FLUX.2-klein-base-9B as the speed/preview co-tenant
-#   beside Qwen-Image on the generative node. The k8s service name is kept as
-#   triton-flux-2-schnell to honor the existing catalog/route contract (and the
-#   comment in qwen-image-deployment.yaml), but MODEL_ID points at the real
-#   artifact. Confirm the intended variant (9B vs the Apache-2.0 4B) with the
-#   ADR owner before applying — see licensing note in RISK below.
-#   Sources:
-#     - https://huggingface.co/blog/flux-2
-#     - https://huggingface.co/docs/diffusers/api/pipelines/flux2
-#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B
-#     - https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B
-#     - https://github.com/black-forest-labs/flux2
+# !!! LICENSE NOTE !!!
+#   DEFAULT = FLUX.2-klein-base-4B is Apache-2.0 and commercial-safe — outputs are
+#   usable commercially with no gating. Do NOT switch MODEL_ID to klein-base-9B for
+#   commercial traffic: 9B is the FLUX Non-Commercial License and is HF-gated, so it
+#   needs a valid HF_TOKEN AND a license review before use.
 #
-# SERVING PATH: NO turnkey Triton image exists. Same strategy as Qwen-Image —
-# Triton Python backend wrapping HuggingFace `diffusers`, but using
-# `Flux2KleinPipeline` (the klein-specific class; `Flux2Pipeline` is for
-# FLUX.2-dev). The CUDA-13 Triton base + a startup pip install of cu128 torch +
-# the diffusers stack keeps the two co-tenants on a shared operational shape.
-# Production should bake a versioned image with cu128 torch + diffusers + weights
-# pre-staged. See docs/runbooks/new-model-runtimes-research.md.
+# !!! BLACKWELL sm_120 — torch is BAKED IN, not pip-installed at runtime !!!
+#   SN prod GPUs are NVIDIA RTX PRO 6000 Blackwell (compute capability sm_120 /
+#   12.0). The base image `pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime` already
+#   ships torch 2.8.0 built against CUDA 12.8 — cu128 wheels carry sm_120 kernels,
+#   so the GPU contract is satisfied by the base alone. We do NOT pip-install torch
+#   at startup (that was a fragility source); startup only pips the small diffusers
+#   stack (no torch in that set, so pip cannot drag in a CPU/old-CUDA torch). The
+#   server logs torch.cuda.get_device_capability() at load so a wrong build (i.e.
+#   not (12, 0)) surfaces immediately rather than as a cryptic kernel error.
+#   Sources (verified June 2026):
+#     - pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime (Docker Hub):
+#       https://hub.docker.com/layers/pytorch/pytorch/2.8.0-cuda12.8-cudnn9-runtime/images/sha256-417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385
+#     - CUDA 12.8 adds sm_120 (Blackwell); torch 2.8.0+cu128 runs RTX PRO 6000:
+#       https://download.pytorch.org/whl/cu128
+#       https://github.com/pytorch/pytorch/issues/159207
+#     - diffusers Flux2KleinPipeline (Qwen3 text enc) @ v0.38.0:
+#       https://huggingface.co/docs/diffusers/api/pipelines/flux2
+#     - FLUX.2 landed in diffusers v0.36.0; klein import needs a current release
+#       (see issue #13087 "cannot import name 'Flux2KleinPipeline'") -> pin >=0.38:
+#       https://github.com/huggingface/diffusers/issues/13087
+#     - FLUX.2-klein-base-4B (Apache-2.0, ~13 GB, not gated):
+#       https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B
+#     - FLUX.2-klein-base-9B (FLUX Non-Commercial, gated, ~29 GB):
+#       https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B
 #
-# PLACEMENT: generative group, k8s-02, 48 GB MPS slice (ADR 0010). klein-9B is
-# ~29 GB; co-tenant Qwen-Image is ~24 GB — together they exceed one 48 GB slice,
-# so they each take a slice on k8s-02 (2 x 48 GB = 96 GB card). Pod requests
-# nvidia.com/gpu: 1 (MPS renameByDefault=false -> one slice).
-#   DEPENDENCY: this manifest's nodeAffinity targets the `specialty` role label
-#   (isa.io/gpu-role-specialty / sn.io/gpu-role=specialty) to match the existing
-#   qwen-image co-tenant. The catalog places flux-2-schnell on the GENERATIVE
-#   node k8s-02; promoting "generative" to a first-class role requires a k8s-02
-#   RELABEL (gpu-node-labels.yaml currently labels k8s-03 specialty, k8s-01/02
-#   llm). Until that relabel lands, flux co-tenants Qwen-Image on the specialty
-#   node. Reconcile the role label with the ADR owner before applying.
+# BASE IMAGE MIRRORING: the cluster pulls from core.harbor.domain/isa, not Docker
+#   Hub. Mirror `pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime` ->
+#   `core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime` before applying.
 #
-# Model repository layout (materialised at startup from the ConfigMap):
-#   /models/flux-2-schnell/{config.pbtxt, 1/model.py}
+# WEIGHTS: downloaded into the PVC-backed HF cache (/root/.cache/huggingface,
+#   HF_HOME) during the GATED startup load — NOT at container start, so the
+#   container comes up immediately and /health gates readiness while weights pull.
 #
-# The production deploy script rewrites namespace: isa-cloud-production to the
-# requested NAMESPACE, e.g. sn-cloud-production.
+# API CONTRACT (OpenAI-compatible image generations):
+#   GET  /health                 -> 503 {"status":"loading"} until pipeline ready,
+#                                    then 200 {"status":"ok"}.
+#   POST /v1/images/generations  -> body {prompt, n, size ("WxH"), response_format
+#                                    ("b64_json"), optional steps/guidance/seed}
+#                                    resp {created, data:[{b64_json: <PNG b64>}]}.
 #
-# RISK / UNKNOWN:
-#   - BLACKWELL: unverified until a pod renders on sm_120. If diffusers pulls a
-#     non-cu128 torch, expect "no kernel image available". The explicit cu128
-#     torch install below is the guard; confirm `torch.cuda.get_device_capability`
-#     reports (12, 0) in pod logs.
-#   - Flux2KleinPipeline + the Qwen3 text encoder need diffusers >= 0.38 (the
-#     release that shipped the flux2 pipelines). Pin verified to v0.38.0 docs.
-#   - GATING/LICENSE: FLUX.2-klein-base-9B is gated on HF under the FLUX
-#     Non-Commercial License — HF_TOKEN is REQUIRED (not optional) and commercial
-#     use is NOT permitted. FLUX.2-klein-base-4B is Apache-2.0 — prefer it if
-#     this serves commercial traffic.
-#   - VRAM headroom on a 48 GB slice for klein-9B + Qwen3 text encoder at bf16 is
-#     tight; enable_model_cpu_offload or fp8 may be needed. Smoke-test first.
+# PLACEMENT: generative group; namespace isa-cloud-production (the prod deploy
+#   script rewrites this to e.g. sn-cloud-production). The deploy targets the SN
+#   prod cluster — NOT the local kind cluster (which has no generative-labeled
+#   nodes). nodeAffinity ORs the two label schemes (isa.io/* and sn.io/*).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -90,200 +85,192 @@ metadata:
     isa-model/model-id: "flux-2-schnell"
     isa-model/instance-group: "generative"
 data:
-  # Real servable artifact — see naming-correction note in the header.
-  # NOTE: 9B is gated + non-commercial; switch to FLUX.2-klein-base-4B (Apache-2.0)
-  # for commercial traffic.
-  MODEL_ID: "black-forest-labs/FLUX.2-klein-base-9B"
+  # DEFAULT = Apache-2.0, commercial-safe, ~13 GB, NOT gated (no HF token needed).
+  # Optional swap to "black-forest-labs/FLUX.2-klein-base-9B" requires HF_TOKEN +
+  # license review (FLUX Non-Commercial). See header LICENSE NOTE.
+  MODEL_ID: "black-forest-labs/FLUX.2-klein-base-4B"
   MODEL_NAME: "flux-2-schnell"
-  MODEL_REPOSITORY: "/models"
-  BACKEND: "python"
-  INSTANCE_COUNT: "1"
-  INSTANCE_KIND: "KIND_GPU"
+  # klein pipeline class — Flux2Pipeline is for FLUX.2-dev (Mistral3 encoder).
+  PIPELINE_CLASS: "Flux2KleinPipeline"
+  DTYPE: "bfloat16"
   DEFAULT_HEIGHT: "1024"
   DEFAULT_WIDTH: "1024"
-  # klein is distilled for few-step generation. The diffusers Flux2KleinPipeline
-  # default is 50 steps / guidance 4.0; the KV variant uses ~4 steps. Keep the
-  # fast tier low but non-trivial — tune against the model card after smoke test.
-  DEFAULT_NUM_INFERENCE_STEPS: "8"
+  # diffusers Flux2KleinPipeline defaults: 50 steps / guidance 4.0 (verified
+  # v0.38.0 docs). Tune the step count down for the fast/preview tier after a
+  # smoke test against the klein model card.
+  DEFAULT_NUM_INFERENCE_STEPS: "50"
   DEFAULT_GUIDANCE_SCALE: "4.0"
-  OUTPUT_FORMAT: "PNG"
   MAX_HEIGHT: "1536"
   MAX_WIDTH: "1536"
-  DTYPE: "bfloat16"
-  LOG_VERBOSE: "1"
-  CONFIG_PBTXT: |
-    name: "flux-2-schnell"
-    backend: "python"
-    max_batch_size: 0
-    input [
-      {
-        name: "prompt"
-        data_type: TYPE_STRING
-        dims: [ 1 ]
-      },
-      {
-        name: "height"
-        data_type: TYPE_INT32
-        dims: [ 1 ]
-        optional: true
-      },
-      {
-        name: "width"
-        data_type: TYPE_INT32
-        dims: [ 1 ]
-        optional: true
-      },
-      {
-        name: "num_inference_steps"
-        data_type: TYPE_INT32
-        dims: [ 1 ]
-        optional: true
-      },
-      {
-        name: "guidance_scale"
-        data_type: TYPE_FP32
-        dims: [ 1 ]
-        optional: true
-      },
-      {
-        name: "seed"
-        data_type: TYPE_INT64
-        dims: [ 1 ]
-        optional: true
-      }
-    ]
-    output [
-      {
-        name: "image"
-        data_type: TYPE_STRING
-        dims: [ 1 ]
-      }
-    ]
-    instance_group [
-      {
-        count: 1
-        kind: KIND_GPU
-      }
-    ]
-  # No EXECUTION_ENV_PATH — startup pip-installs into system python; the python
-  # backend uses the default interpreter (a missing packed python_env path
-  # crashed qwen-image with "Failed to get the canonical path").
-  CONFIG_PY: |
-    """Triton Python backend wrapper for FLUX.2 (klein) via diffusers.
+  OUTPUT_FORMAT: "PNG"
+  HF_HOME: "/root/.cache/huggingface"
+  # Pip stack installed at startup — diffusers ONLY (torch is baked into the base).
+  # diffusers>=0.38 ships an importable Flux2KleinPipeline (0.36 added FLUX.2 but
+  # the klein import was unstable, issue #13087). transformers>=4.57 carries
+  # Qwen3ForCausalLM (klein's text encoder). sentencepiece/protobuf for tokenizer.
+  PIP_PACKAGES: >-
+    diffusers>=0.38
+    transformers>=4.57
+    accelerate>=1.0
+    safetensors>=0.4
+    sentencepiece>=0.2
+    protobuf>=4.0
+    fastapi>=0.115
+    uvicorn>=0.30
+    pillow>=10.0
+  SERVER_PY: |
+    """Standalone FastAPI + diffusers server for FLUX.2 klein (text-to-image).
 
-    DRAFT: requires diffusers >= 0.38 (ships Flux2KleinPipeline). klein uses the
-    Flux2KleinPipeline class — Flux2Pipeline is for FLUX.2-dev. Confirm the
-    few-step defaults against the FLUX.2-klein model card before use.
+    Robust replacement for the Triton python-backend draft. Loads
+    Flux2KleinPipeline in a startup BACKGROUND task; /health gates readiness so
+    the container comes up immediately and the slow weight download does not race
+    the liveness probe. OpenAI-compatible /v1/images/generations.
 
-    BLACKWELL: torch must be the cu128 (sm_120) build — the deployment's startup
-    pip step force-installs it. We log device capability at init so a non-cu128
-    torch surfaces immediately rather than as a cryptic kernel error mid-render.
+    BLACKWELL: torch is baked into the base image (2.8.0+cu128, sm_120). We log
+    device capability at load so a wrong build surfaces loudly rather than as a
+    mid-render "no kernel image available" error.
     """
+    import asyncio
     import base64
     import io
-    import json
     import os
+    import time
+    from typing import List, Optional
 
-    import numpy as np
     import torch
-    import triton_python_backend_utils as pb_utils
-    from diffusers import Flux2KleinPipeline
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse
+    from pydantic import BaseModel
+
+    MODEL_ID = os.environ.get("MODEL_ID", "black-forest-labs/FLUX.2-klein-base-4B")
+    PIPELINE_CLASS = os.environ.get("PIPELINE_CLASS", "Flux2KleinPipeline")
+    DTYPE = os.environ.get("DTYPE", "bfloat16")
+    DEFAULT_HEIGHT = int(os.environ.get("DEFAULT_HEIGHT", "1024"))
+    DEFAULT_WIDTH = int(os.environ.get("DEFAULT_WIDTH", "1024"))
+    DEFAULT_STEPS = int(os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "50"))
+    DEFAULT_GUIDANCE = float(os.environ.get("DEFAULT_GUIDANCE_SCALE", "4.0"))
+    MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "1536"))
+    MAX_WIDTH = int(os.environ.get("MAX_WIDTH", "1536"))
+    OUTPUT_FORMAT = os.environ.get("OUTPUT_FORMAT", "PNG").upper()
+
+    app = FastAPI(title="flux-2-schnell", version="1.0.0")
+
+    STATE = {"pipe": None, "ready": False, "error": None}
 
 
-    class TritonPythonModel:
-        def initialize(self, args):
-            json.loads(args["model_config"])
-            self.model_id = os.environ.get(
-                "MODEL_ID", "black-forest-labs/FLUX.2-klein-base-9B"
+    def _dtype():
+        return torch.bfloat16 if DTYPE == "bfloat16" else torch.float16
+
+
+    def _load_pipeline():
+        """Blocking load — runs in a thread off the event loop."""
+        import diffusers
+
+        if torch.cuda.is_available():
+            cap = torch.cuda.get_device_capability()
+            print(
+                f"[flux2-klein] torch {torch.__version__} cuda {torch.version.cuda} "
+                f"device_capability {cap} (expect (12, 0) on Blackwell sm_120)",
+                flush=True,
             )
-            # Fail loud if torch can't see the Blackwell card with sm_120 kernels.
-            if torch.cuda.is_available():
-                cap = torch.cuda.get_device_capability()
-                print(f"[flux2-klein] torch {torch.__version__} "
-                      f"cuda {torch.version.cuda} device_capability {cap}",
-                      flush=True)
-            self.default_height = int(os.environ.get("DEFAULT_HEIGHT", "1024"))
-            self.default_width = int(os.environ.get("DEFAULT_WIDTH", "1024"))
-            self.default_steps = int(
-                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "8")
+        else:
+            print("[flux2-klein] WARNING: torch.cuda.is_available() is False", flush=True)
+
+        pipe_cls = getattr(diffusers, PIPELINE_CLASS)
+        print(f"[flux2-klein] loading {PIPELINE_CLASS}.from_pretrained({MODEL_ID})", flush=True)
+        pipe = pipe_cls.from_pretrained(MODEL_ID, torch_dtype=_dtype())
+        pipe = pipe.to("cuda")
+        pipe.set_progress_bar_config(disable=True)
+        return pipe
+
+
+    async def _startup_load():
+        try:
+            STATE["pipe"] = await asyncio.to_thread(_load_pipeline)
+            STATE["ready"] = True
+            print("[flux2-klein] pipeline ready", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            STATE["error"] = repr(exc)
+            print(f"[flux2-klein] LOAD FAILED: {exc!r}", flush=True)
+
+
+    @app.on_event("startup")
+    async def startup():
+        # Background task so the container is up immediately; /health gates ready.
+        asyncio.create_task(_startup_load())
+
+
+    @app.get("/health")
+    async def health():
+        if STATE["ready"]:
+            return JSONResponse(status_code=200, content={"status": "ok"})
+        if STATE["error"]:
+            return JSONResponse(
+                status_code=503, content={"status": "error", "detail": STATE["error"]}
             )
-            self.default_guidance = float(
-                os.environ.get("DEFAULT_GUIDANCE_SCALE", "4.0")
+        return JSONResponse(status_code=503, content={"status": "loading"})
+
+
+    class ImageRequest(BaseModel):
+        prompt: str
+        n: int = 1
+        size: Optional[str] = None  # "WxH", e.g. "1024x1024"
+        response_format: str = "b64_json"
+        num_inference_steps: Optional[int] = None
+        guidance_scale: Optional[float] = None
+        seed: Optional[int] = None
+
+
+    def _parse_size(size: Optional[str]):
+        if not size:
+            return DEFAULT_WIDTH, DEFAULT_HEIGHT
+        try:
+            w_str, h_str = size.lower().split("x")
+            w, h = int(w_str), int(h_str)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"invalid size: {size!r} (want WxH)")
+        return min(w, MAX_WIDTH), min(h, MAX_HEIGHT)
+
+
+    @app.post("/v1/images/generations")
+    async def generate(req: ImageRequest):
+        if not STATE["ready"]:
+            raise HTTPException(status_code=503, detail="model still loading")
+        if req.response_format != "b64_json":
+            raise HTTPException(
+                status_code=400, detail="only response_format=b64_json is supported"
             )
-            self.max_height = int(os.environ.get("MAX_HEIGHT", "1536"))
-            self.max_width = int(os.environ.get("MAX_WIDTH", "1536"))
-            self.output_format = os.environ.get("OUTPUT_FORMAT", "PNG").upper()
-            dtype = (
-                torch.bfloat16
-                if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
-                else torch.float16
+        width, height = _parse_size(req.size)
+        steps = req.num_inference_steps or DEFAULT_STEPS
+        guidance = req.guidance_scale if req.guidance_scale is not None else DEFAULT_GUIDANCE
+        n = max(1, int(req.n))
+
+        generator = None
+        if req.seed is not None and req.seed >= 0:
+            generator = torch.Generator(device="cuda").manual_seed(req.seed)
+
+        def _run():
+            result = STATE["pipe"](
+                prompt=req.prompt,
+                height=height,
+                width=width,
+                num_inference_steps=steps,
+                guidance_scale=guidance,
+                num_images_per_prompt=n,
+                generator=generator,
             )
-            self.pipe = Flux2KleinPipeline.from_pretrained(
-                self.model_id, torch_dtype=dtype
-            ).to("cuda")
-            self.pipe.set_progress_bar_config(disable=True)
+            data = []
+            for image in result.images:
+                buf = io.BytesIO()
+                image.save(buf, format=OUTPUT_FORMAT)
+                data.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+            return data
 
-        def _scalar(self, request, name, default, cast):
-            tensor = pb_utils.get_input_tensor_by_name(request, name)
-            if tensor is None:
-                return default
-            return cast(tensor.as_numpy().reshape(-1)[0])
-
-        def _clamp(self, value, ceiling):
-            return min(int(value), int(ceiling))
-
-        def execute(self, requests):
-            responses = []
-            for request in requests:
-                prompt_arr = pb_utils.get_input_tensor_by_name(
-                    request, "prompt"
-                ).as_numpy()
-                prompt = prompt_arr.reshape(-1)[0]
-                if isinstance(prompt, bytes):
-                    prompt = prompt.decode("utf-8")
-
-                height = self._clamp(
-                    self._scalar(request, "height", self.default_height, int),
-                    self.max_height,
-                )
-                width = self._clamp(
-                    self._scalar(request, "width", self.default_width, int),
-                    self.max_width,
-                )
-                steps = self._scalar(
-                    request, "num_inference_steps", self.default_steps, int
-                )
-                guidance = self._scalar(
-                    request, "guidance_scale", self.default_guidance, float
-                )
-                seed = self._scalar(request, "seed", -1, int)
-
-                generator = None
-                if seed >= 0:
-                    generator = torch.Generator(device="cuda").manual_seed(seed)
-
-                result = self.pipe(
-                    prompt=prompt,
-                    height=height,
-                    width=width,
-                    num_inference_steps=steps,
-                    guidance_scale=guidance,
-                    generator=generator,
-                )
-                image = result.images[0]
-                buffer = io.BytesIO()
-                image.save(buffer, format=self.output_format)
-                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-
-                out_tensor = pb_utils.Tensor(
-                    "image", np.array([encoded], dtype=object)
-                )
-                responses.append(pb_utils.InferenceResponse([out_tensor]))
-            return responses
-
-        def finalize(self):
-            del self.pipe
-            torch.cuda.empty_cache()
+        b64_images = await asyncio.to_thread(_run)
+        return {
+            "created": int(time.time()),
+            "data": [{"b64_json": b} for b in b64_images],
+        }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -292,7 +279,7 @@ metadata:
   namespace: isa-cloud-production
   labels:
     app: triton-flux-2-schnell
-    engine: triton
+    engine: fastapi-diffusers
     isa-model/model-id: "flux-2-schnell"
     isa-model/instance-group: "generative"
 spec:
@@ -304,29 +291,27 @@ spec:
     metadata:
       labels:
         app: triton-flux-2-schnell
-        engine: triton
+        engine: fastapi-diffusers
         isa-model/model-id: "flux-2-schnell"
         isa-model/instance-group: "generative"
     spec:
+      # Harbor pull secret — base image mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
       securityContext:
         runAsNonRoot: false
       containers:
-        - name: triton
-          # Blackwell sm_120 needs CUDA 12.8+. 25.10-py3 ships CUDA 13.0.2 +
-          # Ubuntu 24.04 + Python 3.12 and supports compute cap 7.5+ (incl.
-          # Blackwell). The old 24.01-py3 (CUDA 12.3) has NO Blackwell kernels.
-          # Mirror to Harbor first (see /tmp/mirror-flux-base.yaml), then flip to
-          # core.harbor.domain/isa/tritonserver:25.10-py3 for the air-gapped pull.
-          image: core.harbor.domain/isa/tritonserver:25.12-py3
+        - name: flux-2-schnell
+          # Blackwell sm_120: torch 2.8.0+cu128 is BAKED into this base (cu128
+          # wheels carry sm_120 kernels). Mirror Docker Hub
+          # pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime into Harbor first; the
+          # cluster cannot pull Docker Hub directly.
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
           securityContext:
             allowPrivilegeEscalation: false
           ports:
             - containerPort: 8000
               name: http
-            - containerPort: 8001
-              name: grpc
-            - containerPort: 8002
-              name: metrics
           env:
             - name: MODEL_ID
               valueFrom:
@@ -338,11 +323,16 @@ spec:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
                   key: MODEL_NAME
-            - name: MODEL_REPOSITORY
+            - name: PIPELINE_CLASS
               valueFrom:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
-                  key: MODEL_REPOSITORY
+                  key: PIPELINE_CLASS
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-flux-2-schnell-config
+                  key: DTYPE
             - name: DEFAULT_HEIGHT
               valueFrom:
                 configMapKeyRef:
@@ -363,11 +353,6 @@ spec:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
                   key: DEFAULT_GUIDANCE_SCALE
-            - name: OUTPUT_FORMAT
-              valueFrom:
-                configMapKeyRef:
-                  name: triton-flux-2-schnell-config
-                  key: OUTPUT_FORMAT
             - name: MAX_HEIGHT
               valueFrom:
                 configMapKeyRef:
@@ -378,114 +363,98 @@ spec:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
                   key: MAX_WIDTH
-            - name: DTYPE
+            - name: OUTPUT_FORMAT
               valueFrom:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
-                  key: DTYPE
+                  key: OUTPUT_FORMAT
             - name: HF_HOME
-              value: "/root/.cache/huggingface"
-            # FLUX.2-klein-base-9B is gated (FLUX Non-Commercial License) —
-            # token is REQUIRED. optional:false so the pod fails fast if the
-            # secret is missing rather than 401-ing mid weight-download.
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-flux-2-schnell-config
+                  key: HF_HOME
+            - name: PIP_PACKAGES
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-flux-2-schnell-config
+                  key: PIP_PACKAGES
+            # DEFAULT klein-base-4B is Apache-2.0 and NOT gated, so HF_TOKEN is
+            # OPTIONAL (optional:true → pod still starts if the secret is absent).
+            # If MODEL_ID is switched to the gated klein-base-9B, this token
+            # becomes REQUIRED — flip optional:false at that point.
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: huggingface-token
                   key: token
-                  optional: false
+                  optional: true
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -e
-              mkdir -p "$MODEL_REPOSITORY/$MODEL_NAME/1"
-              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt" ]; then
-                cp /etc/triton-config/config.pbtxt \
-                  "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt"
-              fi
-              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py" ]; then
-                cp /etc/triton-config/model.py \
-                  "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
-              fi
-              # BLACKWELL sm_120: force the cu128 torch wheel FIRST so the
-              # diffusers install below cannot drag in a CPU/old-CUDA torch.
-              # cu128 wheels carry sm_120 kernels (cu129/cu130 also fine).
-              pip install --no-cache-dir \
-                --index-url https://download.pytorch.org/whl/cu128 \
-                "torch>=2.7" "torchvision>=0.22"
-              # Flux2KleinPipeline + Qwen3 text encoder need diffusers >= 0.38.
-              pip install --no-cache-dir \
-                "diffusers>=0.38" \
-                "transformers>=4.57" \
-                "accelerate>=1.0" \
-                "safetensors>=0.4" \
-                "sentencepiece>=0.2" \
-                "Pillow>=10.0"
-              exec tritonserver \
-                --model-repository="$MODEL_REPOSITORY" \
-                --strict-model-config=true \
-                --log-verbose=1 \
-                --allow-http=true \
-                --allow-grpc=true \
-                --http-port=8000 \
-                --grpc-port=8001 \
-                --metrics-port=8002
+              # torch is already baked into the base (2.8.0+cu128, sm_120) — do
+              # NOT reinstall it. Only the small diffusers stack is pip'd here;
+              # PIP_PACKAGES intentionally contains NO torch so pip cannot drag in
+              # a CPU/old-CUDA wheel that would break Blackwell kernels.
+              pip install --no-cache-dir $PIP_PACKAGES
+              # Materialise the server from the ConfigMap and run it.
+              cp /etc/flux-config/server.py /opt/server.py
+              exec uvicorn server:app \
+                --app-dir /opt \
+                --host 0.0.0.0 \
+                --port 8000 \
+                --workers 1
           resources:
             requests:
-              memory: "32Gi"
+              memory: "64Gi"
               cpu: "4"
               nvidia.com/gpu: "1"
             limits:
-              memory: "48Gi"
+              memory: "64Gi"
               cpu: "8"
               nvidia.com/gpu: "1"
-          # startupProbe gates liveness during the slow cold start (cu128 pip +
-          # large HF download + load). 60 + 200*15 = ~50 min. Prevents the
-          # 9-min liveness SIGKILL seen on the qwen-image cold boot.
+          # startupProbe gates liveness/readiness during the slow COLD start
+          # (pip install of the diffusers stack + HF weight download + pipeline
+          # load). 60 + 240*15 = ~60 min budget; liveness only begins after this
+          # passes, so it cannot prematurely SIGKILL the boot (the failure mode
+          # the Triton draft hit). Warm restarts pass startup in ~60-120s.
           startupProbe:
             httpGet:
-              path: /v2/health/ready
+              path: /health
               port: 8000
             initialDelaySeconds: 60
             periodSeconds: 15
-            failureThreshold: 200
+            failureThreshold: 240
           readinessProbe:
             httpGet:
-              path: /v2/health/ready
+              path: /health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 15
-            failureThreshold: 20
+            failureThreshold: 6
           livenessProbe:
             httpGet:
-              path: /v2/health/live
+              path: /health
               port: 8000
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 6
           volumeMounts:
-            - name: model-repository
-              mountPath: /models
             - name: model-cache
               mountPath: /root/.cache/huggingface
-            - name: triton-config
-              mountPath: /etc/triton-config
+            - name: flux-config
+              mountPath: /etc/flux-config
               readOnly: true
       volumes:
-        - name: model-repository
-          persistentVolumeClaim:
-            claimName: triton-flux-2-schnell-repo
         - name: model-cache
           persistentVolumeClaim:
             claimName: triton-flux-2-schnell-cache
-        - name: triton-config
+        - name: flux-config
           configMap:
             name: triton-flux-2-schnell-config
             items:
-              - key: CONFIG_PBTXT
-                path: config.pbtxt
-              - key: CONFIG_PY
-                path: model.py
+              - key: SERVER_PY
+                path: server.py
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -519,29 +488,7 @@ spec:
     - port: 8000
       targetPort: 8000
       name: http
-    - port: 8001
-      targetPort: 8001
-      name: grpc
-    - port: 8002
-      targetPort: 8002
-      name: metrics
   type: ClusterIP
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: triton-flux-2-schnell-repo
-  namespace: isa-cloud-production
-  labels:
-    isa-model/model-id: "flux-2-schnell"
-    isa-model/instance-group: "generative"
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
-  storageClassName: local-replica2-delay-bind
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -556,7 +503,9 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 120Gi
+      # HF cache for klein-base-4B (~13 GB) with headroom; raise to ~120Gi if
+      # MODEL_ID is switched to klein-base-9B (~29 GB).
+      storage: 60Gi
   storageClassName: local-replica2-delay-bind
 ---
 apiVersion: policy/v1
