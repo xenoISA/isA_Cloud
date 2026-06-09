@@ -1,0 +1,53 @@
+# =============================================================================
+# SN customer-specific modules — ENTITLEMENT source-of-truth         (#369)
+# =============================================================================
+# This file is the ONE place ops edits to declare which of the 24 SN
+# customer-specific modules (docs/saas-deployment/edition-boundary.md §B) are
+# deployed into ns `sn-cloud-production`.
+#
+# AUTHORITY: this list is a transcription of the signed license's
+# `entitled_modules` array (ADR 0008 §1, §5 — docs/adr/0008-license-entitlement.md).
+# ArgoCD cannot read the signed `license.json` directly, so the entitled list is
+# rendered here at deploy time and consumed by the customer-modules ApplicationSet
+# (deployments/argocd/apps/production/sn-customer-modules-appset.yaml), whose
+# `list` generator carries one element per module gated by an `entitled` flag and
+# whose `spec.selector` only emits Applications for `entitled: "true"` modules.
+# A module NOT entitled is simply never rendered → never deployed (ADR 0008 §5:
+# "the primary control is don't render the app").
+#
+# RENEWAL / CHANGE PROCESS:
+#   1. isA re-issues the signed license.json with the new entitled_modules set.
+#   2. Ops transcribes that exact set into `sn.entitledModules` below.
+#   3. The appset element for each module flips its `entitled` field to match.
+#      (Keep this file and the appset in lock-step; this file is the human index,
+#       the appset element flags are what ArgoCD actually filters on.)
+#
+# Defense-in-depth: an entitled module's own pod may additionally call
+# `get_license().is_entitled("<module>")` at startup (ADR 0008 §5) — but the
+# deployment-boundary gate here is the primary control.
+# =============================================================================
+
+sn:
+  # Edition + customer this entitlement set belongs to (must match the license
+  # body: license.json.edition / .customer_id — ADR 0008 §1).
+  edition: on-prem-full
+  customerId: SN
+
+  # ---------------------------------------------------------------------------
+  # entitledModules — the source-of-truth subset (transcribed from license).
+  # Exactly the modules SN is licensed for. The seed values below mirror the
+  # `entitled_modules` example in ADR 0008 §1 (12 of the 24). Edit on renewal.
+  # ---------------------------------------------------------------------------
+  entitledModules:
+    - erp                # sn_erp              — ERP
+    - mes                # sn_mes              — 制造执行 MES
+    - plm                # sn_plm              — 产品生命周期 PLM
+    - srm                # sn_srm              — 供应商关系 SRM
+    - scm_tower          # sn_scm_tower        — 供应链塔
+    - finance            # sn_finance          — 财务
+    - commerce           # sn_commerce         — 电商
+    - commercial_tower   # sn_commercial_tower — 商业塔
+    - mdm                # sn_mdm              — 主数据 MDM
+    - maestro            # sn_maestro          — Maestro 编排
+    - feishu             # sn_feishu           — 飞书集成
+    - seeyon             # sn_seeyon           — 致远 OA 集成
