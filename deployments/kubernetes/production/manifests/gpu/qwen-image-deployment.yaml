@@ -1,0 +1,542 @@
+# Triton Engine — Qwen Image 2.0 on `specialty` GPU group (GPU 4) (#956)
+#
+# Replaces Replicate-hosted image generation (flux-schnell, flux-kontext-pro,
+# sticker-maker, face-swap) with a self-managed Qwen Image 2.0 pod served via
+# Triton's Python backend over the `diffusers` library. Qwen Image is the
+# current open-weight SOTA for text-to-image (Apache 2.0, DPG-Bench 88.32 vs
+# FLUX.1 83.84, leads AI Arena, and notably renders in-image text — its
+# headline differentiator over FLUX). FLUX.2 Schnell co-tenants on the same
+# GPU for the speed/preview tier (see triton-flux-2-schnell.yaml).
+#
+# Sizing notes (GPU 4, 96 GB A6000):
+#   - Qwen Image 2.0 weights: ~24 GB at fp16.
+#   - Co-tenants on GPU 4: Qwen3-Embedding-8B (~16 GB, #954) + FLUX.2 Schnell
+#     (~16 GB). Total VRAM budget: 24 + 16 + 16 = 56 GB / 96 GB.
+#   - Memory limit 32 Gi RAM is sized for fp16 weights + working set; the GPU
+#     request of "1" reserves a whole card by the k8s contract but co-tenancy
+#     is achieved at the deployment-group level (specialty), not via MIG/MPS.
+#   - INSTANCE_COUNT=1 — diffusion pipelines are not safe to share a CUDA
+#     context across workers. Throughput comes from batching latents inside
+#     the pipeline, not from parallel instances.
+#
+# Backend choice: Triton Python backend wrapping HuggingFace `diffusers`.
+#   Triton has no stock diffusers/text-to-image backend. The Python backend
+#   lets us load `QwenImagePipeline` (or `DiffusionPipeline.from_pretrained`)
+#   once at startup, then expose a standard Triton inference signature:
+#     in:  prompt (BYTES), height/width (INT32), steps (INT32), guidance (FP32)
+#     out: image (BYTES — PNG or WEBP encoded)
+#   The model.py wrapper is materialised from CONFIG_PY at pod startup;
+#   weights download lazily on first request from the HF cache mounted at
+#   /root/.cache/huggingface (PVC-backed for warm restarts).
+#
+# Container strategy: base `nvcr.io/nvidia/tritonserver:24.01-py3` image +
+# pip install diffusers/transformers/accelerate at startup. A custom-built
+# image with the deps baked in is faster on cold boot but harder to roll;
+# the startup pip install adds ~30s once per pod lifetime and trades cold
+# boot speed for image hygiene. Production should bake a versioned image.
+#
+# Model repository layout:
+#   /models/qwen-image-2.0/
+#     config.pbtxt            # generated from CONFIG_PBTXT below
+#     1/
+#       model.py              # generated from CONFIG_PY below
+#
+# Apply with:
+#   kubectl apply -f deployment/k8s/engines/triton-qwen-image-2.0.yaml
+#
+# Health:
+#   kubectl -n isa-engines get pods -l app=triton-qwen-image-2-0
+#   kubectl -n isa-engines port-forward svc/triton-qwen-image-2-0 8000:8000 &
+#   curl http://localhost:8000/v2/health/ready
+#   curl http://localhost:8000/v2/models/qwen-image-2.0
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triton-qwen-image-2-0-config
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "specialty"
+data:
+  MODEL_ID: "Qwen/Qwen-Image"
+  MODEL_NAME: "qwen-image-2.0"
+  MODEL_REPOSITORY: "/models"
+  BACKEND: "python"
+  INSTANCE_COUNT: "1"
+  INSTANCE_KIND: "KIND_GPU"
+  # Scheduler: Qwen Image ships with a flow-matching scheduler by default.
+  # Override to the DPM++ Karras family if quality tuning demands it.
+  SCHEDULER: "default"
+  # Default inference parameters — clients can override per request.
+  DEFAULT_HEIGHT: "1024"
+  DEFAULT_WIDTH: "1024"
+  DEFAULT_NUM_INFERENCE_STEPS: "50"
+  DEFAULT_GUIDANCE_SCALE: "7.5"
+  # Output: PNG (lossless, default) or WEBP (smaller, slightly lossy).
+  OUTPUT_FORMAT: "PNG"
+  # Resolution cap — clients requesting larger will be clamped.
+  MAX_HEIGHT: "1536"
+  MAX_WIDTH: "1536"
+  DTYPE: "bfloat16"
+  LOG_VERBOSE: "1"
+  # Triton config.pbtxt for the Python backend. The Python backend ignores
+  # `max_batch_size > 0` for non-tensor inputs, so we keep the pipeline
+  # single-request and rely on the diffusion scheduler for latent batching.
+  CONFIG_PBTXT: |
+    name: "qwen-image-2.0"
+    backend: "python"
+    max_batch_size: 0
+    input [
+      {
+        name: "prompt"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+      },
+      {
+        name: "negative_prompt"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "height"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "width"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "num_inference_steps"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "guidance_scale"
+        data_type: TYPE_FP32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "seed"
+        data_type: TYPE_INT64
+        dims: [ 1 ]
+        optional: true
+      }
+    ]
+    output [
+      {
+        name: "image"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+      }
+    ]
+    instance_group [
+      {
+        count: 1
+        kind: KIND_GPU
+      }
+    ]
+    parameters [
+      {
+        key: "EXECUTION_ENV_PATH"
+        value: { string_value: "$$TRITON_MODEL_DIRECTORY/python_env" }
+      }
+    ]
+  # Python backend wrapper. Loads QwenImagePipeline at startup and routes
+  # requests through it. Kept intentionally minimal — production should
+  # split this into a vendored module and add structured logging + metrics.
+  CONFIG_PY: |
+    """Triton Python backend wrapper for Qwen Image 2.0 via diffusers."""
+    import base64
+    import io
+    import json
+    import os
+
+    import numpy as np
+    import torch
+    import triton_python_backend_utils as pb_utils
+    from diffusers import DiffusionPipeline
+
+
+    class TritonPythonModel:
+        def initialize(self, args):
+            model_config = json.loads(args["model_config"])
+            params = {
+                p["key"]: p["value"]["string_value"]
+                for p in model_config.get("parameters", [])
+            }
+            self.model_id = os.environ.get("MODEL_ID", "Qwen/Qwen-Image")
+            self.default_height = int(os.environ.get("DEFAULT_HEIGHT", "1024"))
+            self.default_width = int(os.environ.get("DEFAULT_WIDTH", "1024"))
+            self.default_steps = int(
+                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "50")
+            )
+            self.default_guidance = float(
+                os.environ.get("DEFAULT_GUIDANCE_SCALE", "7.5")
+            )
+            self.max_height = int(os.environ.get("MAX_HEIGHT", "1536"))
+            self.max_width = int(os.environ.get("MAX_WIDTH", "1536"))
+            self.output_format = os.environ.get("OUTPUT_FORMAT", "PNG").upper()
+            dtype = (
+                torch.bfloat16
+                if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
+                else torch.float16
+            )
+            self.pipe = DiffusionPipeline.from_pretrained(
+                self.model_id, torch_dtype=dtype
+            ).to("cuda")
+            self.pipe.set_progress_bar_config(disable=True)
+
+        def _scalar(self, request, name, default, cast):
+            tensor = pb_utils.get_input_tensor_by_name(request, name)
+            if tensor is None:
+                return default
+            return cast(tensor.as_numpy().reshape(-1)[0])
+
+        def _clamp(self, value, ceiling):
+            return min(int(value), int(ceiling))
+
+        def execute(self, requests):
+            responses = []
+            for request in requests:
+                prompt_arr = pb_utils.get_input_tensor_by_name(
+                    request, "prompt"
+                ).as_numpy()
+                prompt = prompt_arr.reshape(-1)[0]
+                if isinstance(prompt, bytes):
+                    prompt = prompt.decode("utf-8")
+
+                negative = self._scalar(
+                    request,
+                    "negative_prompt",
+                    "",
+                    lambda v: v.decode("utf-8") if isinstance(v, bytes) else str(v),
+                )
+                height = self._clamp(
+                    self._scalar(request, "height", self.default_height, int),
+                    self.max_height,
+                )
+                width = self._clamp(
+                    self._scalar(request, "width", self.default_width, int),
+                    self.max_width,
+                )
+                steps = self._scalar(
+                    request, "num_inference_steps", self.default_steps, int
+                )
+                guidance = self._scalar(
+                    request, "guidance_scale", self.default_guidance, float
+                )
+                seed = self._scalar(request, "seed", -1, int)
+
+                generator = None
+                if seed >= 0:
+                    generator = torch.Generator(device="cuda").manual_seed(seed)
+
+                result = self.pipe(
+                    prompt=prompt,
+                    negative_prompt=negative or None,
+                    height=height,
+                    width=width,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance,
+                    generator=generator,
+                )
+                image = result.images[0]
+                buffer = io.BytesIO()
+                image.save(buffer, format=self.output_format)
+                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+                out_tensor = pb_utils.Tensor(
+                    "image", np.array([encoded], dtype=object)
+                )
+                responses.append(pb_utils.InferenceResponse([out_tensor]))
+            return responses
+
+        def finalize(self):
+            del self.pipe
+            torch.cuda.empty_cache()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-qwen-image-2-0
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    engine: triton
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "specialty"
+spec:
+  # One pod on GPU 4 of the specialty group. Co-tenants on GPU 4 are
+  # Qwen3-Embedding-8B (#954) and FLUX.2 Schnell (this PR).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton-qwen-image-2-0
+  template:
+    metadata:
+      labels:
+        app: triton-qwen-image-2-0
+        engine: triton
+        isa-model/model-id: "qwen-image-2.0"
+        isa-model/instance-group: "specialty"
+    spec:
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: triton
+          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8000
+              name: http
+            - containerPort: 8001
+              name: grpc
+            - containerPort: 8002
+              name: metrics
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MODEL_ID
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MODEL_NAME
+            - name: MODEL_REPOSITORY
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MODEL_REPOSITORY
+            - name: BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: BACKEND
+            - name: INSTANCE_COUNT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: INSTANCE_COUNT
+            - name: INSTANCE_KIND
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: INSTANCE_KIND
+            - name: SCHEDULER
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: SCHEDULER
+            - name: DEFAULT_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_HEIGHT
+            - name: DEFAULT_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_WIDTH
+            - name: DEFAULT_NUM_INFERENCE_STEPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_NUM_INFERENCE_STEPS
+            - name: DEFAULT_GUIDANCE_SCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_GUIDANCE_SCALE
+            - name: OUTPUT_FORMAT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: OUTPUT_FORMAT
+            - name: MAX_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MAX_HEIGHT
+            - name: MAX_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MAX_WIDTH
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DTYPE
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Materialise model.py + config.pbtxt into the model repo.
+              # Idempotent across restarts so we don't clobber warm caches.
+              mkdir -p "$MODEL_REPOSITORY/$MODEL_NAME/1"
+              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt" ]; then
+                cp /etc/triton-config/config.pbtxt \
+                  "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt"
+              fi
+              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py" ]; then
+                cp /etc/triton-config/model.py \
+                  "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
+              fi
+              # Install diffusers stack into the Triton Python backend's
+              # interpreter. Production should bake a versioned image.
+              pip install --no-cache-dir \
+                "diffusers>=0.30" \
+                "transformers>=4.44" \
+                "accelerate>=0.33" \
+                "safetensors>=0.4" \
+                "Pillow>=10.0"
+              exec tritonserver \
+                --model-repository="$MODEL_REPOSITORY" \
+                --strict-model-config=true \
+                --log-verbose=1 \
+                --allow-http=true \
+                --allow-grpc=true \
+                --http-port=8000 \
+                --grpc-port=8001 \
+                --metrics-port=8002
+          resources:
+            requests:
+              memory: "24Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "32Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          # Cold start dominated by HF weight download (~24 GB at fp16) plus
+          # pip install. First boot can take 10+ minutes on a cold PVC;
+          # warm restarts ~ 60-90s. Wide initialDelaySeconds + high
+          # failureThreshold reflect that.
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 300
+            periodSeconds: 15
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 360
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-repository
+              mountPath: /models
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: triton-config
+              mountPath: /etc/triton-config
+              readOnly: true
+      volumes:
+        - name: model-repository
+          persistentVolumeClaim:
+            claimName: triton-qwen-image-2-0-repo
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: triton-qwen-image-2-0-cache
+        - name: triton-config
+          configMap:
+            name: triton-qwen-image-2-0-config
+            items:
+              - key: CONFIG_PBTXT
+                path: config.pbtxt
+              - key: CONFIG_PY
+                path: model.py
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-qwen-image-2-0
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "specialty"
+spec:
+  selector:
+    app: triton-qwen-image-2-0
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+    - port: 8001
+      targetPort: 8001
+      name: grpc
+    - port: 8002
+      targetPort: 8002
+      name: metrics
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-qwen-image-2-0-repo
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "specialty"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-qwen-image-2-0-cache
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "specialty"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: local-replica2-delay-bind
