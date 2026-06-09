@@ -75,6 +75,13 @@ spec:
         {{- end }}
         {{- end }}
         env:
+        # Pod IP for Consul registration: isa_common consul_client registers this as
+        # the service address so APISIX consul-discovery can route to it. Without it
+        # the client falls back to the pod HOSTNAME (unresolvable) -> gateway 502.
+        - name: SERVICE_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         {{- if .Values.observability }}
         - name: TEMPO_HOST
           value: {{ .Values.observability.tempoHost | quote }}

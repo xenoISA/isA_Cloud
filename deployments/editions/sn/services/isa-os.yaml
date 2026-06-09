@@ -9,3 +9,6 @@ resources:
   limits: {cpu: "2", memory: "2Gi"}
 health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
 liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}
+
+# HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

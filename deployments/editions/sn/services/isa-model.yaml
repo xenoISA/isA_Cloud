@@ -1,0 +1,29 @@
+# isa_model — model-as-a-service compatibility/runtime API (FastAPI, :8082).
+# Standard SN infra/model runtime settings come from isa-platform-env.
+name: isa-model
+image:
+  repository: isa/isa-model
+  tag: "gpu-local-multimodal-20260609-r12"
+port: 8082
+replicas: 1
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  limits: {cpu: "2", memory: "2Gi"}
+health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 20, periodSeconds: 20}
+env:
+  - name: VLLM_BASE_URL
+    value: http://vllm-qwen36-27b-pool.sn-cloud-production.svc.cluster.local:8000
+  - name: VLLM_GPU_COUNT
+    value: "4"
+  - name: VLLM_HOST
+    value: vllm-qwen36-27b-pool
+  - name: LOCAL_TTS_BASE_URL
+    value: http://kokoro-tts.sn-cloud-production.svc.cluster.local:8880
+  - name: LOCAL_IMAGE_BASE_URL
+    value: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_VIDEO_BASE_URL
+    value: http://triton-wan-2-2.sn-cloud-production.svc.cluster.local:8000
+
+# HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

@@ -1,7 +1,7 @@
 name: user-authorization
 image:
   repository: isa/user-authorization
-  tag: "0.1.0"
+  tag: "0.1.2"
 port: 8204
 env:
   - {name: SERVICE_NAME, value: "authorization_service"}

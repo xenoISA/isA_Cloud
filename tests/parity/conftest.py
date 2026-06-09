@@ -105,17 +105,17 @@ def _verification_code(auth: Client, pending_id: str) -> str | None:
     r = auth.get(f"/api/v1/auth/dev/pending-registration/{pending_id}")
     if r.ok and isinstance(r.json(), dict) and r.json().get("verification_code"):
         return r.json()["verification_code"]
-    # in-cluster: read from redis (the prod store)
+    # in-cluster: read from redis (the prod store). Use DISCRETE params, NOT a
+    # redis:// URL — REDIS_PASSWORD has URL-significant chars (@ #) that break
+    # from_url netloc parsing (same bug class the suite hunts).
     try:
         import redis  # noqa: PLC0415
 
-        rc = redis.from_url(
-            "redis://:%s@%s:%s/0"
-            % (
-                os.getenv("REDIS_PASSWORD", ""),
-                os.getenv("REDIS_HOST", "redis-cluster"),
-                os.getenv("REDIS_PORT", "6379"),
-            ),
+        rc = redis.Redis(
+            host=os.getenv("REDIS_HOST", "redis-cluster"),
+            port=int(os.getenv("REDIS_PORT", "6379")),
+            db=int(os.getenv("REDIS_DB") or "0"),
+            password=os.getenv("REDIS_PASSWORD") or None,
             decode_responses=True,
         )
         raw = rc.get(f"auth:pending_reg:{pending_id}")
@@ -139,31 +139,38 @@ def jwt() -> str:
     reg = auth.post("/api/v1/auth/register", {"email": email, "password": pw})
     if not reg.ok:
         pytest.skip(f"auth register unavailable ({reg.status}); skipping authed tests")
-    pending_id = (reg.json() or {}).get("pending_id")
+    # RegistrationStartResponse.pending_registration_id (the redis key id)
+    pending_id = (reg.json() or {}).get("pending_registration_id")
     code = _verification_code(auth, pending_id) if pending_id else None
     if not code:
         pytest.skip(
             "could not retrieve verification code (auth/redis); skipping authed tests"
         )
-    v = None
-    for body in (
-        {"pending_id": pending_id, "code": code},
-        {"email": email, "code": code},
-    ):
-        v = auth.post("/api/v1/auth/verify", body)
-        if v.ok:
-            break
-    lg = auth.post("/api/v1/auth/login", {"email": email, "password": pw})
-    if not lg.ok:
-        pytest.skip(f"auth login failed ({lg.status}); skipping authed tests")
-    body = lg.json() or {}
-    tok = (
-        body.get("access_token")
-        or body.get("token")
-        or (body.get("tokens") or {}).get("access_token")
+    # verify returns an access_token directly (RegistrationVerifyResponse)
+    v = auth.post(
+        "/api/v1/auth/verify", {"pending_registration_id": pending_id, "code": code}
     )
+
+    def _extract(body):
+        if not isinstance(body, dict):
+            return None
+        return (
+            body.get("access_token")
+            or body.get("token")
+            or (body.get("tokens") or {}).get("access_token")
+        )
+
+    tok = _extract(v.json()) if v.ok else None
     if not tok:
-        pytest.skip("no access_token in login response; skipping authed tests")
+        # fall back to an explicit login
+        lg = auth.post("/api/v1/auth/login", {"email": email, "password": pw})
+        if not lg.ok:
+            pytest.skip(
+                f"auth verify/login failed ({v.status}/{lg.status}); skipping authed tests"
+            )
+        tok = _extract(lg.json())
+    if not tok:
+        pytest.skip("no access_token from verify/login; skipping authed tests")
     return tok
 
 

@@ -1,7 +1,7 @@
 name: user-project-sharing
 image:
   repository: isa/user-project-sharing
-  tag: "0.1.0"
+  tag: "0.1.1"
 port: 8270
 env:
   - {name: SERVICE_NAME, value: "project_sharing_service"}
