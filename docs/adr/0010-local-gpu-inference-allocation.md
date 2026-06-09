@@ -168,3 +168,26 @@ labeling k8s-03 `mps.capable=true`, `device-plugin.config=mps-r4`). Result:
 
 Until resolved, the fleet stays on the current dedicated-card layout; Kokoro
 remains the CPU interim (live, serving tts-1).
+
+## Update (2026-06-09) — time-slicing adopted; Kokoro stays CPU (Blackwell)
+
+1. **Sharing mechanism → time-slicing, not MPS.** Since the MPS control daemon
+   crashes on v0.18.2, we use the device-plugin's **time-slicing** — it needs
+   **no control daemon**, sidestepping that bug. Added `ts-r2`/`ts-r4` configs.
+   Canary on k8s-03 (`device-plugin.config=ts-r4`, no `mps.capable`):
+   **allocatable→8, no crashing daemon, embedding/whisper undisturbed, plugin
+   2/2.** Time-slicing has no hard VRAM isolation, so co-tenant vLLM engines MUST
+   cap `gpu_memory_utilization`; small fixed-footprint engines are safe. This is
+   now the working sharing path.
+
+2. **Kokoro GPU image is not Blackwell-compatible.** Onto a slice it scheduled
+   fine (time-slicing works) but crashed at CUDA init: `no kernel image is
+   available for execution on the device` — `kokoro-fastapi-gpu:v0.3.0` torch has
+   no **sm_120 (Blackwell)** kernels. The running engines (vLLM LLM/embedding,
+   faster-whisper) *are* Blackwell-OK, so this is image-specific. **Kokoro stays
+   CPU** (82M, fine). **Implication:** every *new* GPU engine must be verified
+   Blackwell-compatible (cu128+ torch) before taking a slice.
+
+Remaining to fully pack: build Blackwell-compatible images for
+qwen3-asr/qwen-image/qwen3-tts/flux/wan, consolidate the LLM to free cards, then
+schedule them onto slices with VRAM caps.
