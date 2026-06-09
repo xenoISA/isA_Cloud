@@ -490,18 +490,30 @@ spec:
           # pip install. First boot can take 10+ minutes on a cold PVC;
           # warm restarts ~ 60-90s. Wide initialDelaySeconds + high
           # failureThreshold reflect that.
+          # startupProbe gates liveness/readiness during the slow COLD start
+          # (per-pod cu128 pip install + ~40 GB HF download + model load can be
+          # 20-40 min). 60 + 200*15 = ~50 min budget. Liveness only begins after
+          # this succeeds, so it can't prematurely SIGKILL the boot (the 9-min
+          # kill we hit before). Warm restarts pass startup in ~60-90s.
+          startupProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 200
           readinessProbe:
             httpGet:
               path: /v2/health/ready
               port: 8000
-            initialDelaySeconds: 300
+            initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 20
           livenessProbe:
             httpGet:
               path: /v2/health/live
               port: 8000
-            initialDelaySeconds: 360
+            initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 6
           volumeMounts:

@@ -451,18 +451,28 @@ spec:
               memory: "48Gi"
               cpu: "8"
               nvidia.com/gpu: "1"
+          # startupProbe gates liveness during the slow cold start (cu128 pip +
+          # large HF download + load). 60 + 240*15 = ~60 min (video weights are
+          # large). Prevents the 9-min liveness SIGKILL seen on qwen-image.
+          startupProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 240
           readinessProbe:
             httpGet:
               path: /v2/health/ready
               port: 8000
-            initialDelaySeconds: 300
+            initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 20
           livenessProbe:
             httpGet:
               path: /v2/health/live
               port: 8000
-            initialDelaySeconds: 360
+            initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 6
           volumeMounts:
