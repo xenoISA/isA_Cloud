@@ -1,0 +1,507 @@
+# Triton Engine — Wan2.2 text/image-to-video on `elastic` GPU group
+#
+# DRAFT / UNVERIFIED — authored from web research (June 2026), not yet applied
+# or smoke-tested on any cluster.
+#
+# SERVING PATH: NO turnkey OpenAI/Triton image exists for Wan2.2. There is,
+# however, a clean, officially-supported diffusers path: Wan2.2 (T2V, I2V,
+# TI2V) was integrated into HuggingFace `diffusers` on 2025-07-28 via the
+# `WanPipeline` / `WanImageToVideoPipeline` classes. We reuse the same Triton
+# Python-backend + diffusers strategy as triton-qwen-image-2-0, swapping the
+# image output for an MP4 (frames -> diffusers.utils.export_to_video, returned
+# base64-encoded). This is a DRAFT scaffold, not a vendored production server.
+#   Sources:
+#     - https://github.com/Wan-Video/Wan2.2
+#     - https://huggingface.co/docs/diffusers/api/pipelines/wan
+#     - https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers
+#     - https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers
+#
+# VARIANT CHOICE: defaults to Wan-AI/Wan2.2-TI2V-5B-Diffusers — the 5B TI2V
+# model runs in ~24 GB VRAM (RTX 4090 class) and does both text- and
+# image-to-video at 720p. The A14B MoE (T2V/I2V) is higher quality but needs
+# 40-80 GB depending on resolution/precision; switch MODEL_ID + pipeline class
+# if quality is prioritised over fit. See research note in
+# docs/runbooks/new-model-runtimes-research.md.
+#
+# PLACEMENT: elastic group (ADR 0010, residency: preemptible). Video is batch /
+# overflow capacity and must NOT keep a specialty card resident. The node
+# affinity targets the elastic role label only; this pod is expected to be
+# preempted. Pod requests nvidia.com/gpu: 1.
+#
+# The production deploy script rewrites namespace: isa-cloud-production to the
+# requested NAMESPACE, e.g. sn-cloud-production.
+#
+# RISK / UNKNOWN:
+#   - Video generation is slow (a 5s 480p clip is ~4 min on H100); Triton
+#     request timeouts + client expectations must be tuned for long jobs — this
+#     is really an async/batch job shape, not a sync inference one. Consider a
+#     queue in front rather than synchronous /v2/.../infer.
+#   - 5B TI2V VRAM fit on a shared MPS slice is unverified; the A14B variant
+#     will not fit a 24 GB slice.
+#   - export_to_video needs ffmpeg/imageio-ffmpeg present in the Python backend
+#     env (added to the startup pip install below) — verify it resolves a
+#     working ffmpeg binary inside the Triton image.
+#   - The diffusers Wan pipeline signature (num_frames, fps, guidance) should be
+#     pinned against the diffusers release in use before baking an image.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triton-wan-2-2-config
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "elastic"
+data:
+  MODEL_ID: "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+  MODEL_NAME: "wan-2-2"
+  MODEL_REPOSITORY: "/models"
+  BACKEND: "python"
+  INSTANCE_COUNT: "1"
+  INSTANCE_KIND: "KIND_GPU"
+  DEFAULT_HEIGHT: "704"
+  DEFAULT_WIDTH: "1280"
+  DEFAULT_NUM_FRAMES: "81"
+  DEFAULT_FPS: "16"
+  DEFAULT_NUM_INFERENCE_STEPS: "40"
+  DEFAULT_GUIDANCE_SCALE: "5.0"
+  DTYPE: "bfloat16"
+  LOG_VERBOSE: "1"
+  CONFIG_PBTXT: |
+    name: "wan-2-2"
+    backend: "python"
+    max_batch_size: 0
+    input [
+      {
+        name: "prompt"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+      },
+      {
+        name: "negative_prompt"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "height"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "width"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "num_frames"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "num_inference_steps"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "guidance_scale"
+        data_type: TYPE_FP32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "fps"
+        data_type: TYPE_INT32
+        dims: [ 1 ]
+        optional: true
+      },
+      {
+        name: "seed"
+        data_type: TYPE_INT64
+        dims: [ 1 ]
+        optional: true
+      }
+    ]
+    output [
+      {
+        name: "video"
+        data_type: TYPE_STRING
+        dims: [ 1 ]
+      }
+    ]
+    instance_group [
+      {
+        count: 1
+        kind: KIND_GPU
+      }
+    ]
+    parameters [
+      {
+        key: "EXECUTION_ENV_PATH"
+        value: { string_value: "$$TRITON_MODEL_DIRECTORY/python_env" }
+      }
+    ]
+  CONFIG_PY: |
+    """Triton Python backend wrapper for Wan2.2 text-to-video via diffusers.
+
+    DRAFT: returns a base64-encoded MP4. Long-running — see header note on
+    timeouts / preferring an async job shape over synchronous infer.
+    """
+    import base64
+    import os
+    import tempfile
+
+    import numpy as np
+    import torch
+    import triton_python_backend_utils as pb_utils
+    from diffusers import WanPipeline
+    from diffusers.utils import export_to_video
+
+
+    class TritonPythonModel:
+        def initialize(self, args):
+            self.model_id = os.environ.get(
+                "MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+            )
+            self.default_height = int(os.environ.get("DEFAULT_HEIGHT", "704"))
+            self.default_width = int(os.environ.get("DEFAULT_WIDTH", "1280"))
+            self.default_frames = int(os.environ.get("DEFAULT_NUM_FRAMES", "81"))
+            self.default_fps = int(os.environ.get("DEFAULT_FPS", "16"))
+            self.default_steps = int(
+                os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "40")
+            )
+            self.default_guidance = float(
+                os.environ.get("DEFAULT_GUIDANCE_SCALE", "5.0")
+            )
+            dtype = (
+                torch.bfloat16
+                if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
+                else torch.float16
+            )
+            self.pipe = WanPipeline.from_pretrained(
+                self.model_id, torch_dtype=dtype
+            ).to("cuda")
+            self.pipe.set_progress_bar_config(disable=True)
+
+        def _scalar(self, request, name, default, cast):
+            tensor = pb_utils.get_input_tensor_by_name(request, name)
+            if tensor is None:
+                return default
+            return cast(tensor.as_numpy().reshape(-1)[0])
+
+        def execute(self, requests):
+            responses = []
+            for request in requests:
+                prompt_arr = pb_utils.get_input_tensor_by_name(
+                    request, "prompt"
+                ).as_numpy()
+                prompt = prompt_arr.reshape(-1)[0]
+                if isinstance(prompt, bytes):
+                    prompt = prompt.decode("utf-8")
+
+                negative = self._scalar(
+                    request,
+                    "negative_prompt",
+                    "",
+                    lambda v: v.decode("utf-8") if isinstance(v, bytes) else str(v),
+                )
+                height = self._scalar(request, "height", self.default_height, int)
+                width = self._scalar(request, "width", self.default_width, int)
+                num_frames = self._scalar(
+                    request, "num_frames", self.default_frames, int
+                )
+                steps = self._scalar(
+                    request, "num_inference_steps", self.default_steps, int
+                )
+                guidance = self._scalar(
+                    request, "guidance_scale", self.default_guidance, float
+                )
+                fps = self._scalar(request, "fps", self.default_fps, int)
+                seed = self._scalar(request, "seed", -1, int)
+
+                generator = None
+                if seed >= 0:
+                    generator = torch.Generator(device="cuda").manual_seed(seed)
+
+                result = self.pipe(
+                    prompt=prompt,
+                    negative_prompt=negative or None,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance,
+                    generator=generator,
+                )
+                frames = result.frames[0]
+                with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
+                    export_to_video(frames, tmp.name, fps=fps)
+                    tmp.seek(0)
+                    encoded = base64.b64encode(tmp.read()).decode("ascii")
+
+                out_tensor = pb_utils.Tensor(
+                    "video", np.array([encoded], dtype=object)
+                )
+                responses.append(pb_utils.InferenceResponse([out_tensor]))
+            return responses
+
+        def finalize(self):
+            del self.pipe
+            torch.cuda.empty_cache()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+  labels:
+    app: triton-wan-2-2
+    engine: triton
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "elastic"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton-wan-2-2
+  template:
+    metadata:
+      labels:
+        app: triton-wan-2-2
+        engine: triton
+        isa-model/model-id: "wan-2.2"
+        isa-model/instance-group: "elastic"
+    spec:
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: triton
+          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8000
+              name: http
+            - containerPort: 8001
+              name: grpc
+            - containerPort: 8002
+              name: metrics
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: MODEL_ID
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: MODEL_NAME
+            - name: MODEL_REPOSITORY
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: MODEL_REPOSITORY
+            - name: DEFAULT_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_HEIGHT
+            - name: DEFAULT_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_WIDTH
+            - name: DEFAULT_NUM_FRAMES
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_NUM_FRAMES
+            - name: DEFAULT_FPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_FPS
+            - name: DEFAULT_NUM_INFERENCE_STEPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_NUM_INFERENCE_STEPS
+            - name: DEFAULT_GUIDANCE_SCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_GUIDANCE_SCALE
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DTYPE
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p "$MODEL_REPOSITORY/$MODEL_NAME/1"
+              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt" ]; then
+                cp /etc/triton-config/config.pbtxt \
+                  "$MODEL_REPOSITORY/$MODEL_NAME/config.pbtxt"
+              fi
+              if [ ! -f "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py" ]; then
+                cp /etc/triton-config/model.py \
+                  "$MODEL_REPOSITORY/$MODEL_NAME/1/model.py"
+              fi
+              # diffusers Wan support landed 2025-07; pin against the release in
+              # use before baking. imageio-ffmpeg provides export_to_video's mux.
+              pip install --no-cache-dir \
+                "diffusers>=0.35" \
+                "transformers>=4.49" \
+                "accelerate>=0.34" \
+                "safetensors>=0.4" \
+                "imageio-ffmpeg>=0.5" \
+                "ftfy>=6.1"
+              exec tritonserver \
+                --model-repository="$MODEL_REPOSITORY" \
+                --strict-model-config=true \
+                --log-verbose=1 \
+                --allow-http=true \
+                --allow-grpc=true \
+                --http-port=8000 \
+                --grpc-port=8001 \
+                --metrics-port=8002
+          resources:
+            requests:
+              memory: "32Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "48Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 300
+            periodSeconds: 15
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 360
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-repository
+              mountPath: /models
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: triton-config
+              mountPath: /etc/triton-config
+              readOnly: true
+      volumes:
+        - name: model-repository
+          persistentVolumeClaim:
+            claimName: triton-wan-2-2-repo
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: triton-wan-2-2-cache
+        - name: triton-config
+          configMap:
+            name: triton-wan-2-2-config
+            items:
+              - key: CONFIG_PBTXT
+                path: config.pbtxt
+              - key: CONFIG_PY
+                path: model.py
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-elastic
+                    operator: In
+                    values: ["true"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+  labels:
+    app: triton-wan-2-2
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "elastic"
+spec:
+  selector:
+    app: triton-wan-2-2
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+    - port: 8001
+      targetPort: 8001
+      name: grpc
+    - port: 8002
+      targetPort: 8002
+      name: metrics
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-wan-2-2-repo
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "elastic"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-wan-2-2-cache
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "elastic"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 120Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: triton-wan-2-2

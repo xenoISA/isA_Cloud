@@ -50,52 +50,51 @@ Place engines by actual VRAM need, not card count. Cap
 `gpu_memory_utilization` on every vLLM engine (e.g. ~0.4–0.5 for the 27B) so it
 stops hoarding whole cards.
 
-### 2. Latency-critical engines stay dedicated; small engines co-locate
+### 2. Share cards by VRAM via MPS; the LLM does not span cards
 
-- The **chat LLM runs on a single dedicated card** — **no cross-card tensor
-  parallel** (no NVLink → TP all-reduce would crawl over PCIe Gen5). A 27B
-  (~30 GB) fits one 96 GB card with ample KV headroom.
-- **Small, bursty, latency-tolerant specialty engines** (STT, TTS, rerank)
-  **share one card** via **single-container co-location**: one container runs
-  several model servers (supervisord), requests `nvidia.com/gpu: 1`, and the
-  processes share the GPU through the driver's default multi-process context.
-  This is the only clean way to share a card across engines **without** a sharing
-  plugin — a multi-container pod cannot share one GPU because the
-  `nvidia.com/gpu` request and `NVIDIA_VISIBLE_DEVICES` injection are per
-  container.
+- The **chat LLM runs on a single card** — **no cross-card tensor parallel**
+  (no NVLink → TP all-reduce would crawl over PCIe Gen5). A 27B (~30 GB) fits one
+  96 GB card with ample KV headroom; extra cards are a *throughput* choice, not a
+  VRAM need.
+- **Every other engine shares a card via MPS slices.** A 16 GB embedding or a
+  0.5 GB TTS must never own a 96 GB card. MPS partitions a card into equal
+  slices (`replicas` per card → memory = 96 GB ÷ replicas, with per-client mem +
+  compute caps), and pods keep requesting `nvidia.com/gpu: 1` — each gets one
+  slice (`renameByDefault: false`), so engine manifests need no resource-shape
+  change.
 
-### 3. GPU sharing plugin (MPS) is deferred, not adopted
+### 3. Activate the pre-staged MPS (cluster's intended path)
 
-MPS *is* supported at the driver level (CC 12.0). It is **not** adopted now
-because:
+MPS is **already installed on this cluster, dormant**: the NVIDIA device-plugin
+ships a `nvidia-device-plugin-mps-control-daemon` DaemonSet gated on the node
+label `nvidia.com/mps.capable=true` (currently 0 nodes). The operators staged
+MPS as the intended sharing mechanism — activating it is **labeling nodes +
+adding per-node MPS configs + flipping `sharing-strategy=mps`**, not introducing
+new infra. (MIG is unavailable on workstation cards; HAMi is not installed —
+Volcano is present only as a scheduler.)
 
-- the NVIDIA k8s device-plugin MPS mode is **NVIDIA-labeled experimental**;
-- it flips a **cluster-wide** plugin config (affects all GPU scheduling) and
-  needs a maintenance window;
-- it only partitions a card into **equal** slices, and isolation on workstation
-  cards is **soft** (an OOM in one client can disturb neighbours).
+Residual caveats (managed, not blocking): MPS slices are **equal-size** so
+`replicas` is **uniform per node** → group similar-VRAM engines per node;
+isolation on workstation cards is **soft**. Rolling the device-plugin config
+re-registers GPUs, so do it in a brief window.
 
 > A vendor test deploying a 120B model does **not** validate MPS — that exercises
 > single large-process serving (and, if TP, PCIe), not concurrent multi-process
-> GPU sharing. MPS will be adopted only after a **single-card micro-benchmark**
-> (e.g. kokoro + whisper concurrent) shows acceptable interference. Until then,
-> single-container co-location covers the same need with no cluster surgery.
+> GPU sharing. A single-card micro-benchmark (kokoro + whisper concurrent) is
+> still worth running post-activation to tune `replicas` and confirm interference
+> is acceptable.
 
-HAMi (arbitrary per-pod VRAM) is the fallback if independent pod lifecycles +
-hard per-engine memory caps become a hard requirement.
+### 4. Placement (6 × 96 GB, MPS by node)
 
-### 4. Placement (6 × 96 GB)
+| Node | MPS replicas/card | Slice | Tenants |
+|------|-------------------|-------|---------|
+| k8s-01 | 1 (dedicated) — 2 only if chat throughput needs it | 96 / 48 GB | qwen3.6-27b (capped util, no TP) |
+| k8s-02 | 2 | 48 GB | qwen-image-2.0 (40) · flux-2-schnell (24) · wan-2.2 (28) |
+| k8s-03 | 4 | 24 GB | qwen3-embedding-8b (16) · whisper (3) · qwen3-asr (2) · kokoro (0.5) · qwen3-tts (5) · bge-reranker (2) |
 
-| Card | Tenant(s) | ~VRAM |
-|------|-----------|-------|
-| k8s-01 GPU0 | qwen3.6-27b (dedicated, capped util, no TP) | ~30–50 |
-| k8s-01 GPU1 | free → 2nd LLM / overflow | — |
-| k8s-02 GPU0 | qwen-image-2.0 (dedicated) | ~40 |
-| k8s-02 GPU1 | flux-2-schnell + wan-2.2 (async generative) | ~52 |
-| k8s-03 GPU0 | qwen3-embedding-8b (vLLM, capped) | ~16–40 |
-| k8s-03 GPU1 | **specialty-audio bundle**: whisper · qwen3-asr · kokoro · qwen3-tts · rerank | ~13 |
-
-Everything resident on 6 cards, two cards free for headroom.
+8 slices on k8s-03 hold all six small engines with spares; the LLM frees 1–3
+cards vs today's 4. Per-node config is selected by node label
+(`nvidia.com/device-plugin.config`).
 
 ### 5. SOTA model refresh
 
@@ -111,24 +110,28 @@ LTXVideo.
 
 ## Consequences
 
-- **Positive:** all 10 engines fit on 6 cards (today only 3 do); no experimental
-  cluster-wide infra; no maintenance window; the chat LLM keeps predictable
-  latency; trivially reversible (per-Deployment edits).
-- **Negative / cost:** the specialty-audio bundle needs a **combined
-  supervisord image** (build effort) before GPU co-location is real; bundled
-  engines share a pod lifecycle (restart together); repurposing k8s-02 to a
-  `generative` role drops resident chat-LLM capacity from 4 cards to 2 (still
-  ~3× a 27B's need).
-- **Interim:** until the combined specialty-audio image exists, **Kokoro runs on
-  CPU** (82M model — viable, zero GPU contention). This unblocks TTS immediately
-  and is swapped to GPU co-location when the image lands.
+- **Positive:** all engines fit on 6 cards (today only 3 do) with cards to
+  spare; small engines stop wasting 96 GB cards; uses the cluster's pre-staged
+  MPS rather than new infra or a supervisord-image hack; engine manifests keep
+  `nvidia.com/gpu: 1` (no resource-shape churn); the chat LLM frees 1–3 cards.
+- **Negative / cost:** MPS slices are equal-size (group by VRAM per node);
+  isolation is soft on workstation cards; activating MPS re-registers GPUs
+  cluster-wide (brief window); the LLM consolidation reschedules its pods
+  (mitigated by scaling the pool down by replica, keeping it serving).
+- **Superseded interim:** Kokoro's CPU interim (already deployed) is replaced by
+  a GPU MPS slice on k8s-03 once MPS is active.
 
-## Rollout (sequenced, prod changes gated)
+## Rollout (sequenced; MPS activation is the gate)
 
-1. Land this ADR + the `local-inference-catalog.yaml` policy/model updates (repo).
-2. Deploy Kokoro CPU interim → working `tts-1`.
-3. Build the combined specialty-audio image (whisper + qwen3-asr + kokoro +
-   qwen3-tts + rerank via supervisord); mirror to Harbor.
-4. Cut whisper over to the bundle on k8s-03 GPU1; free its dedicated card.
-5. Repurpose k8s-02 → `generative`; deploy qwen-image / flux / wan capped.
-6. (Later, optional) MPS micro-benchmark → adopt if it wins.
+1. Land this ADR + `local-inference-catalog.yaml` updates (repo). ✅
+2. Author MPS device-plugin per-node configs (r1/r2/r4) + node labels (repo).
+3. **Activate MPS** (brief window): label nodes `nvidia.com/mps.capable=true` +
+   `nvidia.com/device-plugin.config=<mps-rN>`, apply the MPS configmap, roll the
+   device plugin; verify `nvidia.com/gpu` allocatable rises per node.
+4. Consolidate the chat LLM to k8s-01 (scale the pool down by replica — stays
+   serving); free k8s-02's cards.
+5. Repack: Kokoro CPU→GPU slice; co-tenant whisper/embedding/asr/tts/rerank on
+   k8s-03; deploy qwen-image / flux / wan on k8s-02 (48 GB slices).
+6. Build/mirror runtime images that don't exist yet (qwen3-asr, qwen3-tts, and
+   any triton model repos) as their deploys come up.
+7. Run the single-card MPS micro-benchmark; tune `replicas` if needed.
