@@ -30,7 +30,7 @@ duckdb==1.1.0
 
 # Offline ed25519 license verification (ADR 0008). Already present transitively
 # via the aioboto3 chain; pinned here as a direct dependency.
-cryptography==44.0.3
+cryptography==46.0.7
 
 # Transitive pins for the aioboto3 chain (exact-pin strategy).
 # urllib3>=2.7.0 clears CVE-2024-37891, -2025-50181, -2025-66418,
