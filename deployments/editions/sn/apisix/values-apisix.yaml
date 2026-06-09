@@ -1,0 +1,84 @@
+# SN apisix helm values (captured from the live release + the worker_processes fix).
+# worker_processes pinned to 4: 'auto' on a many-core node spawns dozens of nginx
+# workers and the consul-discovery broadcast saturates the worker_events socket ->
+# gateway instability (502/503). See editions/sn/apisix/README.md.
+# Apply: helm upgrade --install apisix apisix/apisix -n sn-cloud-production -f this-file
+apisix:
+  admin:
+    allow:
+      ipList:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+    credentials:
+      admin: ${{APISIX_ADMIN_KEY}}
+    enabled: true
+    port: 9180
+    servicePort: 9180
+    type: ClusterIP
+  discovery:
+    enabled: true
+    registry:
+      consul:
+        default_service:
+          host: 127.0.0.1
+          port: 20999
+        default_weight: 1
+        fetch_interval: 3
+        keepalive: true
+        servers:
+        - http://consul-server.sn-cloud-production.svc.cluster.local:8500
+        timeout:
+          connect: 2000
+          read: 2000
+          wait: 60
+  dns:
+    resolvers:
+    - 10.96.0.10
+    timeout: 5
+    validity: 30
+  ssl:
+    enabled: true
+  nginx:
+    workerProcesses: '4'
+dashboard:
+  enabled: false
+etcd:
+  enabled: false
+externalEtcd:
+  host:
+  - http://etcd.sn-cloud-production.svc.cluster.local:2379
+  password: ''
+  user: ''
+extraEnvVars:
+- name: APISIX_ADMIN_KEY
+  valueFrom:
+    secretKeyRef:
+      key: admin-key
+      name: apisix-secret
+global:
+  imagePullSecrets:
+  - harbor-isa
+image:
+  repository: core.harbor.domain/apache/apisix
+  tag: 3.8.0-debian
+ingress-controller:
+  enabled: false
+replicaCount: 1
+resources:
+  limits:
+    cpu: '2'
+    memory: 2Gi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+service:
+  http:
+    containerPort: 9080
+    enabled: true
+    servicePort: 80
+  stream:
+    enabled: false
+  tls:
+    servicePort: 443
+  type: NodePort
