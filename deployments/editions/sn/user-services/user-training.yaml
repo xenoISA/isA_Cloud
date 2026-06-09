@@ -1,7 +1,7 @@
 name: user-training
 image:
   repository: isa/user-training
-  tag: "0.1.0"
+  tag: "0.1.1"
 port: 8262
 env:
   - {name: SERVICE_NAME, value: "training_service"}

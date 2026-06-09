@@ -1,4 +1,5 @@
 # Triton — 3-node override
+# Specialty engines only; keep off LLM role nodes.
 resources:
   requests:
     cpu: "1000m"

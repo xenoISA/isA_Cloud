@@ -1,5 +1,6 @@
 # vLLM — 3-node override
-# Single replica per node, reduced resources
+# Qwen3.6 27B Dense FP8 bootstrap runtime. Keep one replica while model-cache-vllm is
+# RWO; HA replicas require per-replica PVCs or confirmed RWX cache.
 resources:
   requests:
     cpu: "1000m"
@@ -12,8 +13,8 @@ resources:
 
 config:
   gpuMemoryUtilization: "0.85"
-  maxNumSeqs: "128"
+  maxNumSeqs: "32"
 
 persistence:
   # Use smaller cache on 3-node
-  size: 100Gi
+  size: 200Gi

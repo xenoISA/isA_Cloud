@@ -55,6 +55,7 @@ Thumbs.db
 # IDE files
 .vscode/
 .idea/
+.claude/worktrees/
 *.swp
 *.swo
 *~

@@ -30,6 +30,7 @@ spec:
     {{- range $k, $v := .Values.session.flinkConfiguration }}
     {{ $k }}: {{ $v | quote }}
     {{- end }}
+    taskmanager.numberOfTaskSlots: {{ .Values.session.taskManager.numberOfTaskSlots | quote }}
     {{- if .Values.session.highAvailability.enabled }}
     high-availability.type: {{ .Values.session.highAvailability.type | quote }}
     high-availability.storageDir: {{ .Values.session.highAvailability.storageDir | quote }}
@@ -42,6 +43,10 @@ spec:
       memory: {{ .Values.session.jobManager.resource.memory | quote }}
     podTemplate:
       spec:
+        {{- with .Values.session.imagePullSecrets }}
+        imagePullSecrets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- with .Values.session.jobManager.podTemplate.spec.priorityClassName }}
         priorityClassName: {{ . }}
         {{- end }}
@@ -85,6 +90,10 @@ spec:
       memory: {{ .Values.session.taskManager.resource.memory | quote }}
     podTemplate:
       spec:
+        {{- with .Values.session.imagePullSecrets }}
+        imagePullSecrets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- with .Values.session.taskManager.podTemplate.spec.priorityClassName }}
         priorityClassName: {{ . }}
         {{- end }}

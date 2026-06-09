@@ -18,12 +18,17 @@
 **isA_user microservices (42/42):** all `user-*` services on ports 8201–8262.
 - DB `isa_platform` in postgresql; 41 schemas / 178 tables migrated (alembic for 8 services + raw SQL for the rest).
 - Functional smoke verified (not just `/health`): services serve real API routes (auth 39, product 27, billing/org 19, account 17 via `/openapi.json`); real DB INSERT→SELECT→DELETE round-trip in `account.users` works.
+- Functional smoke closure (2026-06-08): the 8 real 5xx endpoints found in
+  `isa-model`, `isa-os`, `user-credit`, and `user-training` now return 200 from
+  inside the cluster. Live images: `isa-model:gpu-vllm-stt-20260608-r10`,
+  `isa-os:0.1.3`, `user-credit:0.1.1`, `user-training:0.1.1`.
 
 **Total app footprint: 51 services (9 platform + 42 user), all healthy.**
 
 ## Deploy method (GCP-portable)
 Standard chart `deployments/charts/isa-service` + a base values overlay + per-service values:
-- Platform: `editions/sn/isa-svc-base.yaml` (configMapRef `isa-platform-env`) + `editions/sn/services/<svc>.yaml`.
+- Platform: `editions/sn/isa-svc-base.yaml` (configMapRef `isa-platform-env`,
+  secretRef `isa-platform-secrets`) + `editions/sn/services/<svc>.yaml`.
 - isA_user: `editions/sn/isa-user-base.yaml` (configMapRef `isa-user-env`, secretRef `isa-platform-secrets`, **pullPolicy Always**) + `editions/sn/user-services/user-<short>.yaml`.
 - For GCP/SaaS: swap ONLY the `isa-*-env` ConfigMap (managed endpoints + `ISA_EDITION=saas` + brand `isA`). Chart + per-service files unchanged.
 

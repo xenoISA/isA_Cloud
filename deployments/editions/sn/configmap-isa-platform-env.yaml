@@ -11,6 +11,7 @@ data:
   ISA_BACKEND_PREFERENCE: local_gpu,modal,local
   ISA_BIGDATA_ENABLED: 'true'
   ISA_CHARGING_ENABLED: 'false'
+  ISA_DEFAULT_PROVIDER: isa
   ISA_DEFAULT_MODEL: qwen2.5
   ISA_EDITION: on-prem-full
   # --- License & entitlement (ADR 0008 §3, §6) — SN on-prem-full ENFORCES. ---
@@ -58,8 +59,14 @@ data:
   VLLM_GPU_COUNT: '1'
   VLLM_MODEL_ALIASES: Qwen/Qwen3.6-27B-FP8=qwen3.6-27b,Qwen/Qwen3.6-27B=qwen3.6-27b,qwen3.6-27b-fp8=qwen3.6-27b
   VLLM_SERVED_MODEL_NAME: qwen3.6-27b
+  VLLM_EMBEDDING_BASE_URL: http://vllm-qwen3-embedding-8b.sn-cloud-production.svc.cluster.local:8000
+  VLLM_EMBEDDING_MODEL: qwen3-embedding-8b
+  VLLM_EMBEDDING_MODEL_ALIASES: Qwen/Qwen3-Embedding-8B=qwen3-embedding-8b,text-embedding-3-large=qwen3-embedding-8b,text-embedding-3-small=qwen3-embedding-8b,text-embedding-ada-002=qwen3-embedding-8b,ada-002=qwen3-embedding-8b,bge-large-en-v1.5=qwen3-embedding-8b
+  VLLM_EMBEDDING_MODEL_DIMENSIONS: text-embedding-3-small=1536,text-embedding-ada-002=1536,ada-002=1536,text-embedding-3-large=3072,bge-large-en-v1.5=1024
+  ISA_RERANK_BACKEND: local_embedding
+  LOCAL_RERANK_EMBEDDING_MODEL: qwen3-embedding-8b
+  ISA_RERANK_ALLOW_MODAL_FALLBACK: 'false'
 kind: ConfigMap
 metadata:
   name: isa-platform-env
   namespace: sn-cloud-production
-

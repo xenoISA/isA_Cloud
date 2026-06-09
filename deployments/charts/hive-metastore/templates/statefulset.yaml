@@ -25,17 +25,55 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.jdbcDriver.enabled }}
+      initContainers:
+        - name: copy-postgresql-jdbc-driver
+          image: "{{ .Values.jdbcDriver.image.registry }}/{{ .Values.jdbcDriver.image.repository }}:{{ .Values.jdbcDriver.image.tag }}"
+          imagePullPolicy: {{ .Values.jdbcDriver.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              cp "{{ .Values.jdbcDriver.sourcePath }}" /jdbc/postgresql.jar
+              chmod 0444 /jdbc/postgresql.jar
+          securityContext:
+            {{- toYaml .Values.jdbcDriver.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: postgres-jdbc-driver
+              mountPath: /jdbc
+      {{- end }}
       containers:
         - name: hive-metastore
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # `hive --service metastore` runs the standalone metastore.
-          # The image's default entrypoint also accepts `metastore` as a
-          # shorthand; we set it explicitly to avoid drift across image
-          # tag bumps.
+          # Bypass the apache/hive entrypoint so it cannot run Derby schema
+          # initialization before our PostgreSQL config is rendered.
+          command:
+            - /bin/sh
+            - -c
           args:
-            - "--service"
-            - "metastore"
+            - |
+              set -e
+              render_hive_site() {
+                export HIVE_CONF_DIR=/tmp/hive-conf
+                mkdir -p "${HIVE_CONF_DIR}"
+                escape_sed() {
+                  printf '%s' "$1" | sed -e 's/[\/&|\\]/\\&/g'
+                }
+                db_user="$(escape_sed "${HIVE_DB_USERNAME}")"
+                db_pass="$(escape_sed "${HIVE_DB_PASSWORD}")"
+                aws_key="$(escape_sed "${AWS_ACCESS_KEY_ID:-}")"
+                aws_secret="$(escape_sed "${AWS_SECRET_ACCESS_KEY:-}")"
+                sed \
+                  -e "s|\${env:HIVE_DB_USERNAME}|${db_user}|g" \
+                  -e "s|\${env:HIVE_DB_PASSWORD}|${db_pass}|g" \
+                  -e "s|\${env:AWS_ACCESS_KEY_ID}|${aws_key}|g" \
+                  -e "s|\${env:AWS_SECRET_ACCESS_KEY}|${aws_secret}|g" \
+                  /opt/hive/conf/hive-site.xml > "${HIVE_CONF_DIR}/hive-site.xml"
+              }
+              render_hive_site
+              exec /opt/hive/bin/hive --service metastore
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
@@ -108,6 +146,12 @@ spec:
               mountPath: /opt/hive/conf/hive-site.xml
               subPath: hive-site.xml
               readOnly: true
+            {{- if .Values.jdbcDriver.enabled }}
+            - name: postgres-jdbc-driver
+              mountPath: {{ .Values.jdbcDriver.mountPath }}
+              subPath: postgresql.jar
+              readOnly: true
+            {{- end }}
             # readOnlyRootFilesystem demands writable tmp + Hive scratch.
             - name: tmp
               mountPath: /tmp
@@ -120,6 +164,10 @@ spec:
             items:
               - key: hive-site.xml
                 path: hive-site.xml
+        {{- if .Values.jdbcDriver.enabled }}
+        - name: postgres-jdbc-driver
+          emptyDir: {}
+        {{- end }}
         - name: tmp
           emptyDir: {}
         - name: hive-scratch

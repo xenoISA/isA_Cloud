@@ -1,0 +1,176 @@
+# Local Inference Catalog — unified isA_Cloud production profile
+#
+# This ConfigMap is the deployment-time contract that combines:
+# - isA_Model's complete local inference model catalog
+# - SN production's 3-node x 2-GPU hardware reality
+# - Kubernetes role labels as the cross-node placement authority
+#
+# It does not force every model to be resident. `residency` describes the
+# intended deployment mode so the model service can route safely before each
+# specialty engine is promoted.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-inference-catalog
+  namespace: isa-cloud-production
+  labels:
+    app: model-runtime
+    isa.io/component: local-inference-catalog
+data:
+  gpu-policy.yaml: |
+    hardware:
+      cluster_profile: sn-3node-blackwell
+      nodes: 3
+      physical_gpus_per_node: 2
+      physical_gpu_total: 6
+      per_gpu_vram_mb: 97887
+      gpu_product: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition
+
+    role_groups:
+      llm:
+        node_labels:
+          isa.io/gpu-role-llm: "true"
+          sn.io/gpu-role: llm
+        nodes: [sn-prod-k8s-01, sn-prod-k8s-02]
+        physical_gpus: 4
+        purpose: primary text/chat inference
+        residency: always_on
+      specialty:
+        node_labels:
+          isa.io/gpu-role-specialty: "true"
+          sn.io/gpu-role: specialty
+        nodes: [sn-prod-k8s-03]
+        physical_gpus: 2
+        purpose: embedding, rerank, STT, TTS, image engines
+        residency: staged_or_elastic
+      elastic:
+        node_labels:
+          isa.io/gpu-role-elastic: "true"
+        nodes: [sn-prod-k8s-03]
+        physical_gpus: 2
+        purpose: batch, training, video, overflow
+        residency: preemptible
+
+    scheduler_guardrails:
+      node_local_gpu_indices_only: [0, 1]
+      disable_flat_gpu_indices_for_sn: true
+      physical_gpu_policy_requires_no_time_slicing: true
+      current_bootstrap_allows_single_vllm_replica: true
+      ray_gpu_workers_default_replicas: 0
+      specialty_cards_reserved_for_resident_engines: true
+      reason: >
+        The SN cluster originally advertised time-sliced nvidia.com/gpu
+        capacity. Physical 6-GPU policy is only valid once sharing is disabled
+        and engine placement is restricted by role labels and per-node
+        capacity. Ray GPU workers are elastic/batch capacity and must not keep
+        the specialty role cards resident while embedding/rerank/STT/TTS/image
+        engines are being promoted.
+
+  models.yaml: |
+    text:
+      qwen3.6-27b:
+        provider_key: isa
+        engine: vllm
+        deployment: vllm
+        service: vllm
+        served_model_name: qwen3.6-27b
+        huggingface_id: Qwen/Qwen3.6-27B-FP8
+        role_group: llm
+        residency: always_on
+        gpu_request: 1
+        aliases:
+          - Qwen/Qwen3.6-27B-FP8
+          - Qwen/Qwen3.6-27B
+          - qwen3.6-27b-fp8
+          - qwen3.6-27b
+        runtime_hints:
+          reasoning_parser: qwen3
+          chat_template_kwargs:
+            enable_thinking: false
+
+    embedding:
+      qwen3-embedding-8b:
+        provider_key: isa
+        engine: vllm
+        deployment: vllm-qwen3-embedding-8b
+        service: vllm-qwen3-embedding-8b
+        served_model_name: qwen3-embedding-8b
+        huggingface_id: Qwen/Qwen3-Embedding-8B
+        role_group: specialty
+        residency: staged
+        gpu_request: 1
+        aliases:
+          - text-embedding-3-large
+          - text-embedding-3-small
+          - text-embedding-ada-002
+          - bge-large-en-v1.5
+        runtime_hints:
+          openai_endpoint: /v1/embeddings
+          vllm_runner: pooling
+          vllm_convert: embed
+          native_dimensions: 4096
+          alias_dimensions:
+            text-embedding-3-small: 1536
+            text-embedding-ada-002: 1536
+            text-embedding-3-large: 3072
+            bge-large-en-v1.5: 1024
+          vllm_hf_overrides:
+            is_matryoshka: true
+
+    rerank:
+      bge-reranker-v2-m3:
+        provider_key: isa
+        engine: triton
+        deployment: triton-bge-reranker-v2-m3
+        service: triton-bge-reranker-v2-m3
+        huggingface_id: BAAI/bge-reranker-v2-m3
+        role_group: specialty
+        residency: staged
+        gpu_request: 1
+        aliases:
+          - isa-jina-reranker-v2-service
+          - sn-jina-reranker-v2-service
+
+    audio:
+      whisper-large-v3-turbo:
+        provider_key: isa
+        engine: faster-whisper
+        deployment: faster-whisper-v3-turbo
+        service: faster-whisper-v3-turbo
+        huggingface_id: openai/whisper-large-v3-turbo
+        role_group: specialty
+        residency: staged
+        aliases: [whisper-1]
+      fish-speech-s2:
+        provider_key: isa
+        engine: sglang
+        role_group: specialty
+        residency: staged
+        aliases: [tts-1-hd]
+      kokoro:
+        provider_key: isa
+        engine: triton
+        role_group: specialty
+        residency: staged
+        aliases: [tts-1]
+
+    image:
+      qwen-image-2.0:
+        provider_key: isa
+        engine: triton
+        role_group: specialty
+        residency: staged
+      flux-2-schnell:
+        provider_key: isa
+        engine: triton
+        role_group: specialty
+        residency: staged
+        aliases: [flux-schnell]
+
+    video:
+      wan-2.2:
+        provider_key: isa
+        engine: triton
+        role_group: elastic
+        residency: preemptible

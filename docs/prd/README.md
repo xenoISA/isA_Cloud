@@ -361,7 +361,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | ID | Criteria | Status |
 |----|----------|--------|
 | AC-1.1 | Provider profile config maps logical names (block, fast, nfs, object) to provider-specific classes | Planned |
-| AC-1.2 | Infotrend preset maps to infotrend-block, infotrend-block-fast, infotrend-nfs, infotrend-object | Planned |
+| AC-1.2 | Infotrend preset maps logical storage roles to current EonKube classes: `local*` / `local-replica*` and GS3060 `infortrend-iscsi*` | Done |
 | AC-1.3 | Generic preset uses standard/default storage class for cloud providers | Planned |
 | AC-1.4 | All Helm value files reference logical storage names, resolved at deploy time | Planned |
 
@@ -474,7 +474,8 @@ This document defines the product requirements for isA Cloud's infrastructure se
 
 ## Epic 10: GPU Inference Platform (isA_Model on IEC)
 
-> Deploy GPU inference infrastructure on IEC K8s — NVIDIA GPU Operator, model serving engines (vLLM, Triton), persistent model cache, GPU monitoring, and autoscaling.
+> Deploy GPU inference infrastructure on IEC K8s — NVIDIA GPU Operator, vLLM,
+> Ray GPU workers, persistent model cache, GPU monitoring, and autoscaling.
 
 ### E10-US1: NVIDIA GPU Operator Deployment
 
@@ -521,19 +522,19 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | AC-3.3 | Prefix caching and speculative decoding enabled | Planned |
 | AC-3.4 | GPU memory utilization target configurable (default 0.9) | Planned |
 
-### E10-US4: Triton Inference Server Deployment
+### E10-US4: Non-LLM Serving Strategy
 
 **As a** ML engineer
-**I want** Triton deployed with TensorRT and ONNX backend support
-**So that** non-LLM models (vision, embedding, TTS) run optimally
+**I want** non-LLM serving handled without adding Triton to the first production footprint
+**So that** production keeps one model-serving runtime until a real non-LLM workload requires otherwise
 
 #### Acceptance Criteria
 
 | ID | Criteria | Status |
 |----|----------|--------|
-| AC-4.1 | Triton deployed with model repository on persistent storage | Planned |
-| AC-4.2 | Dynamic model loading via model-control-mode=poll | Planned |
-| AC-4.3 | gRPC and HTTP endpoints exposed via ClusterIP | Planned |
+| AC-4.1 | Triton is marked retired/deferred for on-prem-full production; vLLM is the sole first-release model-serving runtime | Done |
+| AC-4.2 | Embedding runtime is staged through OpenAI-compatible vLLM endpoint | Done |
+| AC-4.3 | A future Triton/SGLang/non-LLM runtime requires a separate design decision and evidence gate | Planned |
 
 ### E10-US5: GPU Monitoring and Autoscaling
 
@@ -1081,7 +1082,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | E7: Cross-cutting | P0 | Done | Service discovery + health checks |
 | E8: Unified Observability | P1 | Partial | Shared clients done, migrations + tracing remaining |
 | E9: Production K8s Deployment | P0 | Done | Provider-agnostic, Infotrend 3-node, prereq scripts |
-| E10: GPU Inference Platform | P0 | Planned | NVIDIA GPU Operator, vLLM, Triton, model cache |
+| E10: GPU Inference Platform | P0 | In Progress | NVIDIA GPU Operator, vLLM-only production runtime, Ray GPU, model cache |
 | E11: Big Data Platform | P1 | Planned | Ray distributed compute, DAG orchestrator, streaming ETL |
 | E12: Agent Runtime Platform | P0 | Planned | Firecracker/KVM, container-service, VM pool management |
 | E13: Production Readiness | P0 | Planned | SLO, alerting, rate limiting, tracing, backup verification |
