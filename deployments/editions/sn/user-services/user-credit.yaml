@@ -1,7 +1,7 @@
 name: user-credit
 image:
   repository: isa/user-credit
-  tag: "0.1.1"
+  tag: "0.1.2"
 port: 8229
 env:
   - {name: SERVICE_NAME, value: "credit_service"}

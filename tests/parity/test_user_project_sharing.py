@@ -23,7 +23,7 @@ Endpoints exercised (from microservices/project_sharing_service/main.py):
 
 from __future__ import annotations
 
-from conftest import Client
+from conftest import Client, request
 
 SERVICE = "user-project-sharing"
 
