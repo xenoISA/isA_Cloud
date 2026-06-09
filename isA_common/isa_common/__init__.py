@@ -52,20 +52,6 @@ from .async_qdrant_client import AsyncQdrantClient
 # Native Async Clients (Direct Connections)
 # =============================================================================
 from .async_redis_client import AsyncRedisClient
-from .loki_handler import LokiHandler, setup_loki_logging
-
-# =============================================================================
-# Observability (Metrics, Tracing, Unified Setup)
-# =============================================================================
-from .metrics import (
-    create_counter,
-    create_gauge,
-    create_histogram,
-    metrics_text,
-    setup_metrics,
-)
-from .observability import setup_observability
-from .tracing import get_tracer, setup_tracing
 
 # =============================================================================
 # Brand (white-label "brand as config" contract)
@@ -86,6 +72,19 @@ from .licensing import (
     add_license_middleware,
     setup_licensing,
 )
+from .loki_handler import LokiHandler, setup_loki_logging
+
+# =============================================================================
+# Observability (Metrics, Tracing, Unified Setup)
+# =============================================================================
+from .metrics import (
+    create_counter,
+    create_gauge,
+    create_histogram,
+    metrics_text,
+    setup_metrics,
+)
+from .observability import setup_observability
 
 # =============================================================================
 # Plugin / Extension SDK (ADR 0006)
@@ -97,6 +96,7 @@ from .plugin import (
     ServiceBinding,
     load_manifest,
 )
+from .tracing import get_tracer, setup_tracing
 
 # =============================================================================
 # Local-Mode Alternative Clients (ICP/Desktop — no infrastructure required)

@@ -23,9 +23,11 @@ from isa_common.license_sign import (
     _canonical_body,
     build_spec,
     generate_keypair,
-    sign_license,
 )
 from isa_common.license_sign import main as sign_main
+from isa_common.license_sign import (
+    sign_license,
+)
 
 LICENSE_ENV_VARS = ["ISA_LICENSE_FILE", "ISA_LICENSE_PUBKEY", "ISA_EDITION"]
 
