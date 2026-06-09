@@ -54,15 +54,36 @@ def _signing_key() -> Optional[bytes]:
     return Path(path).read_bytes()
 
 
-def build_app(session_factory=None, signing_key_pem: Optional[bytes] = None) -> FastAPI:
-    """Build the console app: the fleet API + the static SPA. Separate deployable."""
+_UNSET = object()
+
+
+def build_app(
+    session_factory=None,
+    signing_key_pem: Optional[bytes] = None,
+    operator_token=_UNSET,
+) -> FastAPI:
+    """Build the console app: the fleet API + the static SPA. Separate deployable.
+
+    The mounted SPA is static; the API underneath still enforces the operator token
+    (B2). The operator (via the SPA) must send ``Authorization: Bearer <FLEET_API_TOKEN>``
+    on each /fleet call. We do NOT bypass auth here: ``operator_token`` defaults to
+    ``FLEET_API_TOKEN`` via ``create_fleet_api`` (fail-closed -> 503 if unset).
+    """
     if session_factory is None:
         session_factory = sessionmaker(bind=_engine(), class_=Session)
     if signing_key_pem is None:
         signing_key_pem = _signing_key()
 
     # The fleet API IS the app (gives us /fleet/* + /healthz); we then mount the UI.
-    app = create_fleet_api(session_factory, signing_key_pem=signing_key_pem)
+    # operator_token left at the sentinel -> create_fleet_api reads FLEET_API_TOKEN.
+    if operator_token is _UNSET:
+        app = create_fleet_api(session_factory, signing_key_pem=signing_key_pem)
+    else:
+        app = create_fleet_api(
+            session_factory,
+            signing_key_pem=signing_key_pem,
+            operator_token=operator_token,
+        )
     app.title = "Fleet Console (UI + API)"
     # Serve the SPA at / (index.html, app.js, app.css). html=True -> / serves index.
     app.mount("/", StaticFiles(directory=str(UI_DIR), html=True), name="console-ui")

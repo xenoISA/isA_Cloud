@@ -204,12 +204,34 @@ since X" for silent/air-gapped), and **Issue / Renew / Revoke** controls wired t
 API. Run:
 
 ```bash
+export FLEET_API_TOKEN="...operator bearer token..."   # REQUIRED — see auth note below
 PYTHONPATH="$PWD/isA_common:$PWD/fleet:$PWD/fleet/console-ui" \
     uvicorn server:app --app-dir fleet/console-ui --port 8077
 # or: python fleet/console-ui/server.py
 # FLEET_DATABASE_URL=postgresql+psycopg://.../fleet  (defaults to a local sqlite file)
 # FLEET_SIGNING_KEY_FILE=...  (optional dev pin; unset => operator pastes key per request)
 ```
+
+### Operator auth — required, fail-closed (B2, #377)
+
+Every `/fleet/*` route is gated by an operator bearer token. The whole API router
+carries a `require_operator` dependency (`create_fleet_api(..., operator_token=...)`,
+defaulting to **`FLEET_API_TOKEN`** in the environment), so all current and future
+routes are covered — there is no open route.
+
+- **Configure `FLEET_API_TOKEN`** before running the console. If it is **unset**, the
+  API **fails closed**: every route returns **503 `fleet auth not configured`** (it
+  never serves open). A signing key pinned (`FLEET_SIGNING_KEY_FILE`) without a token
+  set is **refused at startup** — a hot key behind no auth is an open license-minting
+  oracle.
+- The operator / SPA must send the token on **every** call as
+  **`Authorization: Bearer <FLEET_API_TOKEN>`** (or, equivalently, `X-Fleet-Token:
+  <token>`). A missing/mismatched token → **401**. The token is compared
+  constant-time (`hmac.compare_digest`) and is never logged.
+- The SPA-serving `console-ui/server.py` mounts the static SPA over this same API; it
+  does **not** bypass auth — the operator supplies the token from the browser. (No
+  login UI is built here; behind VPN/SSO the token is the operator credential.)
+- Only `/healthz` is unauthenticated (liveness).
 
 ## The issuance workflow (ADR 0009 §1–2)
 
