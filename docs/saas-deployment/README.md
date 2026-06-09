@@ -49,6 +49,8 @@ isA 是**一个产品**,通过模块化部署支持多种形态。**不是多个
 
 | Document | Purpose |
 |---|---|
+| `licensing-model.md` | **授权模型总纲**:密钥 vs license、端到端流程、四个授权旋钮(edition + 三把锁 + enforce)、密钥策略 A/B。跨 edition,先读这页 |
+| `edition-bom.md` / `edition-boundary.md` | 每个 edition 装什么 / repo 归类(平台镜像 vs 客户专属) |
 | `saas-production-architecture-design.md` | SaaS 形态生产架构:集群、网络、多租户、轻量数据、网关、计费、与企业版/白标的模块边界 |
 | `tenant-isolation-design.md` | (待写)SaaS 多租户隔离粒度 + API key + 计量计费 |
 | `saas-values/` | (待写)SaaS profile 的 Helm values(关大数据、开多租户) |

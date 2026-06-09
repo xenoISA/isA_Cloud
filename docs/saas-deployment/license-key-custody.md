@@ -91,3 +91,15 @@ fully offline, rotation never depends on the (flapping) customer VPN.
   (ADR 0008 Context). The round-trip self-check in `isa-license-sign` guarantees
   every emitted `license.json` actually verifies VALID before it leaves the
   issuance host.
+
+## Status (2026-06-10)
+
+- **Model A adopted** (one vendor-wide signing key — see
+  [`licensing-model.md`](./licensing-model.md) §4).
+- The vendor keypair has been generated (`isa-license-sign keygen`) and the
+  **private key is in isA-side custody, outside any git repo and outside the SN
+  cluster Vault**. It is the only secret in this system; renewal/re-issue requires it.
+- First license issued: `license_id=sn-prod-2026` (SN, `on-prem-full`), round-trip
+  VALID, ConfigMaps staged in `sn-cloud-production` (enforce not yet armed).
+- This is currently laptop-side custody (a working stopgap). Promote to proper
+  offline/HSM custody before issuing beyond SN, per the rotation guidance above.
