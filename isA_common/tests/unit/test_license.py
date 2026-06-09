@@ -240,6 +240,102 @@ def test_invalid_drops_entitlements(monkeypatch, tmp_path, keypair):
     assert c.is_entitled("erp") is False  # nothing granted on INVALID
 
 
+class TestCurrentStatus:
+    """current_status() re-derives the time-based status at runtime (H1).
+
+    The signature-verified static fields are frozen at boot; only VALID/GRACE/EXPIRED
+    drifts with the wall clock. current_status() must recompute it (cheap datetime
+    compare, no signature re-verify) so long-running pods see expiry.
+    """
+
+    def _cfg(self, *, status, expires_at, grace_days):
+        return LicenseConfig(
+            status=status,
+            customer_id="SN",
+            edition="on-prem-full",
+            expires_at=expires_at,
+            grace_days=grace_days,
+            entitled_modules=frozenset({"erp"}),
+            quota_tier="enterprise",
+            seats=-1,
+        )
+
+    def test_rederives_expired_when_now_past_grace(self):
+        # Boot status was VALID, but now() is well past expiry+grace.
+        boot = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        expires = boot + timedelta(days=30)
+        cfg = self._cfg(status=LicenseStatus.VALID, expires_at=expires, grace_days=10)
+        # Within window → still VALID.
+        assert cfg.current_status(now=expires - timedelta(days=1)) is LicenseStatus.VALID
+        # In grace window → GRACE.
+        assert (
+            cfg.current_status(now=expires + timedelta(days=5)) is LicenseStatus.GRACE
+        )
+        # Past grace → EXPIRED, even though boot status was VALID.
+        assert (
+            cfg.current_status(now=expires + timedelta(days=20))
+            is LicenseStatus.EXPIRED
+        )
+
+    def test_grace_boundary_inclusive(self):
+        expires = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        cfg = self._cfg(status=LicenseStatus.VALID, expires_at=expires, grace_days=10)
+        grace_end = expires + timedelta(days=10)
+        assert cfg.current_status(now=grace_end) is LicenseStatus.GRACE
+        assert (
+            cfg.current_status(now=grace_end + timedelta(seconds=1))
+            is LicenseStatus.EXPIRED
+        )
+
+    def test_expiry_boundary_inclusive_is_valid(self):
+        expires = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        cfg = self._cfg(status=LicenseStatus.VALID, expires_at=expires, grace_days=0)
+        assert cfg.current_status(now=expires) is LicenseStatus.VALID
+        assert (
+            cfg.current_status(now=expires + timedelta(seconds=1))
+            is LicenseStatus.EXPIRED
+        )
+
+    def test_perpetual_is_always_valid(self):
+        cfg = self._cfg(status=LicenseStatus.VALID, expires_at=None, grace_days=0)
+        far_future = datetime(3000, 1, 1, tzinfo=timezone.utc)
+        assert cfg.current_status(now=far_future) is LicenseStatus.VALID
+
+    @pytest.mark.parametrize(
+        "terminal", [LicenseStatus.INVALID, LicenseStatus.UNLICENSED]
+    )
+    def test_terminal_status_unchanged(self, terminal):
+        # Terminal statuses have no signed window to re-derive — stay as-is even if
+        # the (meaningless) expires_at would otherwise imply a different status.
+        cfg = self._cfg(
+            status=terminal,
+            expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            grace_days=0,
+        )
+        far_future = datetime(3000, 1, 1, tzinfo=timezone.utc)
+        assert cfg.current_status(now=far_future) is terminal
+
+    def test_default_now_is_utc_now(self):
+        # No now= → uses datetime.now(timezone.utc). A license that expired long ago
+        # resolves to EXPIRED without an injected clock.
+        expires = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        cfg = self._cfg(status=LicenseStatus.VALID, expires_at=expires, grace_days=0)
+        assert cfg.current_status() is LicenseStatus.EXPIRED
+
+
+def test_from_env_uses_same_derivation_as_current_status(
+    monkeypatch, tmp_path, keypair
+):
+    """Boot status from from_env() agrees with current_status() at boot time."""
+    priv, pub_pem = keypair
+    now = datetime.now(timezone.utc)
+    obj = _base_license(expires_at=_iso(now - timedelta(days=5)), grace_days=30)
+    _setup(monkeypatch, tmp_path, obj, priv, pub_pem)
+    c = LicenseConfig.from_env()
+    assert c.status is LicenseStatus.GRACE
+    assert c.current_status() is LicenseStatus.GRACE
+
+
 def test_frozen_dataclass_is_immutable():
     c = LicenseConfig.from_env()
     with pytest.raises(Exception):

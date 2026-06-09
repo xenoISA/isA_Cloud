@@ -13,14 +13,19 @@ it?", split into two enforcement surfaces with deliberately different failure mo
   VALID/GRACE proceed (GRACE logs a loud warning); UNLICENSED proceeds only when
   enforcement is off. With enforcement off (SaaS/lite default) this is a no-op.
 
-- **Runtime (fail-open).** An optional ASGI/HTTP middleware reads a CACHED license
-  status from Redis (1h TTL). It verifies the signature exactly ONCE (via the
-  lazy `get_license()` singleton) and caches the resolved status string; per-request
-  it only reads the cheap cached value. On EXPIRED at runtime it warns + emits an
-  `over_license` metering signal but NEVER 403s — fail-open. Rationale (ADR 0008 §3):
-  the startup gate already stops an expired install from *restarting*; killing live
-  traffic mid-shift on a clock-edge is a worse failure than a few hours of over-run
-  that showback records anyway.
+- **Runtime (fail-open).** An optional ASGI/HTTP middleware re-derives the CURRENT
+  license status per request via `get_license().current_status()`. The signature is
+  verified exactly ONCE (via the lazy `get_license()` singleton at boot); the
+  per-request `current_status()` is a cheap datetime compare against `expires_at` +
+  `grace_days`, so a license that EXPIRES while the pod stays up is observed
+  immediately (H1) instead of freezing the boot status. On GRACE or EXPIRED it warns
+  + emits an `over_license` metering signal but NEVER 403s — fail-open. The 1h Redis
+  cache is an OPTIONAL optimization to skip recomputation across pods; freshness no
+  longer depends on it (the cached enum is only a hint — the expiry decision always
+  uses the freshly-derived `current_status()`). Rationale (ADR 0008 §3): the startup
+  gate already stops an expired install from *restarting*; killing live traffic
+  mid-shift on a clock-edge is a worse failure than a few hours of over-run that
+  showback records anyway.
 
 Usage:
     from isa_common import setup_licensing
@@ -82,9 +87,10 @@ def setup_licensing(
         enforce: Override for ISA_LICENSE_ENFORCE. None (default) reads the env;
             env default is false (enforcement opt-in).
         enable_middleware: Install the fail-open runtime middleware (default: True).
-        redis_client: Optional async redis client (anything with async get/set/setex)
-            used by the middleware to cache the status. Defaults to a lazily-created
-            AsyncRedisClient. Injectable so tests can pass a fake.
+        redis_client: Optional async redis client used by the middleware to cache
+            the resolved status (an optimization only — freshness comes from
+            current_status()). Defaults to a lazily-created AsyncRedisClient.
+            Injectable so tests can pass a fake.
 
     Returns:
         The resolved LicenseStatus from `get_license()` (handy for logging/tests).
@@ -149,8 +155,9 @@ def add_license_middleware(app, *, redis_client: Optional[object] = None) -> Non
 
     Args:
         app: FastAPI/Starlette app with `.add_middleware`.
-        redis_client: Optional async redis client (async get/setex). Defaults to a
-            lazily-created AsyncRedisClient. Injectable for tests.
+        redis_client: Optional async redis client used to cache the resolved status
+            (optimization only). Defaults to a lazily-created AsyncRedisClient.
+            Injectable for tests.
     """
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -163,16 +170,19 @@ def add_license_middleware(app, *, redis_client: Optional[object] = None) -> Non
 
 
 class LicenseRuntimeMiddleware:
-    """Fail-open per-request license check backed by a 1h Redis cache (ADR 0008 §3).
+    """Fail-open per-request license check (ADR 0008 §3).
 
-    Reads a CACHED status string from Redis. On a cache miss it computes the status
-    ONCE via the `get_license()` singleton (no per-request signature verification)
-    and caches it with a 1h TTL. On EXPIRED at runtime it warns + emits an
-    `over_license` metering signal — but NEVER blocks the request (fail-open).
+    Per request it re-derives the CURRENT status via `get_license().current_status()`
+    — a cheap datetime compare against the signature-verified `expires_at`/`grace_days`
+    (the signature itself is verified ONCE, at boot, by the `get_license()` singleton).
+    This is what fixes H1: a license that expires while the pod stays up is observed
+    immediately instead of freezing the boot status. On GRACE or EXPIRED it warns +
+    emits an `over_license` metering signal — but NEVER blocks the request (fail-open).
 
-    The redis client is injectable so tests can pass a fake; if no client is given
-    and the default one cannot be created/reached, the middleware degrades to a
-    direct `get_license()` read and STILL never blocks.
+    The 1h Redis cache is an OPTIONAL optimization to record the resolved status
+    across pods; correctness does NOT depend on it (the cached enum is a hint, not
+    the expiry decision). The redis client is injectable so tests can pass a fake; a
+    redis that is absent or erroring is simply skipped and the request still flows.
     """
 
     def __init__(self, *, redis_client: Optional[object] = None):
@@ -196,35 +206,51 @@ class LicenseRuntimeMiddleware:
             self._redis = None
         return self._redis
 
-    async def _cached_status(self) -> LicenseStatus:
-        """Return the runtime license status, preferring the 1h Redis cache."""
-        redis_client = self._get_redis()
-        if redis_client is not None:
-            try:
-                cached = await redis_client.get(LICENSE_STATUS_CACHE_KEY)
-                if cached:
-                    value = cached.decode() if isinstance(cached, bytes) else str(cached)
-                    return LicenseStatus(value)
-            except Exception as e:
-                logger.debug("license middleware: redis get failed: %s", e)
+    async def _write_cache(self, redis_client, status: LicenseStatus) -> None:
+        """Best-effort write of the resolved status to Redis with a 1h TTL.
 
-        # Cache miss / no redis: compute ONCE via the singleton (no re-verify).
-        status = get_license().status
+        Uses the REAL AsyncRedisClient API: `set_with_ttl(key, value, ttl_seconds)`
+        if present, else `set(key, value, ttl_seconds=TTL)`. (`setex(key, ttl, value)`
+        is only attempted first as a convenience for fakes that expose it — the real
+        client does NOT, and the previous `set(..., ex=...)` call raised a swallowed
+        TypeError, so the cache was never written in production.) Any failure is
+        swallowed: the cache is an optimization, not a correctness dependency.
+        """
+        if redis_client is None:
+            return
+        try:
+            if hasattr(redis_client, "setex"):
+                await redis_client.setex(
+                    LICENSE_STATUS_CACHE_KEY, LICENSE_STATUS_CACHE_TTL, status.value
+                )
+            elif hasattr(redis_client, "set_with_ttl"):
+                await redis_client.set_with_ttl(
+                    LICENSE_STATUS_CACHE_KEY, status.value, LICENSE_STATUS_CACHE_TTL
+                )
+            else:
+                await redis_client.set(
+                    LICENSE_STATUS_CACHE_KEY,
+                    status.value,
+                    ttl_seconds=LICENSE_STATUS_CACHE_TTL,
+                )
+        except Exception as e:
+            logger.debug("license middleware: redis cache write failed: %s", e)
 
-        if redis_client is not None:
-            try:
-                # Prefer setex(key, ttl, value); fall back to set(..., ex=ttl).
-                if hasattr(redis_client, "setex"):
-                    await redis_client.setex(
-                        LICENSE_STATUS_CACHE_KEY, LICENSE_STATUS_CACHE_TTL, status.value
-                    )
-                else:
-                    await redis_client.set(
-                        LICENSE_STATUS_CACHE_KEY, status.value, ex=LICENSE_STATUS_CACHE_TTL
-                    )
-            except Exception as e:
-                logger.debug("license middleware: redis cache write failed: %s", e)
+    async def _runtime_status(self) -> LicenseStatus:
+        """Return the CURRENT license status, re-derived per request.
 
+        Correctness comes from `get_license().current_status()` (a cheap datetime
+        compare over the signature-verified fields) — NOT from Redis. The signature
+        is verified once via the `get_license()` singleton; `current_status()` then
+        re-evaluates VALID/GRACE/EXPIRED against the wall clock so expiry on a
+        long-lived pod is observed immediately (H1).
+
+        The Redis cache is written best-effort as a cross-pod hint, but the returned
+        value is always the freshly-derived status.
+        """
+        status = get_license().current_status()
+        # Best-effort cache write (optimization only — freshness is already correct).
+        await self._write_cache(self._get_redis(), status)
         return status
 
     def _emit_over_license(self, status: LicenseStatus) -> None:
@@ -249,10 +275,10 @@ class LicenseRuntimeMiddleware:
         )
 
     async def __call__(self, request, call_next):
-        """ASGI dispatch: check cached status, emit signal on EXPIRED, never block."""
+        """ASGI dispatch: re-derive current status, emit on GRACE/EXPIRED, never block."""
         try:
-            status = await self._cached_status()
-            if status is LicenseStatus.EXPIRED:
+            status = await self._runtime_status()
+            if status in (LicenseStatus.GRACE, LicenseStatus.EXPIRED):
                 self._emit_over_license(status)
         except Exception as e:
             # Absolutely never block traffic on a license-check error — fail-open.
