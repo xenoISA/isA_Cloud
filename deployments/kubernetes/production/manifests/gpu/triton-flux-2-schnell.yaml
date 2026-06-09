@@ -165,12 +165,9 @@ data:
         kind: KIND_GPU
       }
     ]
-    parameters [
-      {
-        key: "EXECUTION_ENV_PATH"
-        value: { string_value: "$$TRITON_MODEL_DIRECTORY/python_env" }
-      }
-    ]
+  # No EXECUTION_ENV_PATH — startup pip-installs into system python; the python
+  # backend uses the default interpreter (a missing packed python_env path
+  # crashed qwen-image with "Failed to get the canonical path").
   CONFIG_PY: |
     """Triton Python backend wrapper for FLUX.2 (klein) via diffusers.
 

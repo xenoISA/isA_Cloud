@@ -180,12 +180,10 @@ data:
         kind: KIND_GPU
       }
     ]
-    parameters [
-      {
-        key: "EXECUTION_ENV_PATH"
-        value: { string_value: "$$TRITON_MODEL_DIRECTORY/python_env" }
-      }
-    ]
+  # NOTE: no EXECUTION_ENV_PATH — the startup script pip-installs torch
+  # cu128 + diffusers into the system python, so the python backend uses the
+  # default interpreter. (A packed python_env path was referenced before and
+  # didn't exist → "Failed to get the canonical path for .../python_env".)
   # Python backend wrapper. Loads QwenImagePipeline at startup and routes
   # requests through it. Kept intentionally minimal — production should
   # split this into a vendored module and add structured logging + metrics.
