@@ -1,7 +1,12 @@
 name: user-auth
 image:
   repository: isa/user-auth
-  tag: "0.1.3"
+  # 0.1.4: rebuilt from main with `import json` present. 0.1.3 (built from #522)
+  # was missing the import, so _pending_store's json.dumps raised NameError that
+  # the redis-fallback except swallowed -> silent pod-local in-memory storage
+  # (empty redis keyspace -> cross-pod login-after-verify race). #519 added the
+  # import to main incidentally; this rebuild ships it.
+  tag: "0.1.4"
 port: 8201
 env:
   - {name: SERVICE_NAME, value: "auth_service"}
