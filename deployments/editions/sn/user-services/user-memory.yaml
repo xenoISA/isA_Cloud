@@ -1,7 +1,11 @@
 name: user-memory
 image:
   repository: isa/user-memory
-  tag: "0.1.0"
+  # 0.1.1: add `except HTTPException: raise` guards before the catch-all
+  # `except Exception -> 500` in every handler. Previously deliberate 403/404s
+  # (e.g. ownership 403 from _enforce_memory_owner) were swallowed and re-raised
+  # as 500. Parity: list memories returned 500 for a cross-user request.
+  tag: "0.1.1"
 port: 8223
 env:
   - {name: SERVICE_NAME, value: "memory_service"}

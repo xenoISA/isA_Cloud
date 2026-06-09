@@ -1,7 +1,12 @@
 name: user-artifact
 image:
   repository: isa/user-artifact
-  tag: "0.1.0"
+  # 0.1.1: isa_common pgbouncer transaction-pooling fix (insert_into now
+  # schema-qualifies the table; query/query_row/execute run SET search_path
+  # in-txn). Before, the bare SET + INSERT split across pgbouncer server
+  # connections so writes hit public.<table> and silently failed
+  # ("insert succeeded but artifact not visible").
+  tag: "0.1.1"
 port: 8291
 env:
   - {name: SERVICE_NAME, value: "artifact_service"}
