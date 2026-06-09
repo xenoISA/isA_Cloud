@@ -53,42 +53,41 @@ data:
         residency: preemptible
 
     # Allocation policy — see ADR 0010. Cards are 96 GB Blackwell (no MIG, no
-    # NVLink). Budget by VRAM, not by card count. Small latency-tolerant
-    # specialty engines co-locate on one card via a single-container
-    # (supervisord) bundle; the chat LLM and heavy generative engines stay on
-    # dedicated cards. GPU-sharing plugins (MPS/time-slicing) are deferred until
-    # a single-card micro-benchmark justifies them.
+    # NVLink). Budget by VRAM via MPS: small engines share a card as equal MPS
+    # slices; the chat LLM holds 1 card (no cross-card TP). MPS is pre-staged on
+    # the cluster (mps-control-daemon DaemonSet) and activated by node label +
+    # per-node config. Pods keep requesting nvidia.com/gpu:1 (renameByDefault
+    # false) and receive one slice.
     allocation:
-      strategy: vram_budgeted_colocation
-      gpu_sharing_plugin: none            # MPS deferred — see ADR 0010 §3
+      strategy: vram_budgeted_mps
+      gpu_sharing_plugin: mps             # pre-staged; activate per ADR 0010 §3
+      mps_rename_by_default: false        # engines keep nvidia.com/gpu:1 -> 1 slice
       vllm_gpu_memory_utilization_cap: 0.5
+      mps_per_node:                       # device-plugin config selected by node label
+        sn-prod-k8s-01: { replicas: 1, slice_gb: 96 }   # llm dedicated (raise to 2 only for throughput)
+        sn-prod-k8s-02: { replicas: 2, slice_gb: 48 }   # generative
+        sn-prod-k8s-03: { replicas: 4, slice_gb: 24 }   # small specialty pack
       placement:
-        sn-prod-k8s-01:
-          gpu0: [qwen3.6-27b]             # dedicated, no cross-card TP
-          gpu1: []                        # free → 2nd LLM / overflow
-        sn-prod-k8s-02:                   # role → generative (see ADR 0010 §4)
-          gpu0: [qwen-image-2.0]
-          gpu1: [flux-2-schnell, wan-2.2]
-        sn-prod-k8s-03:
-          gpu0: [qwen3-embedding-8b]
-          gpu1: [specialty-audio-bundle]  # whisper + qwen3-asr + kokoro + qwen3-tts + rerank
+        sn-prod-k8s-01: [qwen3.6-27b]
+        sn-prod-k8s-02: [qwen-image-2.0, flux-2-schnell, wan-2.2]
+        sn-prod-k8s-03: [qwen3-embedding-8b, whisper-large-v3-turbo, qwen3-asr-1.7b, kokoro, qwen3-tts, bge-reranker-v2-m3]
 
     scheduler_guardrails:
       node_local_gpu_indices_only: [0, 1]
       disable_flat_gpu_indices_for_sn: true
-      physical_gpu_policy_requires_no_time_slicing: true   # MPS/time-slicing off until benchmarked
+      gpu_sharing_strategy: mps                            # activate pre-staged mps-control-daemon
+      mps_replicas_uniform_per_node: true                  # equal slices -> group by VRAM per node
       no_cross_card_tensor_parallel: true                  # PCIe Gen5 only, no NVLink
       ray_gpu_workers_default_replicas: 0
       reason: >
         96 GB Blackwell cards (no MIG, no NVLink) make 1-model-per-card
-        wasteful. Engines are placed by VRAM budget: the chat LLM and heavy
-        generative engines hold dedicated cards (no cross-card TP — PCIe Gen5
-        only), while small specialty engines (STT/TTS/rerank) share one card via
-        a single-container supervisord bundle. GPU-sharing plugins are deferred:
-        the k8s device-plugin MPS mode is experimental and isolation on
-        workstation cards is soft, so MPS is adopted only after a single-card
-        micro-benchmark. Ray GPU workers are elastic/batch capacity and must not
-        keep specialty cards resident.
+        wasteful. Engines are packed by VRAM via MPS, which the cluster operators
+        pre-staged (mps-control-daemon, gated on nvidia.com/mps.capable). Small
+        engines (embedding/STT/TTS/rerank) share one card as equal 24 GB slices;
+        the chat LLM holds a single card (no cross-card TP — PCIe Gen5 only);
+        generative engines take 48 GB slices. MPS replicas are uniform per node,
+        so engines are grouped by similar VRAM per node. Ray GPU workers are
+        elastic/batch capacity and must not keep specialty cards resident.
 
   models.yaml: |
     text:
