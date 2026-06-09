@@ -135,3 +135,36 @@ LTXVideo.
 6. Build/mirror runtime images that don't exist yet (qwen3-asr, qwen3-tts, and
    any triton model repos) as their deploys come up.
 7. Run the single-card MPS micro-benchmark; tune `replicas` if needed.
+
+## Activation status (2026-06-09) — BLOCKED on a device-plugin bug
+
+Canary attempted on **k8s-03** (helm upgrade adding mps-r1/r2/r4 configs +
+labeling k8s-03 `mps.capable=true`, `device-plugin.config=mps-r4`). Result:
+
+- The **main device plugin applied mps-r4 correctly** — k8s-03 advertised
+  `nvidia.com/gpu: 8`, and the MPS daemon (`-ctr`) started with **per-device
+  pinned mem limit 24471 MB and active-thread 25%** (so this plugin *does*
+  enforce per-slice VRAM — the earlier "soft isolation" worry is moot here).
+- **BUT** the `mps-control-daemon`'s **config-manager `-sidecar` crashloops
+  deterministically**: it reads `nvidia.com/device-plugin.config` as *empty*,
+  falls back to the non-MPS `config`, then panics
+  `index out of range [0] with length 0` (cmd/config-manager/main.go:456) because
+  that config has no `sharing.mps.resources`. Fresh pod → same panic. The DS
+  never reaches Ready (1/2).
+- Running workloads (embedding, whisper) were **never disrupted** throughout.
+- **Rolled back** (removed both labels) → k8s-03 back to `allocatable=2`,
+  mps-control-daemon de-scheduled, fleet healthy. The mps-r* configs remain in
+  the configmap (inert without node labels) ready for a retry.
+
+**Fix paths to investigate (do in a window, off-prod first if possible):**
+1. Bump `nvidia-device-plugin` past v0.18.2 (the config-manager MPS path has a
+   history of bugs across v0.15–v0.18; see upstream issue #1094) and re-canary.
+2. Work around the empty-label read: try a config-map key literally named
+   `default` that *is* a valid MPS config for mps-capable nodes (so the
+   sidecar's empty-label fallback lands on an MPS config, not the non-MPS one) —
+   while keeping llm nodes unlabeled/unshared.
+3. If neither resolves it, fall back to one-pod (supervisord) co-location for the
+   small specialty engines (the pre-MPS plan), which needs no device-plugin MPS.
+
+Until resolved, the fleet stays on the current dedicated-card layout; Kokoro
+remains the CPU interim (live, serving tts-1).
