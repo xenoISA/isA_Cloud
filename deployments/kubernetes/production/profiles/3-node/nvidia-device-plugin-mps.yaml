@@ -83,8 +83,10 @@
 #   Allocatable should return to 2 per node after rollback.
 # ---------------------------------------------------------------------------
 config:
-  # Keep the default key so any unlabelled node falls back to unshared GPUs.
-  default: ""
+  # default MUST name a map key when >1 config exists (plugin validation rejects
+  # an empty default with multiple configs). Point it at the existing non-MPS
+  # "config" key so any unlabelled node stays on unshared GPUs.
+  default: "config"
   fallbackStrategies:
     - named
     - single
