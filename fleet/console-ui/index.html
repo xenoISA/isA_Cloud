@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fleet Console — Vendor License Console (ADR 0009)</title>
+  <link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <header>
+    <h1>Fleet Console</h1>
+    <p class="sub">Vendor-side license / fleet console — <strong>metadata only</strong> (ADR 0009 §5).
+      Never customer business data.</p>
+    <nav>
+      <button data-tab="roster" class="active">Roster</button>
+      <button data-tab="expiry">Expiry &amp; Renewals</button>
+      <button data-tab="entitlement">Entitlements</button>
+      <button data-tab="showback">Showback</button>
+      <button data-tab="actions">Issue / Renew / Revoke</button>
+    </nav>
+    <div class="apiconf">
+      <label>API base <input id="apiBase" value="" placeholder="(same origin)" /></label>
+      <span id="status"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Roster -->
+    <section id="tab-roster" class="tab active">
+      <h2>Roster — all customers × edition × status</h2>
+      <p class="hint">Status is derived from the issuance ledger (current / expiring / expired /
+        perpetual / revoked). Last-seen is honest: silent = no telemetry yet.</p>
+      <button onclick="loadRoster()">Refresh</button>
+      <table id="rosterTable"><thead><tr>
+        <th>Customer</th><th>License</th><th>Edition</th><th>Status</th>
+        <th>Expires</th><th>Last seen</th><th>Modules</th>
+      </tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- Expiry -->
+    <section id="tab-expiry" class="tab">
+      <h2>Expiry calendar / renewal alerts</h2>
+      <label>Within days <input id="expWithin" type="number" value="30" min="0" /></label>
+      <button onclick="loadExpiring()">Load</button>
+      <table id="expiryTable"><thead><tr>
+        <th>Customer</th><th>License</th><th>Edition</th><th>Status</th><th>Expires</th>
+      </tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- Entitlement -->
+    <section id="tab-entitlement" class="tab">
+      <h2>Entitlement view (per customer)</h2>
+      <label>Customer id <input id="entCustomer" placeholder="SN" /></label>
+      <button onclick="loadCustomer()">Load</button>
+      <div id="entitlementOut"></div>
+    </section>
+
+    <!-- Showback -->
+    <section id="tab-showback" class="tab">
+      <h2>Showback rollup</h2>
+      <p class="hint">Realtime (SaaS) / last-upload (connected on-prem) / honest
+        "no telemetry since X" for silent / air-gapped. Counters only — no business data.</p>
+      <label>Silent after days <input id="sbStale" type="number" placeholder="(off)" min="0" /></label>
+      <button onclick="loadShowback()">Load</button>
+      <table id="showbackTable"><thead><tr>
+        <th>Customer</th><th>License</th><th>State</th><th>Last seen</th>
+        <th>Active modules</th><th>Usage</th><th>Showback totals</th><th>Over?</th>
+      </tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- Actions -->
+    <section id="tab-actions" class="tab">
+      <h2>Issue / Renew / Revoke</h2>
+      <p class="hint">Issue/renew need the offline ed25519 <strong>private key (PEM)</strong>.
+        In real ops the operator pastes it per request (ADR 0009 §2); it is never stored hot.
+        Leave blank only if the API was wired with a pinned dev key.</p>
+
+      <fieldset>
+        <legend>Issue</legend>
+        <div class="grid">
+          <label>customer_id <input id="iCustomer" /></label>
+          <label>edition <input id="iEdition" placeholder="on-prem-full" /></label>
+          <label>license_id (optional) <input id="iLicense" /></label>
+          <label>quota_tier <input id="iQuota" placeholder="enterprise" /></label>
+          <label>entitled_modules (csv) <input id="iModules" placeholder="erp,mes" /></label>
+          <label>expires_at (ISO) <input id="iExpires" placeholder="2027-06-08T00:00:00Z" /></label>
+          <label>delivery <input id="iDelivery" placeholder="offline-bundle" /></label>
+          <label>signing_key_pem <textarea id="iKey" rows="3" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+        </div>
+        <button onclick="doIssue()">Issue</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Renew</legend>
+        <div class="grid">
+          <label>prior_license_id <input id="rPrior" /></label>
+          <label>new license_id <input id="rLicense" /></label>
+          <label>customer_id <input id="rCustomer" /></label>
+          <label>edition <input id="rEdition" /></label>
+          <label>expires_at (ISO) <input id="rExpires" /></label>
+          <label>signing_key_pem <textarea id="rKey" rows="3"></textarea></label>
+        </div>
+        <button onclick="doRenew()">Renew</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Revoke (ledger flag — no key needed)</legend>
+        <div class="grid">
+          <label>license_id <input id="vLicense" /></label>
+          <label>reason <input id="vReason" placeholder="contract terminated" /></label>
+        </div>
+        <button onclick="doRevoke()">Revoke</button>
+      </fieldset>
+
+      <pre id="actionOut"></pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

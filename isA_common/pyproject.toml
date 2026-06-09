@@ -43,7 +43,13 @@ dependencies = [
     "duckdb>=0.10.0",  # DuckDB analytics database
     "aiohttp>=3.9.0",  # Async HTTP client (Loki)
     "pyyaml>=6.0",  # Plugin manifest (plugin.yaml) parsing — ADR 0006
+    "cryptography>=46.0.7",  # ed25519 offline license verification — ADR 0008 (floor clears PYSEC-2026-35/36, CVE-2026-26007)
 ]
+
+[project.scripts]
+# Offline ed25519 license issuance tool (ADR 0008 §1). Issuance-side only — the
+# private key never ships; runtime images carry only the public key (license.py).
+isa-license-sign = "isa_common.license_sign:main"
 
 [project.optional-dependencies]
 metrics = [
