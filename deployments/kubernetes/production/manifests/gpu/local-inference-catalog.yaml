@@ -52,20 +52,43 @@ data:
         purpose: batch, training, video, overflow
         residency: preemptible
 
+    # Allocation policy — see ADR 0010. Cards are 96 GB Blackwell (no MIG, no
+    # NVLink). Budget by VRAM, not by card count. Small latency-tolerant
+    # specialty engines co-locate on one card via a single-container
+    # (supervisord) bundle; the chat LLM and heavy generative engines stay on
+    # dedicated cards. GPU-sharing plugins (MPS/time-slicing) are deferred until
+    # a single-card micro-benchmark justifies them.
+    allocation:
+      strategy: vram_budgeted_colocation
+      gpu_sharing_plugin: none            # MPS deferred — see ADR 0010 §3
+      vllm_gpu_memory_utilization_cap: 0.5
+      placement:
+        sn-prod-k8s-01:
+          gpu0: [qwen3.6-27b]             # dedicated, no cross-card TP
+          gpu1: []                        # free → 2nd LLM / overflow
+        sn-prod-k8s-02:                   # role → generative (see ADR 0010 §4)
+          gpu0: [qwen-image-2.0]
+          gpu1: [flux-2-schnell, wan-2.2]
+        sn-prod-k8s-03:
+          gpu0: [qwen3-embedding-8b]
+          gpu1: [specialty-audio-bundle]  # whisper + qwen3-asr + kokoro + qwen3-tts + rerank
+
     scheduler_guardrails:
       node_local_gpu_indices_only: [0, 1]
       disable_flat_gpu_indices_for_sn: true
-      physical_gpu_policy_requires_no_time_slicing: true
-      current_bootstrap_allows_single_vllm_replica: true
+      physical_gpu_policy_requires_no_time_slicing: true   # MPS/time-slicing off until benchmarked
+      no_cross_card_tensor_parallel: true                  # PCIe Gen5 only, no NVLink
       ray_gpu_workers_default_replicas: 0
-      specialty_cards_reserved_for_resident_engines: true
       reason: >
-        The SN cluster originally advertised time-sliced nvidia.com/gpu
-        capacity. Physical 6-GPU policy is only valid once sharing is disabled
-        and engine placement is restricted by role labels and per-node
-        capacity. Ray GPU workers are elastic/batch capacity and must not keep
-        the specialty role cards resident while embedding/rerank/STT/TTS/image
-        engines are being promoted.
+        96 GB Blackwell cards (no MIG, no NVLink) make 1-model-per-card
+        wasteful. Engines are placed by VRAM budget: the chat LLM and heavy
+        generative engines hold dedicated cards (no cross-card TP — PCIe Gen5
+        only), while small specialty engines (STT/TTS/rerank) share one card via
+        a single-container supervisord bundle. GPU-sharing plugins are deferred:
+        the k8s device-plugin MPS mode is experimental and isolation on
+        workstation cards is soft, so MPS is adopted only after a single-card
+        micro-benchmark. Ray GPU workers are elastic/batch capacity and must not
+        keep specialty cards resident.
 
   models.yaml: |
     text:
@@ -132,6 +155,9 @@ data:
           - isa-jina-reranker-v2-service
           - sn-jina-reranker-v2-service
 
+    # All audio engines target the specialty-audio-bundle (k8s-03 GPU1,
+    # single-container co-location) per ADR 0010. kokoro ships first as a CPU
+    # interim until the combined bundle image is built.
     audio:
       whisper-large-v3-turbo:
         provider_key: isa
@@ -140,27 +166,70 @@ data:
         service: faster-whisper-v3-turbo
         huggingface_id: openai/whisper-large-v3-turbo
         role_group: specialty
-        residency: staged
+        residency: bundled            # specialty-audio-bundle
+        colocation_group: specialty-audio
         aliases: [whisper-1]
+        runtime_hints:
+          note: retained for 99-language coverage; qwen3-asr is the accuracy/speed default
+      qwen3-asr-1.7b:
+        provider_key: isa
+        engine: vllm
+        deployment: qwen3-asr
+        service: qwen3-asr
+        huggingface_id: Qwen/Qwen3-ASR-1.7B
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        aliases: [whisper-1, gpt-4o-transcribe]
+        runtime_hints:
+          openai_endpoint: /v1/audio/transcriptions
+          sota: open ASR leader (2026-01) — accuracy, speed, timestamps, streaming
+      kokoro:
+        provider_key: isa
+        engine: kokoro-fastapi
+        deployment: kokoro-tts
+        service: kokoro-tts
+        huggingface_id: hexgrad/Kokoro-82M
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        interim_runtime: cpu          # GPU co-location once bundle image lands
+        aliases: [tts-1]
+        runtime_hints:
+          openai_endpoint: /v1/audio/speech
+          default_voice: af_nicole
+      qwen3-tts:
+        provider_key: isa
+        engine: qwen-tts
+        deployment: qwen3-tts
+        service: qwen3-tts
+        huggingface_id: Qwen/Qwen3-TTS
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        aliases: [tts-1-hd]
+        runtime_hints:
+          openai_endpoint: /v1/audio/speech
+          note: multilingual HD tier; kokoro stays the fast tts-1 default
       fish-speech-s2:
         provider_key: isa
         engine: sglang
         role_group: specialty
-        residency: staged
-        aliases: [tts-1-hd]
-      kokoro:
-        provider_key: isa
-        engine: triton
-        role_group: specialty
-        residency: staged
-        aliases: [tts-1]
+        residency: staged             # alternative HD engine; qwen3-tts holds tts-1-hd
+        aliases: []
 
     image:
       qwen-image-2.0:
         provider_key: isa
         engine: triton
+        deployment: triton-qwen-image-2-0
+        service: triton-qwen-image-2-0
+        huggingface_id: Qwen/Qwen-Image
         role_group: specialty
         residency: staged
+        runtime_hints:
+          triton_model_name: qwen-image-2.0
+          endpoint: /v2/models/qwen-image-2.0/infer
       flux-2-schnell:
         provider_key: isa
         engine: triton
