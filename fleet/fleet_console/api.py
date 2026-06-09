@@ -40,10 +40,13 @@ console "calls the signer, it does not run a hot key service."
 from __future__ import annotations
 
 import base64
+import hmac
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from .issuance import IssuanceRequest, IssuanceService
@@ -58,6 +61,56 @@ except Exception:  # pragma: no cover
 
 # A no-arg factory returning a context-manager Session — same contract as intake.py.
 SessionFactory = Callable[[], "Session"]
+
+logger = logging.getLogger(__name__)
+
+# Sentinel so create_fleet_api can tell "argument not passed -> use env default"
+# apart from an explicit ``operator_token=None`` (used by tests to assert 503).
+_UNSET = object()
+
+
+# --------------------------------------------------------------------------- #
+# Operator auth (B2, #377) — fail-closed bearer token on the WHOLE router
+# --------------------------------------------------------------------------- #
+# The fleet console is vendor-internal but must NOT ship open: every /fleet route
+# mints/mutates licenses or dumps all-customer metadata. We require an operator
+# bearer token (FLEET_API_TOKEN), compared constant-time. Fail-closed: if no token
+# is configured the API refuses to serve (503) rather than running open.
+def make_require_operator(operator_token: Optional[str]) -> Callable:
+    """Build the ``require_operator`` dependency bound to an expected token.
+
+    Auth model (fail-closed):
+      - ``operator_token`` NOT configured (None/empty)  -> 503 on every request.
+        A misconfigured console must never silently serve the issuance oracle open.
+      - token configured but request token missing/mismatched -> 401.
+      - token configured and matches (constant-time) -> allowed.
+
+    The operator/SPA supplies the token via ``Authorization: Bearer <token>`` or,
+    equivalently, the ``X-Fleet-Token: <token>`` header. The token is never logged.
+    """
+
+    async def require_operator(
+        authorization: Optional[str] = Header(default=None),
+        x_fleet_token: Optional[str] = Header(default=None),
+    ) -> None:
+        if not operator_token:
+            # Fail closed: unconfigured auth -> refuse to serve (never open).
+            raise HTTPException(
+                status_code=503, detail="fleet auth not configured"
+            )
+        presented: Optional[str] = None
+        if authorization:
+            scheme, _, param = authorization.partition(" ")
+            if scheme.lower() == "bearer" and param:
+                presented = param.strip()
+        if presented is None and x_fleet_token:
+            presented = x_fleet_token.strip()
+        if presented is None or not hmac.compare_digest(presented, operator_token):
+            raise HTTPException(
+                status_code=401, detail="invalid or missing operator token"
+            )
+
+    return require_operator
 
 
 # --------------------------------------------------------------------------- #
@@ -275,13 +328,43 @@ def build_fleet_router(
     *,
     signing_key_pem: Optional[bytes] = None,
     expiring_within_days: int = 30,
+    operator_token: Optional[str] = None,
 ) -> APIRouter:
     """Build the operator-facing fleet APIRouter bound to a session factory.
 
     ``signing_key_pem`` (optional) pins a signing key for dev/test; in real ops the
     key is supplied per-request in the issue/renew body and dropped after the call.
+
+    ``operator_token`` (B2) is the expected operator bearer token; it is wired into
+    the ``require_operator`` dependency applied to the WHOLE router, so every current
+    and future /fleet route is auth-gated. Fail-closed: if it is unset, the dependency
+    rejects every request with 503 (the API never serves open). It defaults to
+    ``os.environ.get("FLEET_API_TOKEN")`` at the app-factory layer.
+
+    Pinned-key fail-closed (B2): a pinned signing key (``signing_key_pem``) behind no
+    auth is the worst case — an unauthenticated caller could mint validly-signed
+    licenses with no key knowledge. So if a key is pinned, ``operator_token`` MUST be
+    set, else we refuse to build the router. A pinned hot key is dev-only and warned.
     """
-    router = APIRouter(prefix="/fleet", tags=["fleet"])
+    if signing_key_pem is not None:
+        if not operator_token:
+            raise RuntimeError(
+                "refusing to start: a signing key is pinned (signing_key_pem / "
+                "FLEET_SIGNING_KEY_FILE) but no operator token is configured "
+                "(FLEET_API_TOKEN). A hot signing key behind no auth is an open "
+                "license-minting oracle — set FLEET_API_TOKEN or unpin the key."
+            )
+        logger.warning(
+            "fleet console: a signing key is PINNED hot on the API (dev-only). "
+            "In real ops the operator supplies the offline key per request "
+            "(ADR 0009 §2); do not pin a hot key in production."
+        )
+
+    router = APIRouter(
+        prefix="/fleet",
+        tags=["fleet"],
+        dependencies=[Depends(make_require_operator(operator_token))],
+    )
 
     @router.get("/roster", response_model=List[RosterRow])
     async def get_roster(
@@ -487,21 +570,31 @@ def create_fleet_api(
     *,
     signing_key_pem: Optional[bytes] = None,
     expiring_within_days: int = 30,
+    operator_token: Optional[str] = _UNSET,
 ) -> FastAPI:
     """App factory (isa_common ``create_*`` style) for the fleet console API.
 
     Returns a FastAPI app with the fleet router mounted + a liveness ``/healthz``.
     ``signing_key_pem`` is the dev/test convenience pin; production supplies the
-    offline key per request (ADR 0009 §2). A real deployment would also call
-    ``setup_observability(app, ...)`` and put this behind vendor-internal auth/VPN —
-    it is NOT the internet-facing intake.
+    offline key per request (ADR 0009 §2).
+
+    ``operator_token`` (B2) is the expected operator bearer token enforced on EVERY
+    /fleet route (``Authorization: Bearer <token>`` or ``X-Fleet-Token``). It defaults
+    to ``os.environ.get("FLEET_API_TOKEN")`` when not passed (the ``_UNSET`` sentinel
+    distinguishes "use the env default" from an explicit ``None`` in tests). Auth is
+    FAIL-CLOSED: if the resolved token is unset, every route returns 503 ("fleet auth
+    not configured") rather than serving open. ``/healthz`` stays unauthenticated.
     """
+    if operator_token is _UNSET:
+        operator_token = os.environ.get("FLEET_API_TOKEN")
+
     app = FastAPI(title="Fleet Console API", version="0.1.0")
     app.include_router(
         build_fleet_router(
             session_factory,
             signing_key_pem=signing_key_pem,
             expiring_within_days=expiring_within_days,
+            operator_token=operator_token,
         )
     )
 

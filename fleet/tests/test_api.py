@@ -36,11 +36,17 @@ from fleet_console import (
 
 LICENSE_ENV_VARS = ["ISA_LICENSE_FILE", "ISA_LICENSE_PUBKEY", "ISA_EDITION"]
 
+# Operator bearer token used by the test app (B2, #377). The client fixture sets the
+# matching Authorization header so existing behavioral tests exercise the real path.
+OPERATOR_TOKEN = "test-operator-token"
+
 
 @pytest.fixture(autouse=True)
 def clean_license_env(monkeypatch):
     for var in LICENSE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    # Ensure no ambient FLEET_API_TOKEN leaks into the env-default auth path.
+    monkeypatch.delenv("FLEET_API_TOKEN", raising=False)
     import isa_common.edition as edition_mod
 
     edition_mod._edition = None
@@ -74,8 +80,11 @@ def session_factory(engine):
 def client(session_factory, keypair):
     priv_pem, _ = keypair
     # Pin the dev key on the app (real ops supplies it per request, ADR 0009 §2).
-    app = create_fleet_api(session_factory, signing_key_pem=priv_pem)
-    return TestClient(app)
+    # Configure the operator token (B2) and send it by default on every request.
+    app = create_fleet_api(
+        session_factory, signing_key_pem=priv_pem, operator_token=OPERATOR_TOKEN
+    )
+    return TestClient(app, headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"})
 
 
 def _seed_license(session_factory, **overrides):
@@ -191,9 +200,10 @@ def test_issue_signs_and_writes_ledger(monkeypatch, tmp_path, client, session_fa
 
 def test_issue_per_request_key(session_factory, keypair):
     # No pinned key on the app: the operator supplies it per request (ADR 0009 §2).
+    # Still operator-auth gated (B2): configure + send the token.
     priv_pem, _ = keypair
-    app = create_fleet_api(session_factory)  # no signing_key_pem
-    cl = TestClient(app)
+    app = create_fleet_api(session_factory, operator_token=OPERATOR_TOKEN)  # no key
+    cl = TestClient(app, headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"})
 
     # Without a key -> 400
     r0 = cl.post("/fleet/issue", json={"customer_id": "X", "edition": "saas"})
@@ -343,3 +353,72 @@ def test_responses_contain_only_metadata_fields(client, session_factory):
     }
     for r in client.get("/fleet/showback").json():
         assert set(r.keys()) <= allowed_showback
+
+
+# --------------------------------------------------------------------------- #
+# Operator auth — fail-closed bearer token on the whole router (B2, #377)
+# --------------------------------------------------------------------------- #
+def test_missing_or_invalid_token_rejected(session_factory, keypair):
+    """Configured token but missing/wrong request token -> 401 (read AND write)."""
+    priv_pem, _ = keypair
+    app = create_fleet_api(
+        session_factory, signing_key_pem=priv_pem, operator_token=OPERATOR_TOKEN
+    )
+    cl = TestClient(app)  # no Authorization header
+
+    # Missing token -> 401 on a read route...
+    assert cl.get("/fleet/roster").status_code == 401
+    # ...and on a write/mint route (the issuance oracle stays closed).
+    assert cl.post("/fleet/issue", json={"customer_id": "X", "edition": "saas"}).status_code == 401
+
+    # Wrong token -> 401.
+    bad = {"Authorization": "Bearer not-the-token"}
+    assert cl.get("/fleet/roster", headers=bad).status_code == 401
+
+    # Correct token via Authorization: Bearer -> allowed (200).
+    ok = {"Authorization": f"Bearer {OPERATOR_TOKEN}"}
+    assert cl.get("/fleet/roster", headers=ok).status_code == 200
+
+    # X-Fleet-Token header is also accepted.
+    assert cl.get("/fleet/roster", headers={"X-Fleet-Token": OPERATOR_TOKEN}).status_code == 200
+
+    # healthz stays open (liveness, unauthenticated).
+    assert cl.get("/healthz").status_code == 200
+
+
+def test_unconfigured_token_fails_closed_503(session_factory):
+    """No operator token configured -> every /fleet route refuses with 503."""
+    # Explicit None (not the env-default sentinel) => unconfigured. No signing key
+    # pinned so the router still builds; auth itself must fail closed.
+    app = create_fleet_api(session_factory, operator_token=None)
+    cl = TestClient(app)
+
+    # Even WITH a (meaningless) bearer header, an unconfigured app serves nothing.
+    hdr = {"Authorization": "Bearer anything"}
+    r = cl.get("/fleet/roster", headers=hdr)
+    assert r.status_code == 503, r.text
+    assert "not configured" in r.json()["detail"]
+    # write route equally closed
+    assert cl.post("/fleet/issue", json={"customer_id": "X", "edition": "saas"},
+                   headers=hdr).status_code == 503
+
+
+def test_pinned_key_without_token_refuses(session_factory, keypair):
+    """A pinned signing key with no operator token is refused at construction.
+
+    A hot signing key behind no auth is the worst case (unauthenticated minting),
+    so create_fleet_api must refuse to build rather than expose it.
+    """
+    priv_pem, _ = keypair
+    with pytest.raises(RuntimeError):
+        create_fleet_api(session_factory, signing_key_pem=priv_pem, operator_token=None)
+
+
+def test_token_defaults_from_env(session_factory, monkeypatch):
+    """Unpassed operator_token defaults to FLEET_API_TOKEN (env), still gated."""
+    monkeypatch.setenv("FLEET_API_TOKEN", "env-token")
+    app = create_fleet_api(session_factory)  # no operator_token kwarg -> env default
+    cl = TestClient(app)
+    assert cl.get("/fleet/roster").status_code == 401  # gated, needs the env token
+    assert cl.get("/fleet/roster",
+                  headers={"Authorization": "Bearer env-token"}).status_code == 200
