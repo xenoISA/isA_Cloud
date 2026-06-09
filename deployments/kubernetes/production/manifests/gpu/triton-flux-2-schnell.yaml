@@ -320,7 +320,7 @@ spec:
           # Blackwell). The old 24.01-py3 (CUDA 12.3) has NO Blackwell kernels.
           # Mirror to Harbor first (see /tmp/mirror-flux-base.yaml), then flip to
           # core.harbor.domain/isa/tritonserver:25.10-py3 for the air-gapped pull.
-          image: nvcr.io/nvidia/tritonserver:25.10-py3
+          image: core.harbor.domain/isa/tritonserver:25.12-py3
           securityContext:
             allowPrivilegeEscalation: false
           ports:
@@ -484,13 +484,13 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: isa.io/gpu-role-specialty
+                  - key: isa.io/gpu-role-generative
                     operator: In
                     values: ["true"]
               - matchExpressions:
                   - key: sn.io/gpu-role
                     operator: In
-                    values: ["specialty"]
+                    values: ["generative"]
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
