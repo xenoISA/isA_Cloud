@@ -1,7 +1,11 @@
 name: isa-mate
 image:
   repository: isa/isa-mate
-  tag: "0.1.10"
+  # 0.1.11/0.1.12: marketplace skill registry persisted to Redis (shared) instead
+  # of a pod-local in-memory dict — create/update/delete were inconsistent across
+  # replicas (isA_Mate#605). 0.1.12 patches the installed site-packages copy (the
+  # app runs as the `isa-mate` console script, not from /app).
+  tag: "0.1.12"
 port: 18789
 replicas: 1
 resources:
