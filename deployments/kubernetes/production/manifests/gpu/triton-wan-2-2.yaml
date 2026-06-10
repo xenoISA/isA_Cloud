@@ -466,7 +466,8 @@ spec:
               port: 8000
             initialDelaySeconds: 60
             periodSeconds: 15
-            failureThreshold: 240
+            # ~5.5h: first cold HF pull (~24GB) over the slow SN egress.
+            failureThreshold: 1320
           readinessProbe:
             httpGet:
               path: /health
