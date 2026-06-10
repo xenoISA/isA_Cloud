@@ -396,7 +396,13 @@ spec:
               # NOT reinstall it. Only the small diffusers stack is pip'd here;
               # PIP_PACKAGES intentionally contains NO torch so pip cannot drag in
               # a CPU/old-CUDA wheel that would break Blackwell kernels.
-              pip install --no-cache-dir $PIP_PACKAGES
+              # Retry loop — SN egress to PyPI is intermittently flaky.
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 $PIP_PACKAGES && break
+                echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
+                sleep 15
+              done
+              python -c "import diffusers, transformers" || { echo "deps missing after retries"; exit 1; }
               # Materialise the server from the ConfigMap and run it.
               cp /etc/flux-config/server.py /opt/server.py
               exec uvicorn server:app \

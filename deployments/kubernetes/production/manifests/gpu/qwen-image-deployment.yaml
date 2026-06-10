@@ -433,7 +433,15 @@ spec:
               # — pip must not replace the GPU-correct torch. If pip ever tries to
               # pull torch as a transitive dep, that is a bug in a floor pin.
               echo "[startup] installing diffusers stack (torch is pre-baked) ..."
-              pip install --no-cache-dir -r /etc/qwen-image/requirements.txt
+              # Retry loop — SN egress to PyPI is intermittently flaky; a single
+              # timed-out wheel must not kill the pod (incomplete-download).
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                  -r /etc/qwen-image/requirements.txt && break
+                echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
+                sleep 15
+              done
+              python -c "import diffusers, transformers" || { echo "[startup] deps missing after retries"; exit 1; }
               echo "[startup] launching FastAPI server ..."
               # Single worker: the diffusion CUDA context is not fork-safe and the
               # server serializes GPU work via an asyncio lock. Throughput comes
