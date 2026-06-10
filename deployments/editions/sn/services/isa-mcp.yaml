@@ -12,5 +12,23 @@ resources:
 health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
 liveness: {path: /health, initialDelaySeconds: 30, periodSeconds: 20}
 
+# NOTE: helm -f REPLACES list values, so this env array overrides the base's
+# (isa-svc-base.yaml) env. The base only sets ISA_LICENSE_PUBKEY, re-declared
+# here so licensing is preserved.
+#
+# DATA_FALLBACK_HOST/PORT: the MCP data client (digital_client) discovers
+# `data_service` via Consul first; the data service isn't registered there yet,
+# so without this it falls back to localhost:8084 (the pod itself) and every
+# data://* resource + data tool fails in-cluster. Point the fallback at the real
+# K8s service so it resolves. See xenoISA/isA_MCP#731.
+env:
+  - name: ISA_LICENSE_PUBKEY
+    valueFrom:
+      configMapKeyRef:
+        name: isa-license-pubkey
+        key: ed25519.pub
+  - {name: DATA_FALLBACK_HOST, value: "isa-data"}
+  - {name: DATA_FALLBACK_PORT, value: "8084"}
+
 # HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
 autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}
