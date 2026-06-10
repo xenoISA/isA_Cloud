@@ -369,17 +369,92 @@ data:
             # where it shows: from_pretrained signature (device_map/dtype/
             # attn_implementation) or the import path qwen_tts.Qwen3TTSModel.
             from qwen_tts import Qwen3TTSModel
+            # Qwen3TTSConfig (and its sub-config classes) are NOT re-exported from the
+            # top-level qwen_tts package; they live in core.models. Verified against
+            # source: qwen_tts/core/models/__init__.py re-exports Qwen3TTSConfig from
+            # qwen_tts/core/models/configuration_qwen3_tts.py, which is also where
+            # Qwen3TTSTalkerConfig is defined (the talker class is NOT re-exported at
+            # the package __init__, so we import both straight from the module).
+            from qwen_tts.core.models.configuration_qwen3_tts import (
+                Qwen3TTSConfig,
+                Qwen3TTSTalkerConfig,
+            )
+            from huggingface_hub import hf_hub_download
+            import json
+
+            # !!! REAL ROOT-CAUSE FIX for the "talker_config is None / default values"
+            # deadlock (diagnosed June 2026 by reading source + config.json) !!!
+            #
+            # config.json for Qwen3-TTS-12Hz-1.7B-CustomVoice has `talker_config` at
+            # top level (with `code_predictor_config` nested INSIDE it); there is NO
+            # top-level speaker_encoder_config. Qwen3TTSConfig.__init__ does, for a
+            # missing sub-config: `if talker_config is None: talker_config = {}` then
+            # `self.talker_config = Qwen3TTSTalkerConfig(**talker_config)` — i.e. a
+            # DEFAULT-sized talker (+ default code_predictor). The class also sets
+            #   sub_configs = {"talker_config": Qwen3TTSTalkerConfig,
+            #                  "speaker_encoder_config": Qwen3TTSSpeakerEncoderConfig}.
+            # On transformers 4.57.3 the PretrainedConfig.from_dict / sub_configs
+            # processing does NOT forward the real `talker_config` dict into __init__
+            # (the sub_configs path consumes/mishandles it), so __init__ sees
+            # talker_config=None -> builds a default-shaped talker + code_predictor ->
+            # the multi-component build DEADLOCKS (the reported hang). This persisted
+            # through device_map removal, version pins, and the check_model_inputs
+            # shim because the real fault is from_dict dropping talker_config.
+            #
+            # Fix: build the config EXPLICITLY from config.json and pass it via
+            # config= so the real nested talker_config dict reaches __init__ directly,
+            # bypassing from_dict's sub_configs path. qwen-tts's wrapper
+            # from_pretrained forwards **kwargs straight to AutoModel.from_pretrained
+            # (verified in source: qwen_tts/inference/qwen3_tts_model.py — the body is
+            # `model = AutoModel.from_pretrained(path, **kwargs)`), and
+            # AutoModel.from_pretrained HONORS a passed `config=` (it does NOT re-run
+            # from_dict when an explicit config object is supplied). So config= reaches
+            # the real load and is used as-is.
+            log.info("downloading config.json to build Qwen3TTSConfig explicitly ...")
+            cfg_path = hf_hub_download(MODEL_ID, "config.json")
+            with open(cfg_path) as _f:
+                cfg = json.load(_f)
+            # Passing the nested talker_config dict directly to __init__ means
+            # self.talker_config is built from the REAL dict, not defaults.
+            config = Qwen3TTSConfig(**cfg)
+            # FALLBACK: if a future Qwen3TTSConfig(**cfg) still loses talker_config
+            # (e.g. __init__ consumes it before assigning the sub-config), force it:
+            #   if "talker_config" in cfg and not isinstance(
+            #       getattr(config, "talker_config", None), Qwen3TTSTalkerConfig):
+            #       config.talker_config = Qwen3TTSTalkerConfig(**cfg["talker_config"])
+            if "talker_config" in cfg and not isinstance(
+                getattr(config, "talker_config", None), Qwen3TTSTalkerConfig
+            ):
+                log.warning("Qwen3TTSConfig dropped talker_config; rebuilding it from config.json")
+                config.talker_config = Qwen3TTSTalkerConfig(**cfg["talker_config"])
+            # Prove the fix at boot: talker_config must be a real Qwen3TTSTalkerConfig
+            # carrying the nested code_predictor_config, NOT a default.
+            _talker = getattr(config, "talker_config", None)
+            _has_cp = (
+                hasattr(_talker, "code_predictor_config")
+                and getattr(_talker, "code_predictor_config", None) is not None
+            )
+            log.info(
+                "explicit config built: talker_config=%s code_predictor_present=%s",
+                type(_talker).__name__, _has_cp,
+            )
 
             # The README example passes device_map="cuda:0", but accelerate dispatch
             # on this multi-component model is fragile (and the original hang report
             # reproduced with AND without device_map — that hang was the None-config
-            # bug above, now fixed by the shim). We still load WITHOUT device_map for
-            # determinism on the single sm_120 slice, then move to GPU explicitly.
-            # If a future qwen-tts requires device_map for correct sub-module
-            # placement, pass device_map=DEVICE here instead of the .to() below.
-            log.info("from_pretrained (no device_map) ...")
+            # bug above, now fixed by the explicit config). We still load WITHOUT
+            # device_map for determinism on the single sm_120 slice, then move to GPU
+            # explicitly. If a future qwen-tts requires device_map for correct
+            # sub-module placement, pass device_map=DEVICE here instead of the .to()
+            # below.
+            #
+            # config=config flows through qwen-tts's wrapper (**kwargs) into
+            # AutoModel.from_pretrained, which uses the supplied config object as-is
+            # rather than re-deriving it from config.json via from_dict.
+            log.info("from_pretrained (explicit config, no device_map) ...")
             model = Qwen3TTSModel.from_pretrained(
                 MODEL_ID,
+                config=config,
                 dtype=dtype,
                 attn_implementation=ATTN_IMPL,
             )
