@@ -373,6 +373,12 @@ spec:
                 configMapKeyRef:
                   name: triton-flux-2-schnell-config
                   key: HF_HOME
+            # Force standard LFS download instead of HF xet storage: the xet
+            # read-token/CDN endpoint times out from this network, stalling the
+            # pull at "Connection timed out ... xet-read-token". LFS resolve
+            # paths are more reliable here.
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
             - name: PIP_PACKAGES
               valueFrom:
                 configMapKeyRef:

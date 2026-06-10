@@ -417,6 +417,10 @@ spec:
                   key: DIFFUSERS_GIT_REF
             - name: HF_HOME
               value: "/root/.cache/huggingface"
+            # Force standard LFS download (xet read-token endpoint times out on
+            # this network and stalls the pull).
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
