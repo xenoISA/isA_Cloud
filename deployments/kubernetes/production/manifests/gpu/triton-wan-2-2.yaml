@@ -431,6 +431,15 @@ spec:
           args:
             - |
               set -e
+              # diffusers is installed from git main (Wan2.2 TI2V-5B is main-only),
+              # but the pytorch base image has no `git`. Install it first.
+              if ! command -v git >/dev/null 2>&1; then
+                echo "[startup] installing git (needed for pip install git+...)"
+                for attempt in 1 2 3 4; do
+                  (apt-get update && apt-get install -y --no-install-recommends git) && break
+                  echo "[startup] apt git attempt $attempt failed; retry 15s..."; sleep 15
+                done
+              fi
               # Small stack ONLY — torch is already baked (cu128/sm_120). pip
               # must NOT pull a torch wheel; the requirements omit it on purpose.
               # Retry loops — SN egress to PyPI/GitHub is intermittently flaky.
