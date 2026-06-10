@@ -3,7 +3,9 @@
 name: isa-mcp
 image:
   repository: isa/isa-mcp
-  tag: "0.1.3"
+  # 0.1.4: consul_* MCP tools honor CONSUL_HOST/CONSUL_PORT (were defaulting to
+  # localhost:8500 in-cluster). Found via deep MCP-client functional testing.
+  tag: "0.1.4"
 port: 8081
 replicas: 1
 resources:
