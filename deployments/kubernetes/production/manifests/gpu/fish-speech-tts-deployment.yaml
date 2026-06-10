@@ -464,10 +464,22 @@ spec:
 
               # ── 3. pip install (NO torch — baked cu128 satisfies torch==2.8.0;
               #      pip must not replace the sm_120 build) ─────────────────────
+              # Constraints kill resolver backtracking: without them pip walked
+              # werkzeug 3.1.4 -> 2.0.x one metadata fetch at a time (~11s each,
+              # observed live) hunting a version satisfying tensorboard+gradio.
+              # Pin the contested packages; if a pin truly conflicts pip now
+              # fails FAST with the real error instead of spiralling.
+              cat > /tmp/pip-constraints.txt <<'CONSTRAINTS'
+              werkzeug==3.0.6
+              tensorboard==2.18.0
+              CONSTRAINTS
+              sed -i 's/^              //' /tmp/pip-constraints.txt
               echo "[startup] pip installing fish-speech + shim extras (torch is pre-baked) ..."
               for attempt in 1 2 3 4 5 6; do
-                pip install --no-cache-dir --retries 10 --timeout 120 -e /opt/fish-speech \
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                     -c /tmp/pip-constraints.txt -e /opt/fish-speech \
                   && pip install --no-cache-dir --retries 10 --timeout 120 \
+                       -c /tmp/pip-constraints.txt \
                        -r /etc/fish-speech/requirements-extra.txt && break
                 echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
                 sleep 15
