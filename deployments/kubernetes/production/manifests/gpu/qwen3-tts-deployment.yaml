@@ -57,18 +57,32 @@
 #   name is the TOKEN frame rate, NOT the audio rate: the decoded WAVEFORM is
 #   24 kHz, and `sr` is read from the tokenizer at runtime — the server TRUSTS the
 #   returned sr rather than hardcoding it (override env exists for safety only).
-#   attn_implementation MUST be "sdpa": flash_attention_2 is documented broken on
-#   this architecture ("model architecture is incompatible with FA2"), and the
-#   cu128 base has no flash-attn wheel anyway. Built-in CustomVoice speakers:
-#   Vivian, Serena, Uncle_Fu, Dylan, Eric (zh) / Ryan, Aiden (en) / Ono_Anna (ja)
-#   / Sohee (ko). OpenAI's fixed voice vocabulary is mapped onto these.
+#
+#   !!! LOAD HANG ROOT CAUSE (diagnosed June 2026, web research) !!!
+#   The reported deterministic hang — "talker_config/code_predictor_config/
+#   speaker_encoder_config is None -> Initializing with default values" then no
+#   completion — is a transformers<->qwen-tts version conflict, NOT device_map or
+#   attention. qwen-tts 0.1.1 pins transformers==4.57.3 (the version that yields
+#   CORRECT audio; 5.x = silence) yet its modeling code imports `check_model_inputs`
+#   from transformers.utils.generic, which exists ONLY in transformers 5.x. On
+#   4.57.3 that import raises, is swallowed by the dynamic loader, the nested config
+#   classes never register, the sub_configs collapse to None/defaults, and the
+#   multi-component build deadlocks. FIX = pin transformers==4.57.3 + qwen-tts==
+#   0.1.1 AND shim a no-op check_model_inputs before importing qwen_tts (server.py
+#   _patch_qwen_tts_for_transformers_457). flash_attention_2 is moot: there is no
+#   sm_120 flash-attn Linux wheel (Dao-AILab/flash-attention#1987) and none is baked
+#   in; qwen-tts auto-falls-back to the manual PyTorch path. We use eager (sdpa also
+#   works). Built-in CustomVoice speakers: Vivian, Serena, Uncle_Fu, Dylan, Eric
+#   (zh) / Ryan, Aiden (en) / Ono_Anna (ja) / Sohee (ko). OpenAI's fixed voice
+#   vocabulary is mapped onto these.
 #   Sources:
-#     - https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+#     - https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice  (model card; config.json has talker_config + nested code_predictor_config; sub_configs)
 #     - https://github.com/QwenLM/Qwen3-TTS  (README quickstart + speakers)
-#     - https://pypi.org/project/qwen-tts/   (pip install -U qwen-tts)
-#     - https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base/discussions/5 (FA2 broken)
-#     - https://huggingface.co/spaces/Qwen/Qwen3-TTS/blob/main/qwen_tts/inference/qwen3_tts_model.py
-#       (generate_custom_voice -> (wavs, fs) from speech_tokenizer.decode)
+#     - https://github.com/QwenLM/Qwen3-TTS/issues/237  (qwen-tts 0.1.1 pins transformers==4.57.3 but imports check_model_inputs which is 5.x-only)
+#     - https://github.com/QwenLM/Qwen3-TTS/pull/201  (transformers 4.57.3 = correct audio; 5.2.0 = silence)
+#     - https://github.com/flybirdxx/ComfyUI-Qwen-TTS/issues/16  (check_model_inputs / inputs_embeds workaround: disable the decorator)
+#     - https://github.com/Dao-AILab/flash-attention/issues/1987  (no sm_120/Blackwell flash-attn support)
+#     - https://pypi.org/project/qwen-tts/   (0.1.1 is the latest release, Feb 2026)
 #
 #   !!! HIGHEST-RISK LINE — torch supply chain: qwen-tts declares torchaudio (and
 #   transformers/accelerate) as deps. If pip resolves torchaudio it can try to
@@ -121,9 +135,17 @@ data:
   TTS_DTYPE: "bfloat16"
   TTS_DEFAULT_LANGUAGE: "Auto"
   TTS_DEFAULT_SPEAKER: "Ryan"
-  # MUST be sdpa: flash_attention_2 is broken on this architecture and there is no
-  # flash-attn wheel on the cu128 base. Do not flip to flash_attention_2.
-  TTS_ATTN_IMPL: "sdpa"
+  # The README example uses flash_attention_2, but there is NO official flash-attn
+  # Linux wheel for Blackwell sm_120 (Dao-AILab/flash-attention#1987 — sm_120 still
+  # unsupported as of mid-2026; only community Windows/FA3 wheels exist) and none is
+  # baked into the cu128 base. qwen-tts auto-falls-back to the manual PyTorch path
+  # when flash-attn is absent (the "flash-attn is not installed" log), so FA2 is not
+  # an option here. We pin "eager" rather than "sdpa": both work once the configs
+  # load correctly (the hang was NEVER the attention backend — see requirements.txt
+  # root-cause note), and eager is the most deterministic on sm_120 with no fused
+  # attention kernels. Flip to "sdpa" for a modest speedup once a boot is confirmed
+  # green. Do NOT set flash_attention_2.
+  TTS_ATTN_IMPL: "eager"
   # Empty = trust the sample rate qwen-tts returns (24 kHz for these models). Set
   # e.g. "24000" only to force a rate if a variant ever reports an unexpected one.
   TTS_SAMPLE_RATE: ""
@@ -139,6 +161,34 @@ data:
   # torchvision are intentionally ABSENT — the base already provides the sm_120
   # cu128 build and pip MUST NOT replace it.
   #
+  # !!! ROOT CAUSE OF THE "talker_config is None / default values" LOAD HANG !!!
+  #   This is a transformers <-> qwen-tts version TRILEMMA, NOT an attention/
+  #   device_map bug:
+  #     - qwen-tts 0.1.1 (the only PyPI release, Feb 2026) PINS transformers==4.57.3
+  #       and, on 4.57.x, that pinned version PRODUCES CORRECT AUDIO (the 5.x line
+  #       generates near-silence — Qwen3-TTS PR #201 testing).
+  #     - BUT the 0.1.1 wheel's modeling code does
+  #         `from transformers.utils.generic import check_model_inputs`
+  #       which ONLY EXISTS in transformers 5.x. On 4.57.3 that import RAISES.
+  #     - The dynamic config/model loader swallows that import failure, so the
+  #       nested config classes (Qwen3TTSTalkerConfig / ...CodePredictor /
+  #       Qwen3TTSSpeakerEncoderConfig) never register. Qwen3TTSConfig therefore
+  #       can't instantiate the sub_configs from config.json's nested dicts ->
+  #       talker_config / code_predictor_config / speaker_encoder_config come
+  #       through as None -> "Initializing ... with default values" -> the
+  #       default-shaped sub-modules mismatch the checkpoint and the multi-
+  #       component build DEADLOCKS. Exactly the observed hang.
+  #   FIX (two parts, both required):
+  #     1. PIN transformers==4.57.3 (proven-correct audio; refs #237, PR #201).
+  #        Do NOT float to >=4.51 (resolver could pull 5.x = silence) and do NOT
+  #        go to 5.x.
+  #     2. NEUTRALISE the 5.x-only `check_model_inputs` import in the installed
+  #        qwen-tts so the 4.57.3 path imports cleanly and the sub-configs DO
+  #        register. The server.py startup does this as a deterministic in-place
+  #        patch (see _patch_qwen_tts_for_transformers_457) — the documented
+  #        community workaround (Qwen3-TTS #237, ComfyUI-Qwen-TTS #16/#82).
+  #   accelerate is pinned to the qwen-tts 0.1.1 companion pin (1.12.0).
+  #
   # !!! TORCHAUDIO RISK: qwen-tts depends on torchaudio, which is version-locked to
   #   torch. We do NOT pin torchaudio here and instead let qwen-tts pull a
   #   compatible one, then the startup guard ASSERTS torch is still +cu128. If the
@@ -147,9 +197,9 @@ data:
   #     torchaudio==2.8.0+cu128
   #   (kept out by default so a normal install isn't forced through the torch index).
   requirements.txt: |
-    qwen-tts>=0.1.1
-    transformers>=4.51
-    accelerate>=1.0
+    qwen-tts==0.1.1
+    transformers==4.57.3
+    accelerate==1.12.0
     einops>=0.8
     sentencepiece>=0.2
     safetensors>=0.4
@@ -195,8 +245,9 @@ data:
     DTYPE_NAME = os.environ.get("TTS_DTYPE", "bfloat16")
     DEFAULT_LANGUAGE = os.environ.get("TTS_DEFAULT_LANGUAGE", "Auto")
     DEFAULT_SPEAKER = os.environ.get("TTS_DEFAULT_SPEAKER", "Ryan")
-    # sdpa is the only working attn path (flash_attention_2 is broken on this arch).
-    ATTN_IMPL = os.environ.get("TTS_ATTN_IMPL", "sdpa")
+    # eager/sdpa both work; flash_attention_2 is unavailable (no sm_120 wheel) and
+    # qwen-tts auto-falls-back to the manual PyTorch path. See the ConfigMap note.
+    ATTN_IMPL = os.environ.get("TTS_ATTN_IMPL", "eager")
     SAMPLE_RATE_OVERRIDE = os.environ.get("TTS_SAMPLE_RATE") or None
 
     # Map OpenAI's fixed voice vocabulary onto Qwen3-TTS CustomVoice speakers so
@@ -235,6 +286,62 @@ data:
     GPU_LOCK = asyncio.Lock()
 
 
+    def _patch_qwen_tts_for_transformers_457() -> None:
+        """ROOT-CAUSE FIX for the deterministic "talker_config is None / default
+        values" load hang.
+
+        qwen-tts 0.1.1 (the only PyPI release) pins transformers==4.57.3 — which is
+        the version that PRODUCES CORRECT AUDIO (transformers 5.x emits near-silence;
+        Qwen3-TTS PR #201). BUT the 0.1.1 modeling code does
+            `from transformers.utils.generic import check_model_inputs`
+        and that symbol ONLY EXISTS in transformers 5.x. On 4.57.3 the import RAISES,
+        the dynamic loader swallows it, the nested config classes
+        (Qwen3TTSTalkerConfig / ...CodePredictorConfig / Qwen3TTSSpeakerEncoderConfig)
+        never register, so Qwen3TTSConfig cannot build its sub_configs from
+        config.json's nested dicts -> talker_config / code_predictor_config /
+        speaker_encoder_config arrive as None -> "Initializing ... with default
+        values" -> the default-shaped sub-modules mismatch the checkpoint and the
+        multi-component build DEADLOCKS.
+
+        Fix: install a no-op `check_model_inputs` into transformers.utils.generic
+        BEFORE importing qwen_tts, so the 0.1.1 modeling import succeeds on 4.57.3 and
+        the sub-config classes register normally. This is the documented community
+        workaround (Qwen3-TTS #237; ComfyUI-Qwen-TTS #16/#82). It is a deliberate
+        IDENTITY decorator: on 4.57.x the validation it gates does not exist, so a
+        pass-through is the correct behaviour. Idempotent + version-guarded so it is
+        a true no-op the day qwen-tts ships a 4.57-clean wheel or we move to a fixed
+        transformers.
+        """
+        try:
+            import transformers
+            from transformers.utils import generic as _generic
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not import transformers to patch: %s", exc)
+            return
+        tv = getattr(transformers, "__version__", "?")
+        if hasattr(_generic, "check_model_inputs"):
+            log.info("transformers %s already provides check_model_inputs; no patch needed", tv)
+            return
+        if not tv.startswith("4.57"):
+            # We only know this shim is correct for the 4.57.x line. On anything else,
+            # do nothing and let the real import path surface a clear error.
+            log.warning("transformers is %s (expected 4.57.x); skipping check_model_inputs shim", tv)
+            return
+
+        def check_model_inputs(func=None, *_a, **_k):  # noqa: ANN001
+            # Identity / pass-through. Accepts both @check_model_inputs and
+            # @check_model_inputs(...) usages.
+            if callable(func):
+                return func
+            def _decorator(f):  # noqa: ANN001
+                return f
+            return _decorator
+
+        _generic.check_model_inputs = check_model_inputs
+        log.info("patched transformers %s with no-op check_model_inputs "
+                 "(qwen-tts 0.1.1 / transformers 4.57 compat — fixes None sub-configs)", tv)
+
+
     def _load_model():
         """Blocking model load. Runs in a thread so the event loop stays free to
         serve /health (returning 503) during the cold load + first HF pull."""
@@ -252,17 +359,35 @@ data:
             log.info("Loading %s on %s (dtype=%s, attn=%s) ...",
                      MODEL_ID, DEVICE, DTYPE_NAME, ATTN_IMPL)
             t0 = time.time()
+            # CRITICAL: apply the transformers-4.57 compat shim BEFORE importing
+            # qwen_tts. Without it the 0.1.1 wheel's `check_model_inputs` import
+            # fails on 4.57.3, the sub-config classes never register, and the nested
+            # configs load as None -> "default values" -> deterministic load hang.
+            _patch_qwen_tts_for_transformers_457()
+
             # !!! HIGHEST-RISK LINE on first boot. If qwen-tts's API drifts, this is
             # where it shows: from_pretrained signature (device_map/dtype/
             # attn_implementation) or the import path qwen_tts.Qwen3TTSModel.
             from qwen_tts import Qwen3TTSModel
 
+            # The README example passes device_map="cuda:0", but accelerate dispatch
+            # on this multi-component model is fragile (and the original hang report
+            # reproduced with AND without device_map — that hang was the None-config
+            # bug above, now fixed by the shim). We still load WITHOUT device_map for
+            # determinism on the single sm_120 slice, then move to GPU explicitly.
+            # If a future qwen-tts requires device_map for correct sub-module
+            # placement, pass device_map=DEVICE here instead of the .to() below.
+            log.info("from_pretrained (no device_map) ...")
             model = Qwen3TTSModel.from_pretrained(
                 MODEL_ID,
-                device_map=DEVICE,
                 dtype=dtype,
                 attn_implementation=ATTN_IMPL,
             )
+            log.info("from_pretrained done in %.1fs; moving to %s ...", time.time() - t0, DEVICE)
+            try:
+                model = model.to(DEVICE)
+            except Exception as move_exc:  # noqa: BLE001
+                log.warning("model.to(%s) raised (%s); some wrappers place sub-modules internally", DEVICE, move_exc)
             MODEL = model
             LOADED_AT = time.time()
             log.info("Model loaded in %.1fs", LOADED_AT - t0)
