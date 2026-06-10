@@ -476,9 +476,9 @@ spec:
               sed -i 's/^              //' /tmp/pip-constraints.txt
               echo "[startup] pip installing fish-speech + shim extras (torch is pre-baked) ..."
               for attempt in 1 2 3 4 5 6; do
-                pip install --no-cache-dir --retries 10 --timeout 120 \
+                pip install --retries 10 --timeout 120 \
                      -c /tmp/pip-constraints.txt -e /opt/fish-speech \
-                  && pip install --no-cache-dir --retries 10 --timeout 120 \
+                  && pip install --retries 10 --timeout 120 \
                        -c /tmp/pip-constraints.txt \
                        -r /etc/fish-speech/requirements-extra.txt && break
                 echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
