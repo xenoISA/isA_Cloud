@@ -429,11 +429,19 @@ spec:
               set -e
               # Small stack ONLY — torch is already baked (cu128/sm_120). pip
               # must NOT pull a torch wheel; the requirements omit it on purpose.
-              pip install --no-cache-dir -r /etc/wan-config/requirements.txt
+              # Retry loops — SN egress to PyPI/GitHub is intermittently flaky.
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 -r /etc/wan-config/requirements.txt && break
+                echo "[startup] pip(reqs) attempt $attempt failed; retry 15s..."; sleep 15
+              done
               # diffusers from git MAIN — Wan2.2 TI2V-5B is main-only (June 2026).
               # Pin DIFFUSERS_GIT_REF to a commit for reproducible re-bakes.
-              pip install --no-cache-dir \
-                "git+https://github.com/huggingface/diffusers@${DIFFUSERS_GIT_REF}"
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                  "git+https://github.com/huggingface/diffusers@${DIFFUSERS_GIT_REF}" && break
+                echo "[startup] pip(diffusers-git) attempt $attempt failed; retry 15s..."; sleep 15
+              done
+              python -c "import diffusers" || { echo "diffusers missing after retries"; exit 1; }
               # Verify ffmpeg resolves up front (export_to_video needs it) — fail
               # fast rather than after a minutes-long generation.
               python -c "import imageio_ffmpeg; print('ffmpeg:', imageio_ffmpeg.get_ffmpeg_exe())"
