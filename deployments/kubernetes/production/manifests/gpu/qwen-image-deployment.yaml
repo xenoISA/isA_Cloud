@@ -473,7 +473,10 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 15
             timeoutSeconds: 5
-            failureThreshold: 240
+            # ~5.5h budget: the FIRST cold pull of ~40GB over the slow SN->HF
+            # link can take hours (it caches to the PVC, so later starts are
+            # fast). Do not let the probe SIGKILL the one-time download.
+            failureThreshold: 1320
           readinessProbe:
             httpGet:
               path: /health
