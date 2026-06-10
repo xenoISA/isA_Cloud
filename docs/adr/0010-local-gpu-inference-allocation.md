@@ -191,3 +191,39 @@ remains the CPU interim (live, serving tts-1).
 Remaining to fully pack: build Blackwell-compatible images for
 qwen3-asr/qwen-image/qwen3-tts/flux/wan, consolidate the LLM to free cards, then
 schedule them onto slices with VRAM caps.
+
+## Update (2026-06-11) — understanding + perception tier (close the modality matrix)
+
+Audit vs the platform's own API/Modal capability surface (isa_model `types.py`
+ServiceType/TaskType + the Modal `isa_vision_*` services) found the local fleet
+had **generation only** — the **understanding side (image/video -> text) and the
+enterprise perception layer were Modal-only**, not local. The 4×4 modality
+matrix (text/image/video/audio in × out): generation cells covered (T->T LLM,
+T->I qwen-image/flux, T->V wan, T->A TTS); the gaps were **I->T and V->T (no
+VLM)** plus OCR / detection / segmentation / table extraction.
+
+Added to the catalog (specialty node k8s-03, 24 GB time-slices — all verified to
+run on sm_120 **without a hard flash-attn dependency**, the qwen-tts trap):
+
+- **Understanding — VLM**: `Qwen/Qwen3-VL-8B-Instruct-FP8` (Apache-2.0),
+  **vLLM-served** (vLLM uses its own attention kernels — no flash-attn wheel
+  needed; categorically different from qwen-tts/HF `flash_attention_2`). Image +
+  video over OpenAI `/v1/chat/completions`. Localizes the Qwen2.5-VL the platform
+  ran on Modal. 48 GB-slice upgrade: `Qwen3-VL-30B-A3B-Instruct-FP8` (MoE).
+- **Perception — PaddleOCR-VL 1.5** (Apache-2.0, own slice): OCR + layout +
+  tables in one 0.9 B model — retires the Modal OCR service **and** both
+  Table-Transformers.
+- **Perception bundle** (one 24 GB slice, FastAPI multi-model, ~4-6 GB, all
+  SDPA/ONNX): Florence-2 (MIT, grounding/region — 1:1 with the Modal service),
+  Grounding-DINO (Apache), SAM 3.1 (segmentation), YOLO26 (detection),
+  SigLIP-2 (image embeddings).
+
+**⚠️ License flags for commercial/customer (SN) traffic — clear with legal
+before production use:** YOLO26 = **AGPL-3.0** (needs Ultralytics Enterprise
+license, or swap to Apache RT-DETR); SAM 3.1 = **gated Meta SAM license**;
+Fish-Speech S2-Pro = **non-commercial**. The Apache/MIT picks (Qwen3-VL,
+PaddleOCR-VL, Florence-2, Grounding-DINO, SigLIP-2) are commercially clean.
+
+Placement: VLM-8B + PaddleOCR-VL + perception-bundle = 3 new slices on k8s-03
+(→ ~7/8 specialty slices used). Implementation order: VLM first (closes the
+biggest gap, cleanest vLLM path), then PaddleOCR-VL, then the bundle.
