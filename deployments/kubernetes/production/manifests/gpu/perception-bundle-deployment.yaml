@@ -1,0 +1,297 @@
+# Perception Bundle — Florence-2 + SAM + SigLIP-2 (enterprise vision perception)
+#
+# A single FastAPI server hosting three license-clean perception models on one
+# 24GB k8s-03 time-slice. Localizes the Modal vision-perception layer
+# (Florence-2-base-ft) and adds promptable segmentation + image embeddings.
+#
+#   Florence-2-large  (MIT)        detection / caption / OCR / phrase-grounding /
+#                                  referring-expression segmentation  (~1.5GB)
+#   SAM  facebook/sam-vit-base  (Apache-2.0, UNGATED)  promptable masks (~0.4GB)
+#   SigLIP-2  google/siglip2-base-patch16-224 (Apache-2.0) embeddings / zero-shot
+#
+# LICENSE SUBSTITUTIONS (flagged in ADR 0010): YOLO26 is AGPL-3.0 and SAM 3.1 is
+# Meta-gated — both omitted to keep the bundle commercially clean. Florence-2
+# covers detection (closed + open-vocab via grounding); SAM-1 covers promptable
+# segmentation without gating. Swap in YOLO26 / SAM 3.1 only with explicit
+# license sign-off + (for SAM 3.1) a Meta-approved HF token.
+#
+# Pattern: ConfigMap-mounted server.py on the baked cu128 PyTorch base; startup
+# pip (NO torch — baked sm_120 build), weights -> PVC, /health gates 503->200
+# once all three models are resident. BLACKWELL sm_120: all three run on SDPA /
+# eager (NO flash-attn wheel). The production deploy script rewrites namespace.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-perception
+  namespace: isa-cloud-production
+  labels: { app: perception-bundle, isa-model/model-id: perception-bundle }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 30Gi } }
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: perception-bundle-config
+  namespace: isa-cloud-production
+  labels: { app: perception-bundle }
+data:
+  FLORENCE_MODEL: "microsoft/Florence-2-large"
+  SAM_MODEL: "facebook/sam-vit-base"
+  SIGLIP_MODEL: "google/siglip2-base-patch16-224"
+  PIP_EXTRAS: "transformers==4.49.0 timm==1.0.11 einops==0.8.0 pillow==10.4.0 accelerate==1.2.1 safetensors fastapi==0.115.6 uvicorn==0.34.0 python-multipart==0.0.20"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: perception-bundle-server
+  namespace: isa-cloud-production
+  labels: { app: perception-bundle }
+data:
+  server.py: |
+    # Perception bundle: Florence-2 + SAM + SigLIP-2 behind one FastAPI app.
+    # Models load in a background thread so /health can answer 503 immediately and
+    # flip to 200 once all three are resident (startup probe gates traffic).
+    import base64, io, os, threading, time, traceback
+    from typing import Optional, List
+    import torch
+    from PIL import Image
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+    import uvicorn
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+    FLORENCE = os.environ["FLORENCE_MODEL"]
+    SAM = os.environ["SAM_MODEL"]
+    SIGLIP = os.environ["SIGLIP_MODEL"]
+
+    STATE = {"ready": False, "error": None, "loaded": []}
+    M = {}  # model/processor handles
+
+    def _load():
+        try:
+            from transformers import (AutoModelForCausalLM, AutoProcessor,
+                                       SamModel, SamProcessor, AutoModel)
+            t0 = time.time()
+            print(f"[load] Florence-2 {FLORENCE} ...", flush=True)
+            M["flo_model"] = AutoModelForCausalLM.from_pretrained(
+                FLORENCE, trust_remote_code=True, torch_dtype=DTYPE).to(DEVICE).eval()
+            M["flo_proc"] = AutoProcessor.from_pretrained(FLORENCE, trust_remote_code=True)
+            STATE["loaded"].append("florence-2")
+            print(f"[load] SAM {SAM} ...", flush=True)
+            M["sam_model"] = SamModel.from_pretrained(SAM, torch_dtype=DTYPE).to(DEVICE).eval()
+            M["sam_proc"] = SamProcessor.from_pretrained(SAM)
+            STATE["loaded"].append("sam")
+            print(f"[load] SigLIP-2 {SIGLIP} ...", flush=True)
+            M["sig_model"] = AutoModel.from_pretrained(SIGLIP, torch_dtype=DTYPE).to(DEVICE).eval()
+            M["sig_proc"] = AutoProcessor.from_pretrained(SIGLIP)
+            STATE["loaded"].append("siglip-2")
+            STATE["ready"] = True
+            print(f"[load] all models resident in {time.time()-t0:.0f}s", flush=True)
+        except Exception as e:
+            STATE["error"] = f"{e}\n{traceback.format_exc()}"
+            print(f"[load] FAILED: {STATE['error']}", flush=True)
+
+    def _img(b64: str) -> Image.Image:
+        if b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+
+    app = FastAPI(title="perception-bundle")
+
+    @app.get("/health")
+    def health():
+        if STATE["error"]:
+            raise HTTPException(500, STATE["error"][:500])
+        if not STATE["ready"]:
+            raise HTTPException(503, f"loading: {STATE['loaded']}")
+        return {"status": "ok", "models": STATE["loaded"], "device": DEVICE}
+
+    class FlorenceReq(BaseModel):
+        image: str                       # base64 (optionally data: URL)
+        task: str = "<OD>"               # <OD> <CAPTION> <DETAILED_CAPTION> <OCR>
+                                         # <CAPTION_TO_PHRASE_GROUNDING> <REFERRING_EXPRESSION_SEGMENTATION>
+        text: Optional[str] = None       # phrase for grounding / referring tasks
+        max_new_tokens: int = 1024
+
+    @app.post("/v1/perception/florence")
+    def florence(r: FlorenceReq):
+        if not STATE["ready"]: raise HTTPException(503, "not ready")
+        img = _img(r.image)
+        prompt = r.task + (r.text or "")
+        proc, model = M["flo_proc"], M["flo_model"]
+        inp = proc(text=prompt, images=img, return_tensors="pt").to(DEVICE, DTYPE)
+        with torch.inference_mode():
+            ids = model.generate(input_ids=inp["input_ids"],
+                                 pixel_values=inp["pixel_values"],
+                                 max_new_tokens=r.max_new_tokens, num_beams=3, do_sample=False)
+        txt = proc.batch_decode(ids, skip_special_tokens=False)[0]
+        parsed = proc.post_process_generation(txt, task=r.task, image_size=(img.width, img.height))
+        return {"task": r.task, "result": parsed}
+
+    class SamReq(BaseModel):
+        image: str
+        points: Optional[List[List[float]]] = None   # [[x,y], ...] foreground prompts
+        boxes: Optional[List[List[float]]] = None     # [[x0,y0,x1,y1], ...]
+
+    @app.post("/v1/perception/segment")
+    def segment(r: SamReq):
+        if not STATE["ready"]: raise HTTPException(503, "not ready")
+        img = _img(r.image)
+        proc, model = M["sam_proc"], M["sam_model"]
+        kw = {}
+        if r.points: kw["input_points"] = [[[float(x), float(y)] for x, y in r.points]]
+        if r.boxes:  kw["input_boxes"] = [[list(map(float, b)) for b in r.boxes]]
+        inp = proc(img, return_tensors="pt", **kw).to(DEVICE)
+        with torch.inference_mode():
+            out = model(**inp)
+        masks = proc.image_processor.post_process_masks(
+            out.pred_masks.cpu(), inp["original_sizes"].cpu(), inp["reshaped_input_sizes"].cpu())
+        scores = out.iou_scores.cpu().tolist()
+        # return mask shapes + scores (raw masks are large; caller can re-request)
+        return {"num_masks": int(masks[0].shape[0]) if masks else 0,
+                "mask_shape": list(masks[0].shape) if masks else [], "iou_scores": scores}
+
+    class EmbedReq(BaseModel):
+        image: Optional[str] = None
+        texts: Optional[List[str]] = None     # zero-shot labels or text to embed
+
+    @app.post("/v1/perception/embed")
+    def embed(r: EmbedReq):
+        if not STATE["ready"]: raise HTTPException(503, "not ready")
+        proc, model = M["sig_proc"], M["sig_model"]
+        out = {}
+        with torch.inference_mode():
+            if r.image:
+                img = _img(r.image)
+                pi = proc(images=img, return_tensors="pt").to(DEVICE)
+                ie = model.get_image_features(**pi)
+                out["image_embedding"] = ie[0].float().cpu().tolist()
+            if r.texts:
+                pt = proc(text=r.texts, padding="max_length", max_length=64,
+                          return_tensors="pt").to(DEVICE)
+                te = model.get_text_features(**pt)
+                out["text_embeddings"] = te.float().cpu().tolist()
+            if r.image and r.texts:
+                import torch.nn.functional as F
+                ie_n = F.normalize(ie, dim=-1); te_n = F.normalize(te, dim=-1)
+                out["similarities"] = (ie_n @ te_n.T)[0].float().cpu().tolist()
+        return out
+
+    if __name__ == "__main__":
+        threading.Thread(target=_load, daemon=True).start()
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perception-bundle
+  namespace: isa-cloud-production
+  labels:
+    app: perception-bundle
+    engine: fastapi-transformers
+    isa-model/instance-group: specialty
+    isa-model/model-id: perception-bundle
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 3600
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: perception-bundle } }
+  template:
+    metadata:
+      labels:
+        app: perception-bundle
+        engine: fastapi-transformers
+        isa-model/instance-group: specialty
+        isa-model/model-id: perception-bundle
+    spec:
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: isa.io/gpu-role-specialty, operator: In, values: ["true"] }
+              - matchExpressions:
+                  - { key: sn.io/gpu-role, operator: In, values: ["specialty"] }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: perception
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8000, name: http } ]
+          env:
+            - { name: FLORENCE_MODEL, valueFrom: { configMapKeyRef: { name: perception-bundle-config, key: FLORENCE_MODEL } } }
+            - { name: SAM_MODEL, valueFrom: { configMapKeyRef: { name: perception-bundle-config, key: SAM_MODEL } } }
+            - { name: SIGLIP_MODEL, valueFrom: { configMapKeyRef: { name: perception-bundle-config, key: SIGLIP_MODEL } } }
+            - { name: PIP_EXTRAS, valueFrom: { configMapKeyRef: { name: perception-bundle-config, key: PIP_EXTRAS } } }
+            - { name: HF_HUB_DISABLE_XET, value: "1" }
+            - { name: HF_HOME, value: /root/.cache/huggingface }
+            - { name: TRANSFORMERS_CACHE, value: /root/.cache/huggingface }
+            - { name: HF_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+            - { name: HUGGING_FACE_HUB_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -eu
+              echo "[startup] apt git ..."; (apt-get update -qq && apt-get install -y -qq git) || true
+              echo "[startup] pip extras (torch is pre-baked sm_120 — DO NOT reinstall) ..."
+              for attempt in 1 2 3 4 5 6; do
+                pip install --retries 10 --timeout 120 ${PIP_EXTRAS} && break
+                echo "[startup] pip attempt $attempt failed; retry in 15s"; sleep 15
+              done
+              # torch-clobber guard: extras must not have pulled a non-cu128 torch
+              python -c "import torch,sys; v=torch.__version__; assert 'cu12' in v or '+cu128' in v, 'torch clobbered: %s'%v; print('[guard] torch',v,'OK cuda',torch.version.cuda)"
+              echo "[startup] launching perception server ..."
+              exec python /opt/perception/server.py
+          resources:
+            requests: { cpu: "2000m", memory: "10Gi", nvidia.com/gpu: "1" }
+            limits: { cpu: "6000m", memory: "28Gi", nvidia.com/gpu: "1" }
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 900           # pip + 3 model pulls over slow HF link
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: model-cache, mountPath: /root/.cache/huggingface }
+            - { name: server-code, mountPath: /opt/perception }
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim: { claimName: model-cache-perception }
+        - name: server-code
+          configMap: { name: perception-bundle-server }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: perception-bundle
+  namespace: isa-cloud-production
+  labels: { app: perception-bundle, engine: fastapi-transformers }
+spec:
+  type: ClusterIP
+  selector: { app: perception-bundle }
+  ports: [ { name: http, port: 8000, targetPort: 8000 } ]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: perception-bundle
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector: { matchLabels: { app: perception-bundle } }

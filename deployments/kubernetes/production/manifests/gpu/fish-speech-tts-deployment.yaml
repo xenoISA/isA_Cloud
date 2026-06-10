@@ -472,6 +472,7 @@ spec:
               cat > /tmp/pip-constraints.txt <<'CONSTRAINTS'
               werkzeug==3.0.6
               tensorboard==2.18.0
+              sentry-sdk==2.40.0
               CONSTRAINTS
               sed -i 's/^              //' /tmp/pip-constraints.txt
               echo "[startup] pip installing fish-speech + shim extras (torch is pre-baked) ..."

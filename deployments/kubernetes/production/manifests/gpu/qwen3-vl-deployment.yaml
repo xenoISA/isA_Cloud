@@ -1,0 +1,154 @@
+# vLLM Runtime — Qwen3-VL-8B (vision-language: image/video -> text)
+#
+# Localizes the Qwen2.5-VL the platform ran on Modal. Closes the image->text and
+# video->text cells of the modality matrix (VQA, captioning, OCR, grounding,
+# document understanding). Served by vLLM over OpenAI /v1/chat/completions with
+# image_url + video. The production deploy script rewrites namespace.
+#
+# BLACKWELL sm_120: vLLM uses ITS OWN attention kernels (FLASH_ATTN backend) — it
+# does NOT depend on the Dao-AILab flash-attn PyPI wheel (which has no sm_120
+# build). This is categorically different from qwen-tts (HF transformers
+# flash_attention_2 hard-import). Qwen3-VL falls back to SDPA regardless.
+#
+# TIME-SLICING: this pod shares a 96GB k8s-03 card via time-slicing (no hard mem
+# partition). GPU_MEMORY_UTILIZATION is capped LOW (0.20 ~= 19GB) so the 8B-FP8
+# VLM (~9GB weights + KV/mm cache) coexists with embedding/whisper/asr/fish on
+# the same physical card. Do NOT raise it without checking co-tenant budgets.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-qwen3-vl
+  namespace: isa-cloud-production
+  labels: { app: qwen3-vl, isa-model/model-id: qwen3-vl-8b }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 40Gi } }
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-vl-config
+  namespace: isa-cloud-production
+  labels: { app: qwen3-vl, engine: vllm }
+data:
+  MODEL_ID: "Qwen/Qwen3-VL-8B-Instruct-FP8"   # 48GB-slice upgrade: Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+  SERVED_MODEL_NAME: "qwen3-vl-8b"
+  MAX_MODEL_LEN: "65536"
+  GPU_MEMORY_UTILIZATION: "0.20"               # time-slice co-tenant cap (~19GB of the 96GB card)
+  MAX_NUM_SEQS: "8"
+  LIMIT_MM_IMAGE: "4"
+  LIMIT_MM_VIDEO: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-vl
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-vl
+    engine: vllm
+    isa-model/instance-group: specialty
+    isa-model/model-id: qwen3-vl-8b
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2400
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: qwen3-vl } }
+  template:
+    metadata:
+      labels:
+        app: qwen3-vl
+        engine: vllm
+        isa-model/instance-group: specialty
+        isa-model/model-id: qwen3-vl-8b
+    spec:
+      enableServiceLinks: false
+      securityContext: { runAsNonRoot: false }
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: isa.io/gpu-role-specialty, operator: In, values: ["true"] }
+              - matchExpressions:
+                  - { key: sn.io/gpu-role, operator: In, values: ["specialty"] }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:cu130-nightly
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8000, name: http } ]
+          env:
+            - { name: MODEL_ID, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: MODEL_ID } } }
+            - { name: SERVED_MODEL_NAME, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: SERVED_MODEL_NAME } } }
+            - { name: MAX_MODEL_LEN, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: MAX_MODEL_LEN } } }
+            - { name: GPU_MEMORY_UTILIZATION, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: GPU_MEMORY_UTILIZATION } } }
+            - { name: MAX_NUM_SEQS, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: MAX_NUM_SEQS } } }
+            - { name: LIMIT_MM_IMAGE, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: LIMIT_MM_IMAGE } } }
+            - { name: LIMIT_MM_VIDEO, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: LIMIT_MM_VIDEO } } }
+            - { name: VLLM_ATTENTION_BACKEND, value: "FLASH_ATTN" }   # vLLM's own kernel; no flash-attn wheel
+            - { name: HF_HUB_DISABLE_XET, value: "1" }                # xet endpoint times out on this network
+            - { name: HF_HOME, value: /root/.cache/huggingface }
+            - { name: VLLM_PORT, value: "8000" }
+            - { name: HF_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+            - { name: HUGGING_FACE_HUB_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -eu
+              exec vllm serve "${MODEL_ID}" \
+                --served-model-name "${SERVED_MODEL_NAME}" \
+                --max-model-len "${MAX_MODEL_LEN}" \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+                --max-num-seqs "${MAX_NUM_SEQS}" \
+                --limit-mm-per-prompt.image "${LIMIT_MM_IMAGE}" \
+                --limit-mm-per-prompt.video "${LIMIT_MM_VIDEO}" \
+                --trust-remote-code \
+                --host 0.0.0.0 --port 8000
+          resources:
+            requests: { cpu: "1000m", memory: "8Gi", nvidia.com/gpu: "1" }
+            limits: { cpu: "4000m", memory: "24Gi", nvidia.com/gpu: "1" }
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 1320          # ~5.5h cold model pull over the slow SN->HF link
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - { name: model-cache, mountPath: /root/.cache/huggingface }
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim: { claimName: model-cache-qwen3-vl }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-vl
+  namespace: isa-cloud-production
+  labels: { app: qwen3-vl, engine: vllm }
+spec:
+  type: ClusterIP
+  selector: { app: qwen3-vl }
+  ports: [ { name: http, port: 8000, targetPort: 8000 } ]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qwen3-vl
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector: { matchLabels: { app: qwen3-vl } }
