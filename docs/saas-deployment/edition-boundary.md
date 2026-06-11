@@ -21,9 +21,14 @@
 
 ---
 
-## A. Platform 平台镜像(17 — 应 sync;含 #324 新增 isA_Admin)
+## A. Platform 平台镜像(15 — 应 sync;含 #324 新增 isA_Admin)
 
-`sn_X` ↔ `isA_X` 一一对应。sanitizer **只应**对这 16 个运行。
+`sn_X` ↔ `isA_X` 一一对应。sanitizer **只应**对这 15 个运行。
+
+> **2026-06-11 修订**:`sn_model`、`sn_training` 已从本类**移出**到 §B —— archive 验证
+> 发现它们已累积真实 SweetNight 业务逻辑(sn_model 含完整 SCM 销量预测 ML 产品、耦合
+> `sn_data` 预测数据产品;sn_training 含 SweetNight 业务化培训内容/案例库),**不再是纯镜像**。
+> 见 `fork-to-profile-decommission.md` §2 与 ADR 0010。
 
 | sn repo | isA 上游 |
 |---|---|
@@ -38,25 +43,29 @@
 | sn_marketing | isA_Marketing |
 | sn_mate | isA_Mate |
 | sn_mcp | isA_MCP |
-| sn_model | isA_Model |
 | sn_os | isA_OS |
-| sn_training | isA_Training |
 | sn_user | isA_user |
 | sn_vibe | isA_Vibe |
 | sn_admin | isA_Admin (#324, 新增) |
 
 规范化的平台 key(供 sanitizer 白名单使用):
-`agent agent_sdk app_sdk cloud console creative data docs marketing mate mcp model os training user vibe admin`
+`agent agent_sdk app_sdk cloud console creative data docs marketing mate mcp os user vibe admin`
 
 ---
 
-## B. Customer-specific 客户专属(24 — 永不 sync)
+## B. Customer-specific 客户专属(26 — 永不 sync)
 
-无 isA 上游。一旦被 sanitizer 碰到 → 被脱敏/历史重写/覆盖。**必须排除。**
-这些是 SN 客户场景下的企业系统与业务塔,独立演进。
+无 isA 上游(或已积累 SN 专属业务逻辑,不能再 sync 覆盖)。一旦被 sanitizer 碰到 →
+被脱敏/历史重写/覆盖。**必须排除。** 这些是 SN 客户场景下的企业系统与业务塔,独立演进。
+
+> 业务塔(`sn_commercial_tower` / `sn_scm_tower` / `sn_ipd_tower` / `sn_operation_tower` /
+> `sn_dtc`)是 **ADR 0010 `isa_data_product`** 的候选——拟把它们从"每域一个 bespoke 仓库"
+> 收敛为"isA 数据产品框架 + 每塔一个 profile"。届时这几项的形态会再变。
 
 | sn repo | 性质(推测) |
 |---|---|
+| sn_model | **ML/模型(SweetNight SCM 销量预测产品;2026-06-11 从 §A 移入)** |
+| sn_training | **培训(SweetNight 业务化内容/案例库;2026-06-11 从 §A 移入)** |
 | sn_aom | 运维/AOM |
 | sn_arch | 架构/arch(discover 曾漏列,实地核对补回) |
 | sn_commerce | 电商 |
