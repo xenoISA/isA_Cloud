@@ -31,25 +31,40 @@ SN-specific source divergence — which the gate measures.
 Each local mirror was diffed against its isA upstream (commit history + tree diff +
 content spot-check). Result is **not** "archive all" — 2 are real customer logic:
 
-| sn repo | verdict | finding | action |
+Two gate waves run (local clones + fresh clones of the never-cloned forks). Result is
+**not** "archive all" — 6 of the "mirrors" carry real SweetNight product:
+
+| sn repo | verdict | finding | status / action |
 |---|---|---|---|
-| **sn_app_sdk** | ✅ CLEAN | branding-only, behind upstream | **archive now** |
-| **sn_docs** | ✅ CLEAN | branding-only, 0 SN-only files | **archive now** |
-| **sn_marketing** | ✅ CLEAN | branding-only, 0 SN-only files | **archive now** |
-| **sn_user** | ✅ CLEAN | "SN-only" migrations are identical-modulo-renumber; behind upstream | **archive now** |
-| **sn_agent** | 🟡 small delta | 3 SN-only docs/ops: `docs/scheduler.md`, `docs/deployment/multi-tenant-playbook.md`, `deployment/local-dev-crud.sh` (document features already in isA) | **port up → isA_Agent, then archive** |
-| **sn_console** | 🟡 small delta | 7 SN-only test files (tenant/schedule/billing — source is upstream, tests weren't); CI workflows + `.d.ts` shims are white-label scaffolding | **port 7 tests → isA_Console; reclassify scaffolding; then archive** |
-| **sn_mate** | 🟡 stale | only code delta is SN *behind* isA's #590/#901 proxy-ownership refactor; 1 SN-only test covers deleted behavior | **confirm nobody wants self-hosted proxy → archive (nothing to preserve)** |
-| **sn_model** | 🔴 RECLASSIFY | full SweetNight **SCM sales-forecast ML product** (LightGBM/backtest/eval-gate/MLflow/notebooks/25+ tests), coupled to `sn_data` forecast product | **NOT a mirror → customer-specific (§3); do NOT archive** |
-| **sn_training** | 🔴 RECLASSIFY | divergent sibling: SweetNight business-ized training content / case libraries / PRD / decks; drops the isA training-service half entirely | **NOT a mirror → customer-specific (§3); do NOT archive** |
-| **sn_cloud** | KEEP | carries SN delivery/ops content with no isA equivalent | **keep — see §4** |
-| *(not cloned locally)* sn_agent_sdk, sn_creative, sn_data, sn_mcp, sn_os, sn_vibe, sn_admin | ⬜ ungated | can't verify locally | **run the gate at the source repo before archiving** |
+| **sn_app_sdk** | ✅ CLEAN | branding-only, behind upstream | **ARCHIVED 2026-06-11** (read-only + local clone removed) |
+| **sn_docs** | ✅ CLEAN | branding-only | **ARCHIVED 2026-06-11** |
+| **sn_marketing** | ✅ CLEAN | branding-only | **ARCHIVED 2026-06-11** |
+| **sn_user** | ✅ CLEAN | migrations identical-modulo-renumber; behind upstream | **ARCHIVED 2026-06-11** |
+| **sn_creative** | ✅ CLEAN | 1 branding-renamed test; not a deployed service | **ARCHIVED 2026-06-11** (no local clone) |
+| **sn_agent** | 🟡 port done | 3 SN-only docs/ops | port → isA_Agent **#140**; **archive after merge** |
+| **sn_console** | 🟡 port done | 7 SN-only tests (re-gated 06-02 push = sync-merge + 1-line sidebar overlay to keep) | port → isA_Console **#792**; **archive after merge** |
+| **sn_mcp** | 🟡 small infra | 7 SN k8s/deploy scripts; legacy ArgoCD refs its values | port scripts / treat as infra → **archive (read-only safe)** |
+| **sn_vibe** | 🟡 trivial | ABAP already in sync; 1 audit memo + deploy yaml | port memo (or drop) → **archive** |
+| **sn_mate** | 🟡 stale | SN *behind* isA #590/#901 proxy refactor; test covers deleted behavior | **confirm proxy dead → archive** (pending) |
+| **sn_data** | 🔴 RECLASSIFY | ~35k LOC SN data-infra + forecast/TROBS data products; `sn_model` depends on it | **→ §B customer-specific; ADR 0010 domain; do NOT archive** |
+| **sn_os** | 🔴 RECLASSIFY | 141 SN-only files: personas / Amazon VC strategies / stealth / workers | **→ §B; do NOT archive** |
+| **sn_agent_sdk** | 🔴 RECLASSIFY | net-new `sn_agent_sdk/` pkg: BatchSwarm / chain / Rufus·social adapters | **→ §B; do NOT archive** |
+| **sn_model** | 🔴 RECLASSIFY | SweetNight SCM sales-forecast ML product, coupled to sn_data | **→ §B; do NOT archive** |
+| **sn_training** | 🔴 RECLASSIFY | SweetNight business-ized training content / case libraries | **→ §B; do NOT archive** |
+| **sn_cloud** | KEEP | SN delivery/ops content, no isA equivalent | **keep — §4** |
 
-> sn_model + sn_training are moved to §3/§B in `edition-boundary.md`. They are exactly
-> the SN business logic that ADR 0010 (`isa_data_product`) aims to give a platform home.
+> **Deploy-safety check (2026-06-11):** production runs the **isA_Cloud editions path**
+> (`isa-*` upstream images), not the forks. The only forks referenced in deploy are the
+> **legacy** `sn_cloud` ArgoCD apps (`../../../sn_{model,mcp,os}/...` value files) — an
+> explicitly-deprecated fallback, and ArgoCD isn't deployed. Archive = read-only (reads
+> still resolve), so no deploy path breaks. model/os are kept anyway; mcp archive is safe.
+>
+> The 5 reclassified repos are moved to §B in `edition-boundary.md` — they are exactly the
+> SN business logic ADR 0010 (`isa_data_product`) aims to give a platform home (esp. sn_data).
 
-**Net:** 4 archive-clean today · 3 archive after a small fixup · 2 reclassify-and-keep ·
-1 keep (sn_cloud) · 7 ungated (verify at source).
+**Net:** 5 archived · 2 port-done→archive-on-merge (agent #140, console #792) · 2 small-fixup
+(mcp, vibe) · 1 pending (mate) · 5 reclassify-keep (data, os, agent_sdk, model, training) ·
+1 keep (sn_cloud). `sn_admin` never existed.
 
 The heuristic gate above is strong; for the final archive, a `/sync-diff` (or sanitizer
 dry-run) per repo is the authoritative confirmation. Archive = GitHub Settings → Archive
