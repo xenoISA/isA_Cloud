@@ -3,8 +3,14 @@
 name: isa-model
 image:
   repository: isa/isa-model
-  tag: "gpu-local-multimodal-20260611-r16"
+  tag: "gpu-local-multimodal-20260611-r17"
 port: 8082
+# External LLM provider keys (OPENAI_API_KEY, ...) — ESO-synced into a separate
+# secret (externalsecret-isa-model-providers.yaml), mounted optional:true so the
+# pod starts even before Vault is seeded. Enables provider=openai/anthropic API
+# mode without risking the infra secretRef. See the runbook for the Vault seed.
+extraSecretRefs:
+  - isa-model-provider-keys
 replicas: 1
 resources:
   requests: {cpu: "250m", memory: "512Mi"}
