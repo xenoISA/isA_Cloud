@@ -18,7 +18,13 @@ data:
   MODEL_ID: "Qwen/Qwen3-Embedding-8B"
   SERVED_MODEL_NAME: "qwen3-embedding-8b"
   MAX_MODEL_LEN: "32768"
-  GPU_MEMORY_UTILIZATION: "0.50"
+  GPU_MEMORY_UTILIZATION: "0.22"   # POOLING runner: one forward pass, no
+                                   # autoregressive KV growth. 0.50 reserved ~48GB
+                                   # (16GB weights + 31.63GiB wasted KV / 230k
+                                   # tokens). Right-size to weights + headroom:
+                                   # 0.22 (~21GB) << the 24GB k8s-03 slice cap.
+                                   # Frees ~27GB on the shared card (ADR 0010
+                                   # 2026-06-11b memory-budget policy).
   DTYPE: "auto"
   HF_OVERRIDES: '{"is_matryoshka": true}'
 ---

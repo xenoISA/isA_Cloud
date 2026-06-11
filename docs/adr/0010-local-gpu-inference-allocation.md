@@ -227,3 +227,96 @@ PaddleOCR-VL, Florence-2, Grounding-DINO, SigLIP-2) are commercially clean.
 Placement: VLM-8B + PaddleOCR-VL + perception-bundle = 3 new slices on k8s-03
 (→ ~7/8 specialty slices used). Implementation order: VLM first (closes the
 biggest gap, cleanest vLLM path), then PaddleOCR-VL, then the bundle.
+
+**As-built note (perception bundle):** the bundle shipped as **Florence-2-large
+(MIT) + SAM (`facebook/sam-vit-base`, Apache, ungated) + SigLIP-2→SigLIP-1
+fallback (Apache)** — the license-clean, ungated subset. AGPL YOLO26 and
+Meta-gated SAM 3.1 were deliberately dropped (see license flags above); Florence-2
+covers detection/grounding and SAM covers promptable segmentation. SigLIP-2 has a
+processor bug in transformers 4.49.0, so the loader falls back to SigLIP-1; the
+loader marks the bundle ready on Florence-2+SAM alone and treats SigLIP as
+best-effort.
+
+## Update (2026-06-11b) — VRAM memory-budget policy (per-pod caps, enforceable)
+
+A fish-speech **CUDA OOM** ("card has 7.62 MiB free") exposed the gap between the
+*intent* above ("cap `gpu_memory_utilization`") and an *enforceable rule*. Root
+cause: `vllm-qwen3-embedding-8b` ran at `gpu_memory_utilization=0.50` → it
+reserved **~48 GB** (16 GB weights + **31.63 GiB KV cache**, 230 320 tokens) on a
+k8s-03 card whose **time-slice budget is 24 GB**. An **embedding model is a
+pooling runner** — one forward pass, *no* autoregressive KV growth — so that
+31.63 GiB of KV cache is pure waste. It occupied one *scheduler slice* while
+eating *two slices' worth of memory*, starving co-tenants.
+
+### The invariant (why this happens)
+
+Time-slicing has **no memory isolation** and the scheduler counts **slices, not
+bytes**. `nvidia.com/gpu: 1` reserves a *time slot*, not VRAM. So nothing stops
+the sum of co-tenant reservations on one physical card from exceeding 96 GB — and
+when it does, whichever pod loads last OOMs. The only defense is to **bound each
+pod's VRAM to the slice granularity** so that a full card (all slices occupied)
+still fits:
+
+> **Per-pod VRAM cap = (card VRAM ÷ slices-per-card) × ~0.95 headroom.**
+> For vLLM this is exactly `gpu_memory_utilization` (a fraction of the *whole*
+> card), so on a node with N slices/card the cap is **≤ 1/N**.
+
+| Node | Role | Slices/card | Slice budget | **Per-pod cap** |
+|------|------|------------|-------------|-----------------|
+| k8s-01 | llm (dedicated, no TS) | 1 | 96 GB | `gpu_mem_util ≤ 0.85` |
+| k8s-02 | generative (ts-r2) | 2 | 48 GB | `≤ 0.50` |
+| k8s-03 | specialty (ts-r4) | 4 | 24 GB | **`≤ 0.25`** |
+
+### Per-model-type sizing rules (size to *need*, not to the cap)
+
+The cap is a **ceiling**; size each engine to its actual footprint:
+
+- **Generative (LLM, VLM)** — weights + KV cache; KV fills the remaining budget →
+  more concurrency/context. *Use the slice cap.* qwen3-vl-8B-FP8 = 0.25 (10 GB
+  weights + ~14 GB KV → 2.4× concurrency @ 32k); qwen36-27B = 0.85 on its
+  dedicated card.
+- **Pooling (embedding, rerank)** — weights + small activation, **no KV cache**.
+  *Size to weights + ~30 %, well under the cap.* 8B embedder ≈ 16 GB weights →
+  **0.22 (~21 GB)**, never 0.50.
+- **ASR/STT** — weights + audio activation; modest. qwen3-asr 0.25; faster-whisper
+  ~3 GB (fixed, non-vLLM).
+- **Diffusion (Triton/diffusers)** — weights + latent/VAE buffers, can spike
+  during denoising; not `gpu_mem_util`-governed, so verify peak ≤ slice budget.
+- **Fixed-footprint (FastAPI/transformers: perception, fish)** — load what they
+  need (~6 GB, ~16 GB); count them against the card budget like any co-tenant.
+
+### k8s-03 allocation — current vs corrected
+
+| Pod | Type | was | **now** | VRAM | within 24 GB slice? |
+|-----|------|-----|---------|------|---------------------|
+| vllm-qwen3-embedding-8b | pooling | 0.50 | **0.22** | ~21 GB | ✓ (was ✗ @ 48 GB) |
+| qwen3-vl-8b | generative | 0.25 | 0.25 | ~24 GB | ✓ |
+| qwen3-asr | asr | 0.25 | 0.25 | ~24 GB | ✓ |
+| paddleocr-vl | generative (0.9B) | 0.10 | 0.10 | ~10 GB | ✓ |
+| faster-whisper-v3-turbo | asr (fixed) | — | — | ~3 GB | ✓ |
+| perception-bundle | fixed | — | — | ~6 GB | ✓ |
+| fish-speech-tts | fixed | — | — | ~16 GB | ✓ |
+
+**Worst-case placement check** (the 4 heaviest pods on one physical card, since
+ts-r4 = 4 slices/card): qwen3-vl 24 + embedding 21 + qwen3-asr 24 + fish 16 =
+**85 GB < 96 GB ✓**. Total node demand ~104 GB across 192 GB (2 cards) = 54 %
+util — comfortable, with fish now fitting.
+
+### Dynamic allocation — why static caps (for now)
+
+True *dynamic* per-process memory limits need either **MPS**
+(`CUDA_MPS_PINNED_DEVICE_MEM_LIMIT` per client) — **blocked**, the MPS control
+daemon crashloops on device-plugin v0.18.2 (see 2026-06-09 update) — or **MIG**,
+which gives *hardware* memory isolation but only in fixed profiles (e.g. 1g/2g/4g)
+and reduces packing flexibility. Until MPS is fixed or MIG profiles are planned,
+**static per-pod caps at slice granularity** are the correct, predictable policy.
+Revisit MIG if hard isolation becomes a multi-tenant requirement.
+
+### Checklist when adding a model to a time-sliced node
+
+1. Classify it (generative / pooling / asr / diffusion / fixed).
+2. Set `gpu_memory_utilization` ≤ the node's per-pod cap (1/slices-per-card),
+   and **lower** for pooling/small models.
+3. Re-run the worst-case check: sum the *N* heaviest pods (N = slices/card) ≤
+   ~0.95 × card VRAM.
+4. Pooling/embedding/rerank models **never** get a generative-sized budget.
