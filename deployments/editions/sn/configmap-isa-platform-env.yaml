@@ -27,6 +27,11 @@ data:
   ISA_METERING_ENABLED: 'true'
   ISA_MODEL_PROVIDER: local
   ISA_MODEL_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  # Alias of ISA_MODEL_URL. The isa-mcp model client (core/config/mcp_config.py)
+  # reads ISA_SERVICE_URL (not ISA_MODEL_URL) and otherwise defaults to
+  # localhost:8082 → consumers couldn't reach isa-model (model_service is also
+  # unhealthy in Consul). Set both so every consumer resolves isa-model.
+  ISA_SERVICE_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
   ISA_MULTI_TENANT: 'false'
   LOCAL_GPU_DISPATCH_MODE: vllm
   LOKI_ENABLED: 'false'
@@ -66,9 +71,9 @@ data:
   ISA_RERANK_BACKEND: local_embedding
   LOCAL_RERANK_EMBEDDING_MODEL: qwen3-embedding-8b
   ISA_RERANK_ALLOW_MODAL_FALLBACK: 'false'
-  LOCAL_TTS_BASE_URL: http://kokoro-tts.sn-cloud-production.svc.cluster.local:8880
-  LOCAL_TTS_RUNTIME_MODEL: kokoro
-  LOCAL_TTS_DEFAULT_VOICE: af_nicole
+  LOCAL_TTS_BASE_URL: http://fish-speech-tts.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_TTS_RUNTIME_MODEL: fish-speech
+  LOCAL_TTS_DEFAULT_VOICE: default
   LOCAL_TTS_RESPONSE_FORMAT: wav
   LOCAL_IMAGE_BASE_URL: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
   LOCAL_IMAGE_RUNTIME_MODEL: qwen-image-2.0
