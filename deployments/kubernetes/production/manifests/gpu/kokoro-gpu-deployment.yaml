@@ -160,40 +160,27 @@ spec:
         - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
       containers:
         - name: kokoro
-          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          image: core.harbor.domain/isa/kokoro-gpu:cu128-v1   # baked (#408): deps pre-installed -> fast restart
           imagePullPolicy: IfNotPresent
           ports: [ { containerPort: 8880, name: http } ]
           env:
             - { name: KOKORO_LANG, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: KOKORO_LANG } } }
             - { name: DEFAULT_VOICE, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: DEFAULT_VOICE } } }
-            - { name: PIP_EXTRAS, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: PIP_EXTRAS } } }
             - { name: HF_HUB_DISABLE_XET, value: "1" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
             - { name: HF_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
             - { name: HUGGING_FACE_HUB_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
-          command: ["/bin/bash", "-lc"]
-          args:
-            - |
-              set -eu
-              echo "[startup] apt espeak-ng + git ..."; (apt-get update -qq && apt-get install -y -qq espeak-ng git) || true
-              echo "[startup] pip extras (torch pre-baked sm_120 — DO NOT reinstall) ..."
-              for attempt in 1 2 3 4 5 6; do
-                pip install --retries 10 --timeout 300 --prefer-binary ${PIP_EXTRAS} && break
-                echo "[startup] pip attempt $attempt failed; retry in 15s"; sleep 15
-              done
-              python -c "import torch,sys; v=torch.__version__; assert 'cu12' in v or '+cu128' in v, 'torch clobbered: %s'%v; print('[guard] torch',v,'cuda',torch.version.cuda,'sm', torch.cuda.get_device_capability() if torch.cuda.is_available() else 'cpu')"
-              cp /etc/kokoro/server.py /tmp/server.py
-              echo "[startup] launching kokoro-gpu ..."
-              exec python /tmp/server.py
+          # server.py + kokoro/misaki/torch all baked into the image; just run it.
+          command: ["python", "/opt/kokoro/server.py"]
           resources:
             requests: { cpu: "1000m", memory: "4Gi", nvidia.com/gpu: "1" }
             limits: { cpu: "4000m", memory: "12Gi", nvidia.com/gpu: "1" }
           startupProbe:
             httpGet: { path: /health, port: 8880 }
-            initialDelaySeconds: 30
+            initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 360
+            failureThreshold: 120          # baked image: first node pull + 15s model load (no startup pip)
           readinessProbe:
             httpGet: { path: /health, port: 8880 }
             initialDelaySeconds: 20
@@ -208,12 +195,9 @@ spec:
             failureThreshold: 6
           volumeMounts:
             - { name: model-cache, mountPath: /root/.cache/huggingface }
-            - { name: server-code, mountPath: /etc/kokoro }
       volumes:
         - name: model-cache
           persistentVolumeClaim: { claimName: model-cache-kokoro-gpu }
-        - name: server-code
-          configMap: { name: kokoro-gpu-config, items: [ { key: server.py, path: server.py } ] }
 ---
 apiVersion: v1
 kind: Service
