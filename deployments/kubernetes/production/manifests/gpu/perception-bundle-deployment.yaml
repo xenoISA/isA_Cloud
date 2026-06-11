@@ -76,6 +76,7 @@ data:
             from transformers import (AutoModelForCausalLM, AutoProcessor,
                                        SamModel, SamProcessor, AutoModel)
             t0 = time.time()
+            # --- mandatory: Florence-2 + SAM (detection/caption/OCR/grounding/seg) ---
             print(f"[load] Florence-2 {FLORENCE} ...", flush=True)
             M["flo_model"] = AutoModelForCausalLM.from_pretrained(
                 FLORENCE, trust_remote_code=True, torch_dtype=DTYPE).to(DEVICE).eval()
@@ -85,15 +86,20 @@ data:
             M["sam_model"] = SamModel.from_pretrained(SAM, torch_dtype=DTYPE).to(DEVICE).eval()
             M["sam_proc"] = SamProcessor.from_pretrained(SAM)
             STATE["loaded"].append("sam")
-            print(f"[load] SigLIP-2 {SIGLIP} ...", flush=True)
-            M["sig_model"] = AutoModel.from_pretrained(SIGLIP, torch_dtype=DTYPE).to(DEVICE).eval()
-            # use_fast: SigLIP-2's slow SentencePiece tokenizer has a None
-            # vocab_file path in transformers 4.49.0; the fast tokenizer loads
-            # from tokenizer.json and sidesteps it.
-            M["sig_proc"] = AutoProcessor.from_pretrained(SIGLIP, use_fast=True)
-            STATE["loaded"].append("siglip-2")
+            # --- best-effort: SigLIP embeddings (siglip2 buggy in tf 4.49.0 ->
+            #     fall back to stable siglip-1; NEVER block the bundle on it) ---
+            for sig_id in [SIGLIP, "google/siglip-base-patch16-224"]:
+                try:
+                    print(f"[load] SigLIP {sig_id} ...", flush=True)
+                    M["sig_model"] = AutoModel.from_pretrained(sig_id, torch_dtype=DTYPE).to(DEVICE).eval()
+                    M["sig_proc"] = AutoProcessor.from_pretrained(sig_id)
+                    STATE["loaded"].append(f"siglip:{sig_id.split('/')[-1]}")
+                    break
+                except Exception as se:
+                    print(f"[load] SigLIP {sig_id} failed ({se}); trying fallback", flush=True)
+                    M.pop("sig_model", None)
             STATE["ready"] = True
-            print(f"[load] all models resident in {time.time()-t0:.0f}s", flush=True)
+            print(f"[load] resident in {time.time()-t0:.0f}s: {STATE['loaded']}", flush=True)
         except Exception as e:
             STATE["error"] = f"{e}\n{traceback.format_exc()}"
             print(f"[load] FAILED: {STATE['error']}", flush=True)
@@ -165,6 +171,8 @@ data:
     @app.post("/v1/perception/embed")
     def embed(r: EmbedReq):
         if not STATE["ready"]: raise HTTPException(503, "not ready")
+        if "sig_model" not in M:
+            raise HTTPException(501, "siglip embeddings unavailable in this build")
         proc, model = M["sig_proc"], M["sig_model"]
         out = {}
         with torch.inference_mode():
