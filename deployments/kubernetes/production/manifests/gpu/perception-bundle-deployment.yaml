@@ -41,7 +41,7 @@ data:
   FLORENCE_MODEL: "microsoft/Florence-2-large"
   SAM_MODEL: "facebook/sam-vit-base"
   SIGLIP_MODEL: "google/siglip2-base-patch16-224"
-  PIP_EXTRAS: "transformers==4.49.0 timm==1.0.11 einops==0.8.0 pillow==10.4.0 accelerate==1.2.1 safetensors fastapi==0.115.6 uvicorn==0.34.0 python-multipart==0.0.20"
+  PIP_EXTRAS: "transformers==4.49.0 timm==1.0.11 einops==0.8.0 pillow==10.4.0 accelerate==1.2.1 safetensors sentencepiece==0.2.0 protobuf==5.28.3 fastapi==0.115.6 uvicorn==0.34.0 python-multipart==0.0.20"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -87,7 +87,10 @@ data:
             STATE["loaded"].append("sam")
             print(f"[load] SigLIP-2 {SIGLIP} ...", flush=True)
             M["sig_model"] = AutoModel.from_pretrained(SIGLIP, torch_dtype=DTYPE).to(DEVICE).eval()
-            M["sig_proc"] = AutoProcessor.from_pretrained(SIGLIP)
+            # use_fast: SigLIP-2's slow SentencePiece tokenizer has a None
+            # vocab_file path in transformers 4.49.0; the fast tokenizer loads
+            # from tokenizer.json and sidesteps it.
+            M["sig_proc"] = AutoProcessor.from_pretrained(SIGLIP, use_fast=True)
             STATE["loaded"].append("siglip-2")
             STATE["ready"] = True
             print(f"[load] all models resident in {time.time()-t0:.0f}s", flush=True)

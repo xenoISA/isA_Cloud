@@ -35,8 +35,8 @@ metadata:
 data:
   MODEL_ID: "Qwen/Qwen3-VL-8B-Instruct-FP8"   # 48GB-slice upgrade: Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
   SERVED_MODEL_NAME: "qwen3-vl-8b"
-  MAX_MODEL_LEN: "65536"
-  GPU_MEMORY_UTILIZATION: "0.20"               # time-slice co-tenant cap (~19GB of the 96GB card)
+  MAX_MODEL_LEN: "32768"                        # 65536 needed 9GiB KV > budget; 32768 -> ~4.5GiB KV
+  GPU_MEMORY_UTILIZATION: "0.25"               # ~24GB of 96GB: 10.3GB weights + ~11GB KV headroom
   MAX_NUM_SEQS: "8"
   LIMIT_MM_IMAGE: "4"
   LIMIT_MM_VIDEO: "1"
@@ -91,6 +91,8 @@ spec:
             - { name: LIMIT_MM_VIDEO, valueFrom: { configMapKeyRef: { name: qwen3-vl-config, key: LIMIT_MM_VIDEO } } }
             - { name: VLLM_ATTENTION_BACKEND, value: "FLASH_ATTN" }   # vLLM's own kernel; no flash-attn wheel
             - { name: HF_HUB_DISABLE_XET, value: "1" }                # xet endpoint times out on this network
+            - { name: HF_HUB_OFFLINE, value: "1" }                    # weights cached on PVC; skip HF sync (survives DNS flaps)
+            - { name: TRANSFORMERS_OFFLINE, value: "1" }
             - { name: HF_HOME, value: /root/.cache/huggingface }
             - { name: VLLM_PORT, value: "8000" }
             - { name: HF_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }

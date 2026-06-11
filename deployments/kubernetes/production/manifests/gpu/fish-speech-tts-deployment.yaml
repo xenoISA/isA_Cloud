@@ -469,17 +469,30 @@ spec:
               # observed live) hunting a version satisfying tensorboard+gradio.
               # Pin the contested packages; if a pin truly conflicts pip now
               # fails FAST with the real error instead of spiralling.
+              # The real trigger for resolver backtracking is metadata-fetch
+              # TIMEOUTS on the flaky SN->PyPI link: a timed-out .whl.metadata
+              # reads as "version unavailable" so pip walks to the next version,
+              # cascading down the whole range. Two levers: (1) a long per-fetch
+              # timeout (PIP_DEFAULT_TIMEOUT=300) so fetches almost never give up,
+              # and (2) pin the packages seen walking so even a miss can't spiral.
               cat > /tmp/pip-constraints.txt <<'CONSTRAINTS'
               werkzeug==3.0.6
               tensorboard==2.18.0
               sentry-sdk==2.40.0
+              wandb==0.19.11
+              gitpython==3.1.43
+              gitdb==4.0.11
+              smmap==5.0.1
+              cachetools==5.5.2
+              zstandard==0.23.0
               CONSTRAINTS
               sed -i 's/^              //' /tmp/pip-constraints.txt
+              export PIP_DEFAULT_TIMEOUT=300
               echo "[startup] pip installing fish-speech + shim extras (torch is pre-baked) ..."
               for attempt in 1 2 3 4 5 6; do
-                pip install --retries 10 --timeout 120 \
+                pip install --retries 10 --timeout 300 --prefer-binary \
                      -c /tmp/pip-constraints.txt -e /opt/fish-speech \
-                  && pip install --retries 10 --timeout 120 \
+                  && pip install --retries 10 --timeout 300 --prefer-binary \
                        -c /tmp/pip-constraints.txt \
                        -r /etc/fish-speech/requirements-extra.txt && break
                 echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
