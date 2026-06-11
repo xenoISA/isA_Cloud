@@ -21,39 +21,38 @@
 
 ---
 
-## A. Platform 平台镜像(15 — 应 sync;含 #324 新增 isA_Admin)
+## A. Platform 平台镜像(11 — 应 sync)
 
-`sn_X` ↔ `isA_X` 一一对应。sanitizer **只应**对这 15 个运行。
+`sn_X` ↔ `isA_X` 一一对应。sanitizer **只应**对这 11 个运行。
 
-> **2026-06-11 修订**:`sn_model`、`sn_training` 已从本类**移出**到 §B —— archive 验证
-> 发现它们已累积真实 SweetNight 业务逻辑(sn_model 含完整 SCM 销量预测 ML 产品、耦合
-> `sn_data` 预测数据产品;sn_training 含 SweetNight 业务化培训内容/案例库),**不再是纯镜像**。
+> **2026-06-11 修订(archive 验证两轮)**:从本类**移出 5 个**到 §B —— 它们已累积真实
+> SweetNight 业务逻辑,不再是纯镜像:`sn_model`(SCM 销量预测 ML 产品)、`sn_training`
+> (业务化培训内容)、`sn_data`(~35k LOC SN 数据基建 + forecast/TROBS 数据产品,`sn_model`
+> 依赖)、`sn_os`(141 个 SN-only 文件:personas / Amazon VC 策略 / stealth 等)、`sn_agent_sdk`
+> (net-new `sn_agent_sdk/` 包:BatchSwarm / 链 / Rufus·social 适配器)。另:`sn_admin`(#324
+> 计划项)**从未建仓**,删除。已归档的镜像应同步从 sanitizer 白名单移除。
 > 见 `fork-to-profile-decommission.md` §2 与 ADR 0010。
 
 | sn repo | isA 上游 |
 |---|---|
 | sn_agent | isA_Agent |
-| sn_agent_sdk | isA_Agent_SDK |
 | sn_app_sdk | isA_App_SDK |
 | sn_cloud | isA_Cloud |
 | sn_console | isA_Console |
 | sn_creative | isA_Creative |
-| sn_data | isA_Data |
 | sn_docs | isA_Docs |
 | sn_marketing | isA_Marketing |
 | sn_mate | isA_Mate |
 | sn_mcp | isA_MCP |
-| sn_os | isA_OS |
 | sn_user | isA_user |
 | sn_vibe | isA_Vibe |
-| sn_admin | isA_Admin (#324, 新增) |
 
-规范化的平台 key(供 sanitizer 白名单使用):
-`agent agent_sdk app_sdk cloud console creative data docs marketing mate mcp os user vibe admin`
+规范化的平台 key(供 sanitizer 白名单使用;已归档者应从活动白名单移除):
+`agent app_sdk cloud console creative docs marketing mate mcp user vibe`
 
 ---
 
-## B. Customer-specific 客户专属(26 — 永不 sync)
+## B. Customer-specific 客户专属(29 — 永不 sync)
 
 无 isA 上游(或已积累 SN 专属业务逻辑,不能再 sync 覆盖)。一旦被 sanitizer 碰到 →
 被脱敏/历史重写/覆盖。**必须排除。** 这些是 SN 客户场景下的企业系统与业务塔,独立演进。
@@ -66,6 +65,9 @@
 |---|---|
 | sn_model | **ML/模型(SweetNight SCM 销量预测产品;2026-06-11 从 §A 移入)** |
 | sn_training | **培训(SweetNight 业务化内容/案例库;2026-06-11 从 §A 移入)** |
+| sn_data | **数据(~35k LOC SN 数据基建 + forecast/TROBS 数据产品,sn_model 依赖;2026-06-11 从 §A 移入;ADR 0010 候选)** |
+| sn_os | **OS/业务(personas / Amazon VC 策略 / stealth,141 SN-only 文件;2026-06-11 从 §A 移入)** |
+| sn_agent_sdk | **Agent SDK(net-new sn_agent_sdk 包:BatchSwarm/链/适配器;2026-06-11 从 §A 移入)** |
 | sn_aom | 运维/AOM |
 | sn_arch | 架构/arch(discover 曾漏列,实地核对补回) |
 | sn_commerce | 电商 |
