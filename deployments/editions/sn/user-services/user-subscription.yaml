@@ -8,3 +8,10 @@ env:
   - {name: SERVICE_PORT, value: "8228"}
 health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
 liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}
+# 2Gi (base default 512Mi): steady-state ~175Mi but the startup spike exceeds
+# even 1Gi intermittently (OOM exit 137, dozens of restarts) — isA_user#528.
+# Generous headroom; the spike's root cause (a ~6x transient over steady) is
+# tracked in #528 for profiling.
+resources:
+  requests: {cpu: "150m", memory: "256Mi"}
+  limits: {cpu: "500m", memory: "2Gi"}
