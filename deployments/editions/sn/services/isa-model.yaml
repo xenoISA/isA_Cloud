@@ -3,7 +3,7 @@
 name: isa-model
 image:
   repository: isa/isa-model
-  tag: "gpu-local-multimodal-20260609-r12"
+  tag: "gpu-local-multimodal-20260611-r16"
 port: 8082
 replicas: 1
 resources:
