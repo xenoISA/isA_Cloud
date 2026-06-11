@@ -10,9 +10,19 @@ port: 8081
 replicas: 1
 resources:
   requests: {cpu: "250m", memory: "512Mi"}
-  limits: {cpu: "2", memory: "2Gi"}
-health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
-liveness: {path: /health, initialDelaySeconds: 30, periodSeconds: 20}
+  # 4Gi (was 2Gi): steady-state ~350Mi but startup spikes (284 tools + MCP
+  # schema fetch + model-client init) were OOMKilling pods (exit 137) during
+  # rollout. Node has ample RAM; headroom for the startup peak.
+  limits: {cpu: "2", memory: "4Gi"}
+# /health does real dependency checks (incl. isa-model now that it's reachable),
+# which can take >5s. Generous probe timeouts/thresholds so a slow health check
+# doesn't fail liveness and SIGKILL the pod (exit 137 kill-loop).
+health: {path: /health, initialDelaySeconds: 20, periodSeconds: 15, timeoutSeconds: 20, failureThreshold: 6}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 30, timeoutSeconds: 20, failureThreshold: 6}
+# startupProbe holds liveness OFF until the app finishes its slow startup
+# (it retries down deps like FalkorDB before binding). ~900s budget so liveness
+# never SIGKILLs a still-starting pod. Once /health 200s once, liveness takes over.
+startupProbe: {enabled: true, path: /health, failureThreshold: 90, periodSeconds: 10}
 
 # NOTE: helm -f REPLACES list values, so this env array overrides the base's
 # (isa-svc-base.yaml) env. The base only sets ISA_LICENSE_PUBKEY, re-declared
