@@ -91,8 +91,11 @@ data:
   # Capped LOW for a shared MPS/time-slice with no hard VRAM isolation: 0.25 of
   # a 96 GB card is ~24 GB ceiling, leaving headroom for the rest of the
   # specialty-audio pack. 1.7B bf16 weights are ~4 GB; the rest is KV cache +
-  # audio buffers. Raise only after a live VRAM check on the shared slice.
-  GPU_MEMORY_UTILIZATION: "0.25"
+  # audio buffers. Live check (ADR 0010 2026-06-11b): at 0.25 it reserved 24GB
+  # (3.87GB weights + 15.59GiB KV / 291k tokens / 71x concurrency) — wildly
+  # over-provisioned for short 4k-ctx ASR @ 8 seqs (~1.8GB KV needed). 0.10
+  # (~9.6GB) = weights + ample KV + headroom; frees ~14GB on the k8s-03 slice.
+  GPU_MEMORY_UTILIZATION: "0.10"
   MAX_MODEL_LEN: "4096"
   MAX_NUM_SEQS: "8"
   KV_CACHE_DTYPE: "fp8"

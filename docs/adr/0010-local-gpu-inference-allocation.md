@@ -289,18 +289,29 @@ The cap is a **ceiling**; size each engine to its actual footprint:
 
 | Pod | Type | was | **now** | VRAM | within 24 GB slice? |
 |-----|------|-----|---------|------|---------------------|
-| vllm-qwen3-embedding-8b | pooling | 0.50 | **0.22** | ~21 GB | ✓ (was ✗ @ 48 GB) |
-| qwen3-vl-8b | generative | 0.25 | 0.25 | ~24 GB | ✓ |
-| qwen3-asr | asr | 0.25 | 0.25 | ~24 GB | ✓ |
+| vllm-qwen3-embedding-8b | pooling (8B) | 0.50 | **0.22** | ~21 GB | ✓ (was ✗ @ 48 GB) |
+| qwen3-vl-8b | generative (8B) | 0.25 | 0.25 | ~24 GB | ✓ |
+| qwen3-asr-1.7b | asr (1.7B) | 0.25 | **0.10** | ~10 GB | ✓ (was over-provisioned: 24 GB / 71× concurrency for short ASR) |
 | paddleocr-vl | generative (0.9B) | 0.10 | 0.10 | ~10 GB | ✓ |
 | faster-whisper-v3-turbo | asr (fixed) | — | — | ~3 GB | ✓ |
 | perception-bundle | fixed | — | — | ~6 GB | ✓ |
 | fish-speech-tts | fixed | — | — | ~16 GB | ✓ |
 
 **Worst-case placement check** (the 4 heaviest pods on one physical card, since
-ts-r4 = 4 slices/card): qwen3-vl 24 + embedding 21 + qwen3-asr 24 + fish 16 =
-**85 GB < 96 GB ✓**. Total node demand ~104 GB across 192 GB (2 cards) = 54 %
-util — comfortable, with fish now fitting.
+ts-r4 = 4 slices/card): qwen3-vl 24 + embedding 21 + fish 16 + qwen3-asr 10 =
+**71 GB < 96 GB ✓** (was 85 GB before the qwen3-asr trim). Total node demand
+~80 GB across 192 GB (2 cards) = 42 % util — comfortable, with fish now fitting
+and room for the spare 8th slice.
+
+**Other nodes audited (2026-06-11b):**
+- **k8s-01 (llm, dedicated):** qwen36-27B-FP8 ×2 @ 0.85 = 27.6 GB weights + 50 GB
+  KV (204k tokens, 21.8× concurrency) per card. Correct — a dedicated card *should*
+  use ~0.85; KV→concurrency is the goal for the main LLM. No change.
+- **k8s-02 (generative, ts-r2, 48 GB slices):** triton-flux / triton-qwen-image /
+  triton-wan (diffusers, fixed-footprint ~20-28 GB each), 3 pods on 2 cards, all
+  stable @ 0 restarts. Worst case (2 heaviest on one card) ≈ 56 GB < 96 GB. No
+  change — but diffusion peak VRAM isn't `gpu_mem_util`-governed, so re-verify if
+  a 4th generative engine is added.
 
 ### Dynamic allocation — why static caps (for now)
 
