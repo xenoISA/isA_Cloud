@@ -1,0 +1,236 @@
+# Kokoro-82M on GPU (Blackwell sm_120) — commercial-safe local TTS
+#
+# Replaces the CPU interim (kokoro-tts-deployment.yaml) and the dead-end fish
+# (non-commercial). Kokoro-82M is Apache-2.0 (commercial-safe), tiny (~0.5GB),
+# SOTA-for-its-size, and on GPU it's fast — fixing the original "slow/flaky CPU"
+# complaint without fish's license/stability problems.
+#
+# WHY NOT the prebuilt kokoro-fastapi-gpu image: its v0.3.0 bundles CUDA 12.6.3,
+# which has NO sm_120 kernels -> "CUDA error: no kernel image available" on
+# Blackwell. Same wall as the MPS test. So we run Kokoro via its own `kokoro`
+# pip package on the BAKED cu128 PyTorch base (sm_120-capable), exactly like the
+# perception bundle: ConfigMap server.py + startup pip (NO torch — baked),
+# weights->PVC, /health gates 503->200. Kokoro uses standard torch ops (no
+# flash-attn), so it runs clean on sm_120.
+#
+# Validate here as `kokoro-gpu`; once it serves, repoint isa-model
+# LOCAL_TTS_BASE_URL kokoro-tts -> kokoro-gpu and retire the CPU one.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-kokoro-gpu
+  namespace: isa-cloud-production
+  labels: { app: kokoro-gpu, isa-model/model-id: kokoro }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 10Gi } }
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kokoro-gpu-config
+  namespace: isa-cloud-production
+  labels: { app: kokoro-gpu }
+data:
+  KOKORO_LANG: "a"                 # 'a' = American English
+  DEFAULT_VOICE: "af_nicole"
+  PIP_EXTRAS: "kokoro==0.9.4 misaki[en]==0.9.4 soundfile==0.12.1 numpy==1.26.4 fastapi==0.115.6 uvicorn==0.34.0"
+  server.py: |
+    import io, os, threading, time, traceback
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import Response
+    from pydantic import BaseModel
+    import uvicorn
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    LANG = os.getenv("KOKORO_LANG", "a")
+    DEFAULT_VOICE = os.getenv("DEFAULT_VOICE", "af_nicole")
+    SR = 24000
+    STATE = {"ready": False, "error": None}
+    P = {}
+
+    def _load():
+        # Retry across the flaky SN->HF link: a transient DNS/connection error
+        # during the Kokoro-82M download must NOT permanently fail the engine
+        # (the download resumes from the PVC HF cache on each attempt).
+        from kokoro import KPipeline
+        for attempt in range(1, 13):
+            try:
+                t0 = time.time()
+                print(f"[load] attempt {attempt}: KPipeline lang={LANG} device={DEVICE} ...", flush=True)
+                P["pipe"] = KPipeline(lang_code=LANG, device=DEVICE)
+                for _g, _p, _a in P["pipe"]("warm up.", voice=DEFAULT_VOICE):
+                    break
+                STATE["ready"] = True
+                STATE["error"] = None
+                print(f"[load] kokoro ready on {DEVICE} in {time.time()-t0:.0f}s", flush=True)
+                return
+            except Exception as e:
+                # keep /health at 503 (loading) during retries, not 500
+                print(f"[load] attempt {attempt} failed ({e}); retry in 20s", flush=True)
+                time.sleep(20)
+        STATE["error"] = "kokoro load failed after retries (see logs)"
+        print(f"[load] giving up: {STATE['error']}", flush=True)
+
+    app = FastAPI(title="kokoro-gpu")
+
+    @app.get("/health")
+    def health():
+        if STATE["error"]: raise HTTPException(500, STATE["error"][:400])
+        if not STATE["ready"]: raise HTTPException(503, "loading")
+        return {"status": "ok", "device": DEVICE}
+
+    class SpeechReq(BaseModel):
+        model: str = "kokoro"
+        input: str
+        voice: str = DEFAULT_VOICE
+        response_format: str = "wav"
+        speed: float = 1.0
+
+    def _synth(text, voice, speed):
+        chunks = []
+        for _gs, _ps, audio in P["pipe"](text, voice=voice or DEFAULT_VOICE, speed=speed):
+            a = audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio)
+            chunks.append(a.astype("float32"))
+        return np.concatenate(chunks) if chunks else np.zeros(1, dtype="float32")
+
+    @app.post("/v1/audio/speech")
+    def speech(r: SpeechReq):
+        if not STATE["ready"]: raise HTTPException(503, "not ready")
+        try:
+            audio = _synth(r.input, r.voice, r.speed)
+        except Exception as e:
+            raise HTTPException(500, f"synthesis failed: {e}")
+        fmt = (r.response_format or "wav").lower()
+        buf = io.BytesIO()
+        if fmt in ("wav", "pcm"):
+            sf.write(buf, audio, SR, format="WAV"); mt = "audio/wav"
+        elif fmt == "flac":
+            sf.write(buf, audio, SR, format="FLAC"); mt = "audio/flac"
+        else:
+            sf.write(buf, audio, SR, format="WAV"); mt = "audio/wav"
+        return Response(content=buf.getvalue(), media_type=mt)
+
+    @app.get("/v1/models")
+    def models():
+        return {"object": "list", "data": [{"id": "kokoro", "object": "model", "owned_by": "isa"}]}
+
+    if __name__ == "__main__":
+        threading.Thread(target=_load, daemon=True).start()
+        uvicorn.run(app, host="0.0.0.0", port=8880, log_level="info")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokoro-gpu
+  namespace: isa-cloud-production
+  labels:
+    app: kokoro-gpu
+    engine: fastapi-kokoro
+    isa-model/instance-group: specialty
+    isa-model/model-id: kokoro
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2400
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: kokoro-gpu } }
+  template:
+    metadata:
+      labels:
+        app: kokoro-gpu
+        engine: fastapi-kokoro
+        isa-model/instance-group: specialty
+        isa-model/model-id: kokoro
+    spec:
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - { key: isa.io/gpu-role-specialty, operator: In, values: ["true"] }
+              - matchExpressions:
+                  - { key: sn.io/gpu-role, operator: In, values: ["specialty"] }
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: kokoro
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8880, name: http } ]
+          env:
+            - { name: KOKORO_LANG, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: KOKORO_LANG } } }
+            - { name: DEFAULT_VOICE, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: DEFAULT_VOICE } } }
+            - { name: PIP_EXTRAS, valueFrom: { configMapKeyRef: { name: kokoro-gpu-config, key: PIP_EXTRAS } } }
+            - { name: HF_HUB_DISABLE_XET, value: "1" }
+            - { name: HF_HOME, value: /root/.cache/huggingface }
+            - { name: HF_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+            - { name: HUGGING_FACE_HUB_TOKEN, valueFrom: { secretKeyRef: { name: huggingface-token, key: token, optional: true } } }
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -eu
+              echo "[startup] apt espeak-ng + git ..."; (apt-get update -qq && apt-get install -y -qq espeak-ng git) || true
+              echo "[startup] pip extras (torch pre-baked sm_120 — DO NOT reinstall) ..."
+              for attempt in 1 2 3 4 5 6; do
+                pip install --retries 10 --timeout 300 --prefer-binary ${PIP_EXTRAS} && break
+                echo "[startup] pip attempt $attempt failed; retry in 15s"; sleep 15
+              done
+              python -c "import torch,sys; v=torch.__version__; assert 'cu12' in v or '+cu128' in v, 'torch clobbered: %s'%v; print('[guard] torch',v,'cuda',torch.version.cuda,'sm', torch.cuda.get_device_capability() if torch.cuda.is_available() else 'cpu')"
+              cp /etc/kokoro/server.py /tmp/server.py
+              echo "[startup] launching kokoro-gpu ..."
+              exec python /tmp/server.py
+          resources:
+            requests: { cpu: "1000m", memory: "4Gi", nvidia.com/gpu: "1" }
+            limits: { cpu: "4000m", memory: "12Gi", nvidia.com/gpu: "1" }
+          startupProbe:
+            httpGet: { path: /health, port: 8880 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 360
+          readinessProbe:
+            httpGet: { path: /health, port: 8880 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: 8880 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - { name: model-cache, mountPath: /root/.cache/huggingface }
+            - { name: server-code, mountPath: /etc/kokoro }
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim: { claimName: model-cache-kokoro-gpu }
+        - name: server-code
+          configMap: { name: kokoro-gpu-config, items: [ { key: server.py, path: server.py } ] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kokoro-gpu
+  namespace: isa-cloud-production
+  labels: { app: kokoro-gpu, engine: fastapi-kokoro }
+spec:
+  type: ClusterIP
+  selector: { app: kokoro-gpu }
+  ports: [ { name: http, port: 8880, targetPort: 8880 } ]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kokoro-gpu
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector: { matchLabels: { app: kokoro-gpu } }
