@@ -19,7 +19,7 @@ env:
   - name: VLLM_HOST
     value: vllm-qwen36-27b-pool
   - name: LOCAL_TTS_BASE_URL
-    value: http://fish-speech-tts.sn-cloud-production.svc.cluster.local:8000
+    value: http://kokoro-gpu.sn-cloud-production.svc.cluster.local:8880
   - name: LOCAL_IMAGE_BASE_URL
     value: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
   - name: LOCAL_VIDEO_BASE_URL
