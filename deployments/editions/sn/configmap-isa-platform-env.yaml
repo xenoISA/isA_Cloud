@@ -78,6 +78,12 @@ data:
   LOCAL_VIDEO_RUNTIME_MODEL: wan-2.2
   LOCAL_VIDEO_BACKEND: triton
   LOCAL_VIDEO_TIMEOUT_SECONDS: '1800'
+  LOCAL_VLM_BASE_URL: http://qwen3-vl.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_VLM_RUNTIME_MODEL: qwen3-vl-8b
+  LOCAL_VLM_TIMEOUT_SECONDS: '180'
+  LOCAL_OCR_BASE_URL: http://paddleocr-vl.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_OCR_RUNTIME_MODEL: paddleocr-vl
+  LOCAL_PERCEPTION_BASE_URL: http://perception-bundle.sn-cloud-production.svc.cluster.local:8000
 kind: ConfigMap
 metadata:
   name: isa-platform-env

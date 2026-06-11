@@ -123,12 +123,14 @@ spec:
             httpGet: { path: /health, port: 8000 }
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 8            # vLLM /health can lag under inference load
             failureThreshold: 30
           livenessProbe:
             httpGet: { path: /health, port: 8000 }
             initialDelaySeconds: 60
             periodSeconds: 30
-            failureThreshold: 5
+            timeoutSeconds: 10           # generous: avoid false restarts when busy
+            failureThreshold: 8
           volumeMounts:
             - { name: model-cache, mountPath: /root/.cache/huggingface }
       volumes:

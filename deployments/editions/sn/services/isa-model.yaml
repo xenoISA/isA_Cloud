@@ -24,6 +24,12 @@ env:
     value: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
   - name: LOCAL_VIDEO_BASE_URL
     value: http://triton-wan-2-2.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_VLM_BASE_URL
+    value: http://qwen3-vl.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_OCR_BASE_URL
+    value: http://paddleocr-vl.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_PERCEPTION_BASE_URL
+    value: http://perception-bundle.sn-cloud-production.svc.cluster.local:8000
 
 # HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
 autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}
