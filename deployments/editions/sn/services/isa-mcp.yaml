@@ -3,14 +3,44 @@
 name: isa-mcp
 image:
   repository: isa/isa-mcp
-  tag: "0.1.3"
+  # 0.1.4: consul_* MCP tools honor CONSUL_HOST/CONSUL_PORT (were defaulting to
+  # localhost:8500 in-cluster). Found via deep MCP-client functional testing.
+  tag: "0.1.4"
 port: 8081
 replicas: 1
 resources:
   requests: {cpu: "250m", memory: "512Mi"}
-  limits: {cpu: "2", memory: "2Gi"}
-health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
-liveness: {path: /health, initialDelaySeconds: 30, periodSeconds: 20}
+  # 4Gi (was 2Gi): steady-state ~350Mi but startup spikes (284 tools + MCP
+  # schema fetch + model-client init) were OOMKilling pods (exit 137) during
+  # rollout. Node has ample RAM; headroom for the startup peak.
+  limits: {cpu: "2", memory: "4Gi"}
+# /health does real dependency checks (incl. isa-model now that it's reachable),
+# which can take >5s. Generous probe timeouts/thresholds so a slow health check
+# doesn't fail liveness and SIGKILL the pod (exit 137 kill-loop).
+health: {path: /health, initialDelaySeconds: 20, periodSeconds: 15, timeoutSeconds: 20, failureThreshold: 6}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 30, timeoutSeconds: 20, failureThreshold: 6}
+# startupProbe holds liveness OFF until the app finishes its slow startup
+# (it retries down deps like FalkorDB before binding). ~900s budget so liveness
+# never SIGKILLs a still-starting pod. Once /health 200s once, liveness takes over.
+startupProbe: {enabled: true, path: /health, failureThreshold: 90, periodSeconds: 10}
+
+# NOTE: helm -f REPLACES list values, so this env array overrides the base's
+# (isa-svc-base.yaml) env. The base only sets ISA_LICENSE_PUBKEY, re-declared
+# here so licensing is preserved.
+#
+# DATA_FALLBACK_HOST/PORT: the MCP data client (digital_client) discovers
+# `data_service` via Consul first; the data service isn't registered there yet,
+# so without this it falls back to localhost:8084 (the pod itself) and every
+# data://* resource + data tool fails in-cluster. Point the fallback at the real
+# K8s service so it resolves. See xenoISA/isA_MCP#731.
+env:
+  - name: ISA_LICENSE_PUBKEY
+    valueFrom:
+      configMapKeyRef:
+        name: isa-license-pubkey
+        key: ed25519.pub
+  - {name: DATA_FALLBACK_HOST, value: "isa-data"}
+  - {name: DATA_FALLBACK_PORT, value: "8084"}
 
 # HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
 autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

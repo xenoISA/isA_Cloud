@@ -52,6 +52,15 @@ async def postgres_client():
     )
     # asyncpg pool.acquire() is a sync call returning an async context manager
     mock_conn = AsyncMock()
+    # asyncpg conn.transaction() is a SYNC call returning an async context
+    # manager. query/query_row/execute run SET search_path + the statement
+    # inside `async with conn.transaction()` (pgbouncer transaction-pooling
+    # safety), so the mock must expose it as a sync-callable async-CM, not an
+    # AsyncMock (which would return a coroutine).
+    mock_txn_cm = MagicMock()
+    mock_txn_cm.__aenter__ = AsyncMock(return_value=None)
+    mock_txn_cm.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=mock_txn_cm)
     mock_acquire_cm = MagicMock()
     mock_acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_acquire_cm.__aexit__ = AsyncMock(return_value=None)

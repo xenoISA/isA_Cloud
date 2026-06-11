@@ -1,13 +1,12 @@
 # isa-model schema migration (SN edition).
 #
 # INTERIM: applies the `model`/config DDL that isa-model's admin config API
-# (/api/v1/config/{providers,settings,backups,environments}) needs. These tables
-# mirror isa-model's alembic migrations 003_create_provider_configs +
-# 004_config_admin_tables, but the isa-model GPU image does NOT bundle
-# deployment/alembic, so we can't run `alembic upgrade` from it. The DDL is
-# idempotent (CREATE ... IF NOT EXISTS), so re-applying is safe.
+# (/api/v1/config/{providers,settings,backups,environments}) needs. Mirrors
+# isa-model alembic 003_create_provider_configs + 004_config_admin_tables, but
+# the isa-model GPU image does NOT bundle deployment/alembic, so we can't run
+# `alembic upgrade` from it. DDL is idempotent (CREATE ... IF NOT EXISTS).
 #
-# PROPER FIX (tracked): bundle the alembic migrations in the isa-model image and
+# PROPER FIX (tracked, isA_Model): bundle the alembic migrations in the image and
 # replace this with an `alembic upgrade head` job (like isa-user-migrate-job.yaml).
 #
 #   kubectl apply -f isa-model-migrate-job.yaml

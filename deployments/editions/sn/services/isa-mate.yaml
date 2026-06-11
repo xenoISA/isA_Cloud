@@ -1,12 +1,25 @@
 name: isa-mate
 image:
   repository: isa/isa-mate
-  tag: "0.1.10"
+  # 0.1.11/0.1.12: marketplace skill registry persisted to Redis (shared) instead
+  # of a pod-local in-memory dict — create/update/delete were inconsistent across
+  # replicas (isA_Mate#605). 0.1.12 patches the installed site-packages copy (the
+  # app runs as the `isa-mate` console script, not from /app).
+  # 0.1.13: tracker (datasets/traces) now passes POSTGRES_* to create_tracker_backend
+  # so "auto" mode uses the SHARED postgres `tracker` schema instead of pod-local
+  # SQLite (cross-pod consistency).
+  # 0.1.14: + fix isa_agent_sdk tracker schema DDL — the idx_annotations_jsonb GIN
+  # index used jsonb_build_object (STABLE, not IMMUTABLE) which rolled back schema
+  # creation, forcing the SQLite fallback. Replaced with a plain composite index.
+  tag: "0.1.15"
 port: 18789
 replicas: 1
 resources:
-  requests: {cpu: "200m", memory: "256Mi"}
-  limits: {cpu: "1", memory: "1Gi"}
+  requests: {cpu: "200m", memory: "384Mi"}
+  # 2Gi (was 1Gi): steady-state is ~250Mi but startup/load spikes (agent SDK +
+  # dual tracker + MCP schema fetch + connection pools) were OOMKilling pods
+  # (exit 137). Headroom for the spike.
+  limits: {cpu: "1", memory: "2Gi"}
 health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
 liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}
 

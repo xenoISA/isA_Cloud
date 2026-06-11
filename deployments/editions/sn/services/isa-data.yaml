@@ -2,7 +2,13 @@
 name: isa-data
 image:
   repository: isa/isa-data
-  tag: "0.1.4"
+  # 0.1.5: enable Consul service registration by default so isa-data registers
+  # as `data_service` like every other platform service. Before, it alone never
+  # registered, so data-service consumers' Consul discovery fell back to
+  # localhost (xenoISA/isA_MCP#731). Registration stays gated on CONSUL_ENABLED.
+  # 0.1.6: RBAC policies persisted to Redis (shared) instead of a pod-local JSON
+  # file — grant/check were inconsistent across the 4 replicas (isA_Data#432).
+  tag: "0.1.6"
 port: 8084
 replicas: 1
 resources:
