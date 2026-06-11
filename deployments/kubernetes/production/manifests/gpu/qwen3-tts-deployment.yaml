@@ -1,0 +1,899 @@
+# Qwen3-TTS GPU Engine — standalone FastAPI + qwen-tts/transformers (#956 sibling)
+#
+# REWRITTEN 2026-06-10 from the custom-docker-build draft to the PROVEN, no-build
+# ConfigMap-mounted FastAPI pattern that already runs the image engines in prod
+# (see gpu/qwen-image-deployment.yaml). AUTHORED FROM WEB RESEARCH — NOT yet
+# built, mirrored, or applied to any cluster. Smoke-test on a real RTX PRO 6000
+# (sm_120) specialty slice before cutting kokoro traffic over.
+#
+# ── WHY THE CUSTOM-IMAGE APPROACH WAS REPLACED ────────────────────────────────
+#   The prior qwen3-tts ran a hand-built core.harbor.domain/isa/qwen3-tts:0.1.0
+#   image (deployments/runtimes/qwen3-tts/Dockerfile) that pip-installed torch
+#   from the cu128 index at BUILD time. That is a second torch supply chain to
+#   build, mirror, and keep Blackwell-correct — exactly the maintenance the image
+#   engines deleted by standardising on the baked cu128 base + ConfigMap server.
+#   This manifest converges qwen3-tts onto that same pattern: NO docker build, the
+#   small TTS stack pip-installed at startup over a baked sm_120 torch, the server
+#   materialised from a ConfigMap, and a background model load gated by /health.
+#
+# ── SHARED ARCHITECTURE (matches qwen-image / flux-2 / wan-2.2) ────────────────
+#   1. Base image with cu128 torch ALREADY baked (no runtime torch install):
+#        pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+#      mirrored to core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime.
+#      Only the small TTS stack is pip-installed at startup (from a
+#      ConfigMap-mounted requirements.txt) — torch is NEVER reinstalled.
+#   2. Server = FastAPI/uvicorn, materialised from this ConfigMap (server.py),
+#      NOT a custom image. OpenAI-compatible /v1/audio/speech.
+#   3. Weights → PVC HF cache at /root/.cache/huggingface (HF_HOME). Download
+#      happens during the startup background load, gated by /health.
+#   4. Model loads in a startup BACKGROUND task; /health returns 503 until the
+#      load completes, then 200 — so startup/readiness probes gate correctly and
+#      liveness never fires during the cold load.
+#
+# ── BLACKWELL (sm_120) CONTRACT ───────────────────────────────────────────────
+#   SN specialty GPU is an NVIDIA RTX PRO 6000 Blackwell (sm_120). The base image
+#   torch MUST carry sm_120 kernels or the first CUDA call dies with
+#   "CUDA error: no kernel image is available for execution on the device".
+#   pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime is built FROM the cu128 wheels
+#   (PyTorch 2.7+ ships prebuilt CUDA 12.8 wheels with Blackwell kernels). The
+#   server logs torch.cuda.get_device_capability() at load so the slice's sm_120
+#   is visible in pod logs. Sources:
+#     - PyTorch 2.7 blog (Blackwell, prebuilt cu128 wheels):
+#       https://pytorch.org/blog/pytorch-2-7/
+#     - pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime: https://hub.docker.com/r/pytorch/pytorch/tags
+#     - CUDA 12.8 adds sm_120: https://forums.developer.nvidia.com/t/cuda-toolkit-12-8-what-gpu-is-sm-120/322128
+#
+# ── MODEL (verified June 2026) ────────────────────────────────────────────────
+#   Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice — Apache-2.0, NOT gated, no HF token
+#   required (token kept optional for rate-limit headroom only). Loaded via the
+#   `qwen-tts` PyPI package's Qwen3TTSModel, NOT a transformers AutoModel:
+#     from qwen_tts import Qwen3TTSModel
+#     model = Qwen3TTSModel.from_pretrained(MODEL_ID, device_map="cuda:0",
+#                                           dtype=torch.bfloat16,
+#                                           attn_implementation="sdpa")
+#     wavs, sr = model.generate_custom_voice(text=..., language="Auto",
+#                                            speaker="Ryan", instruct=None)
+#   generate_custom_voice returns (List[np.ndarray], int). The "12Hz" in the repo
+#   name is the TOKEN frame rate, NOT the audio rate: the decoded WAVEFORM is
+#   24 kHz, and `sr` is read from the tokenizer at runtime — the server TRUSTS the
+#   returned sr rather than hardcoding it (override env exists for safety only).
+#
+#   !!! LOAD HANG ROOT CAUSE (diagnosed June 2026, web research) !!!
+#   The reported deterministic hang — "talker_config/code_predictor_config/
+#   speaker_encoder_config is None -> Initializing with default values" then no
+#   completion — is a transformers<->qwen-tts version conflict, NOT device_map or
+#   attention. qwen-tts 0.1.1 pins transformers==4.57.3 (the version that yields
+#   CORRECT audio; 5.x = silence) yet its modeling code imports `check_model_inputs`
+#   from transformers.utils.generic, which exists ONLY in transformers 5.x. On
+#   4.57.3 that import raises, is swallowed by the dynamic loader, the nested config
+#   classes never register, the sub_configs collapse to None/defaults, and the
+#   multi-component build deadlocks. FIX = pin transformers==4.57.3 + qwen-tts==
+#   0.1.1 AND shim a no-op check_model_inputs before importing qwen_tts (server.py
+#   _patch_qwen_tts_for_transformers_457). flash_attention_2 is moot: there is no
+#   sm_120 flash-attn Linux wheel (Dao-AILab/flash-attention#1987) and none is baked
+#   in; qwen-tts auto-falls-back to the manual PyTorch path. We use eager (sdpa also
+#   works). Built-in CustomVoice speakers: Vivian, Serena, Uncle_Fu, Dylan, Eric
+#   (zh) / Ryan, Aiden (en) / Ono_Anna (ja) / Sohee (ko). OpenAI's fixed voice
+#   vocabulary is mapped onto these.
+#   Sources:
+#     - https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice  (model card; config.json has talker_config + nested code_predictor_config; sub_configs)
+#     - https://github.com/QwenLM/Qwen3-TTS  (README quickstart + speakers)
+#     - https://github.com/QwenLM/Qwen3-TTS/issues/237  (qwen-tts 0.1.1 pins transformers==4.57.3 but imports check_model_inputs which is 5.x-only)
+#     - https://github.com/QwenLM/Qwen3-TTS/pull/201  (transformers 4.57.3 = correct audio; 5.2.0 = silence)
+#     - https://github.com/flybirdxx/ComfyUI-Qwen-TTS/issues/16  (check_model_inputs / inputs_embeds workaround: disable the decorator)
+#     - https://github.com/Dao-AILab/flash-attention/issues/1987  (no sm_120/Blackwell flash-attn support)
+#     - https://pypi.org/project/qwen-tts/   (0.1.1 is the latest release, Feb 2026)
+#
+#   !!! HIGHEST-RISK LINE — torch supply chain: qwen-tts declares torchaudio (and
+#   transformers/accelerate) as deps. If pip resolves torchaudio it can try to
+#   pull a matching torch and CLOBBER the baked cu128 (sm_120) build with a CPU /
+#   cu12x-mismatch wheel. The startup guard installs the stack, then ASSERTS the
+#   torch build string still ends in "+cu128" (and that torchaudio did not drag a
+#   new torch) BEFORE launching uvicorn; if the assert trips, see the requirements
+#   note for the torchaudio pin to add. The model load line itself
+#   (Qwen3TTSModel.from_pretrained(...)) is the second thing to watch on first boot.
+#
+# ── API CONTRACT (OpenAI-compatible — replaces the CPU kokoro tts-1) ───────────
+#   GET  /health                  -> 503 while loading, 200 once model ready.
+#   GET  /v1/voices               -> mapped OpenAI aliases + native speakers.
+#   POST /v1/audio/speech         -> body {model, input, voice,
+#                                    response_format=wav|mp3|opus|aac|flac|pcm,
+#                                    speed?, language?, instruct?}; returns raw
+#                                    audio bytes with the right Content-Type.
+#
+# Service name `qwen3-tts` port 8000 (the model-service tts route points here).
+# The production deploy script rewrites `namespace: isa-cloud-production` to the
+# requested NAMESPACE (e.g. sn-cloud-production).
+#
+# Health check after apply:
+#   kubectl -n isa-cloud-production get pods -l app=qwen3-tts
+#   kubectl -n isa-cloud-production port-forward svc/qwen3-tts 8000:8000 &
+#   curl http://localhost:8000/health
+#   curl -s http://localhost:8000/v1/audio/speech \
+#     -H 'content-type: application/json' \
+#     -d '{"input":"hello from qwen tts","voice":"alloy","response_format":"wav"}' \
+#     -o out.wav
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-tts-config
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: fastapi-qwen-tts
+    isa-model/model-id: "qwen3-tts"
+    isa-model/instance-group: "specialty"
+data:
+  # ── runtime env (non-secret) ────────────────────────────────────────────────
+  # Concrete repo (the catalog's `Qwen/Qwen3-TTS` is a family alias, not loadable).
+  TTS_MODEL_ID: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+  MODEL_NAME: "qwen3-tts"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  DEVICE: "cuda:0"
+  TTS_DTYPE: "bfloat16"
+  TTS_DEFAULT_LANGUAGE: "Auto"
+  TTS_DEFAULT_SPEAKER: "Ryan"
+  # The README example uses flash_attention_2, but there is NO official flash-attn
+  # Linux wheel for Blackwell sm_120 (Dao-AILab/flash-attention#1987 — sm_120 still
+  # unsupported as of mid-2026; only community Windows/FA3 wheels exist) and none is
+  # baked into the cu128 base. qwen-tts auto-falls-back to the manual PyTorch path
+  # when flash-attn is absent (the "flash-attn is not installed" log), so FA2 is not
+  # an option here. We pin "eager" rather than "sdpa": both work once the configs
+  # load correctly (the hang was NEVER the attention backend — see requirements.txt
+  # root-cause note), and eager is the most deterministic on sm_120 with no fused
+  # attention kernels. Flip to "sdpa" for a modest speedup once a boot is confirmed
+  # green. Do NOT set flash_attention_2.
+  TTS_ATTN_IMPL: "eager"
+  # Empty = trust the sample rate qwen-tts returns (24 kHz for these models). Set
+  # e.g. "24000" only to force a rate if a variant ever reports an unexpected one.
+  TTS_SAMPLE_RATE: ""
+  LOG_LEVEL: "info"
+  # xet endpoint times out on the SN network and broke the flux cold pull — force
+  # the classic HF resolve/CDN path. CRITICAL on this cluster.
+  HF_HUB_DISABLE_XET: "1"
+  # Fast transfer for the cold weight download into the PVC.
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+
+  # ── pip requirements (TTS stack ONLY — torch is baked in the base) ───────────
+  # Installed at startup into the system python of the cu128 base. torch /
+  # torchvision are intentionally ABSENT — the base already provides the sm_120
+  # cu128 build and pip MUST NOT replace it.
+  #
+  # !!! ROOT CAUSE OF THE "talker_config is None / default values" LOAD HANG !!!
+  #   This is a transformers <-> qwen-tts version TRILEMMA, NOT an attention/
+  #   device_map bug:
+  #     - qwen-tts 0.1.1 (the only PyPI release, Feb 2026) PINS transformers==4.57.3
+  #       and, on 4.57.x, that pinned version PRODUCES CORRECT AUDIO (the 5.x line
+  #       generates near-silence — Qwen3-TTS PR #201 testing).
+  #     - BUT the 0.1.1 wheel's modeling code does
+  #         `from transformers.utils.generic import check_model_inputs`
+  #       which ONLY EXISTS in transformers 5.x. On 4.57.3 that import RAISES.
+  #     - The dynamic config/model loader swallows that import failure, so the
+  #       nested config classes (Qwen3TTSTalkerConfig / ...CodePredictor /
+  #       Qwen3TTSSpeakerEncoderConfig) never register. Qwen3TTSConfig therefore
+  #       can't instantiate the sub_configs from config.json's nested dicts ->
+  #       talker_config / code_predictor_config / speaker_encoder_config come
+  #       through as None -> "Initializing ... with default values" -> the
+  #       default-shaped sub-modules mismatch the checkpoint and the multi-
+  #       component build DEADLOCKS. Exactly the observed hang.
+  #   FIX (two parts, both required):
+  #     1. PIN transformers==4.57.3 (proven-correct audio; refs #237, PR #201).
+  #        Do NOT float to >=4.51 (resolver could pull 5.x = silence) and do NOT
+  #        go to 5.x.
+  #     2. NEUTRALISE the 5.x-only `check_model_inputs` import in the installed
+  #        qwen-tts so the 4.57.3 path imports cleanly and the sub-configs DO
+  #        register. The server.py startup does this as a deterministic in-place
+  #        patch (see _patch_qwen_tts_for_transformers_457) — the documented
+  #        community workaround (Qwen3-TTS #237, ComfyUI-Qwen-TTS #16/#82).
+  #   accelerate is pinned to the qwen-tts 0.1.1 companion pin (1.12.0).
+  #
+  # !!! TORCHAUDIO RISK: qwen-tts depends on torchaudio, which is version-locked to
+  #   torch. We do NOT pin torchaudio here and instead let qwen-tts pull a
+  #   compatible one, then the startup guard ASSERTS torch is still +cu128. If the
+  #   guard trips on first boot, pin the cu128-matched build here, e.g.:
+  #     --extra-index-url https://download.pytorch.org/whl/cu128
+  #     torchaudio==2.8.0+cu128
+  #   (kept out by default so a normal install isn't forced through the torch index).
+  requirements.txt: |
+    qwen-tts==0.1.1
+    transformers==4.57.3
+    accelerate==1.12.0
+    einops>=0.8
+    sentencepiece>=0.2
+    safetensors>=0.4
+    soundfile>=0.12
+    librosa>=0.10
+    scipy>=1.11
+    numpy>=1.26
+    hf_transfer>=0.1.6
+    fastapi>=0.110
+    uvicorn[standard]>=0.30
+    pydantic>=2.6
+
+  # ── FastAPI server ───────────────────────────────────────────────────────────
+  server.py: |
+    """Standalone FastAPI server for Qwen3-TTS via the qwen-tts package.
+
+    Loads Qwen3TTSModel in a startup BACKGROUND task. /health is 503 until the
+    model is fully loaded, then 200 — this is what makes the k8s probes gate
+    correctly and prevents the probe-kill failure class. OpenAI /v1/audio/speech
+    contract so it is a drop-in replacement for the slow/flaky CPU kokoro.
+    """
+    import asyncio
+    import io
+    import logging
+    import os
+    import subprocess
+    import time
+    from typing import Literal, Optional
+
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse, Response
+    from pydantic import BaseModel, Field
+
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "info").upper())
+    log = logging.getLogger("qwen3-tts")
+
+    MODEL_ID = os.environ.get("TTS_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
+    MODEL_NAME = os.environ.get("MODEL_NAME", "qwen3-tts")
+    DEVICE = os.environ.get("DEVICE", "cuda:0")
+    DTYPE_NAME = os.environ.get("TTS_DTYPE", "bfloat16")
+    DEFAULT_LANGUAGE = os.environ.get("TTS_DEFAULT_LANGUAGE", "Auto")
+    DEFAULT_SPEAKER = os.environ.get("TTS_DEFAULT_SPEAKER", "Ryan")
+    # eager/sdpa both work; flash_attention_2 is unavailable (no sm_120 wheel) and
+    # qwen-tts auto-falls-back to the manual PyTorch path. See the ConfigMap note.
+    ATTN_IMPL = os.environ.get("TTS_ATTN_IMPL", "eager")
+    SAMPLE_RATE_OVERRIDE = os.environ.get("TTS_SAMPLE_RATE") or None
+
+    # Map OpenAI's fixed voice vocabulary onto Qwen3-TTS CustomVoice speakers so
+    # existing OpenAI clients (alloy/echo/...) keep working. Unknown voices pass
+    # through verbatim so callers can request a native speaker directly.
+    OPENAI_VOICE_MAP = {
+        "alloy": "Ryan",
+        "echo": "Eric",
+        "fable": "Dylan",
+        "onyx": "Uncle_Fu",
+        "nova": "Serena",
+        "shimmer": "Vivian",
+        "ash": "Aiden",
+        "ballad": "Sohee",
+        "coral": "Ono_Anna",
+        "sage": "Vivian",
+        "verse": "Ryan",
+    }
+    NATIVE_SPEAKERS = ["Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric",
+                       "Ryan", "Aiden", "Ono_Anna", "Sohee"]
+
+    # soundfile handles wav/flac/pcm natively; mp3/opus/aac go through ffmpeg.
+    SF_FORMATS = {"wav": ("WAV", "PCM_16"), "flac": ("FLAC", None), "pcm": ("RAW", "PCM_16")}
+    FFMPEG_FORMATS = {"mp3": ("mp3", "audio/mpeg"), "opus": ("opus", "audio/ogg"),
+                      "aac": ("adts", "audio/aac")}
+    CONTENT_TYPES = {"wav": "audio/wav", "flac": "audio/flac", "pcm": "audio/pcm",
+                     "mp3": "audio/mpeg", "opus": "audio/ogg", "aac": "audio/aac"}
+
+    app = FastAPI(title="qwen3-tts", version="1.0")
+
+    # Module-level load state. MODEL is None until the background task finishes.
+    MODEL = None
+    LOAD_ERROR: Optional[str] = None
+    LOADED_AT: Optional[float] = None
+    # Serialize GPU work — one in-flight synthesis at a time on the slice.
+    GPU_LOCK = asyncio.Lock()
+
+
+    def _patch_qwen_tts_for_transformers_457() -> None:
+        """ROOT-CAUSE FIX for the deterministic "talker_config is None / default
+        values" load hang.
+
+        qwen-tts 0.1.1 (the only PyPI release) pins transformers==4.57.3 — which is
+        the version that PRODUCES CORRECT AUDIO (transformers 5.x emits near-silence;
+        Qwen3-TTS PR #201). BUT the 0.1.1 modeling code does
+            `from transformers.utils.generic import check_model_inputs`
+        and that symbol ONLY EXISTS in transformers 5.x. On 4.57.3 the import RAISES,
+        the dynamic loader swallows it, the nested config classes
+        (Qwen3TTSTalkerConfig / ...CodePredictorConfig / Qwen3TTSSpeakerEncoderConfig)
+        never register, so Qwen3TTSConfig cannot build its sub_configs from
+        config.json's nested dicts -> talker_config / code_predictor_config /
+        speaker_encoder_config arrive as None -> "Initializing ... with default
+        values" -> the default-shaped sub-modules mismatch the checkpoint and the
+        multi-component build DEADLOCKS.
+
+        Fix: install a no-op `check_model_inputs` into transformers.utils.generic
+        BEFORE importing qwen_tts, so the 0.1.1 modeling import succeeds on 4.57.3 and
+        the sub-config classes register normally. This is the documented community
+        workaround (Qwen3-TTS #237; ComfyUI-Qwen-TTS #16/#82). It is a deliberate
+        IDENTITY decorator: on 4.57.x the validation it gates does not exist, so a
+        pass-through is the correct behaviour. Idempotent + version-guarded so it is
+        a true no-op the day qwen-tts ships a 4.57-clean wheel or we move to a fixed
+        transformers.
+        """
+        try:
+            import transformers
+            from transformers.utils import generic as _generic
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not import transformers to patch: %s", exc)
+            return
+        tv = getattr(transformers, "__version__", "?")
+        if hasattr(_generic, "check_model_inputs"):
+            log.info("transformers %s already provides check_model_inputs; no patch needed", tv)
+            return
+        if not tv.startswith("4.57"):
+            # We only know this shim is correct for the 4.57.x line. On anything else,
+            # do nothing and let the real import path surface a clear error.
+            log.warning("transformers is %s (expected 4.57.x); skipping check_model_inputs shim", tv)
+            return
+
+        def check_model_inputs(func=None, *_a, **_k):  # noqa: ANN001
+            # Identity / pass-through. Accepts both @check_model_inputs and
+            # @check_model_inputs(...) usages.
+            if callable(func):
+                return func
+            def _decorator(f):  # noqa: ANN001
+                return f
+            return _decorator
+
+        _generic.check_model_inputs = check_model_inputs
+        log.info("patched transformers %s with no-op check_model_inputs "
+                 "(qwen-tts 0.1.1 / transformers 4.57 compat — fixes None sub-configs)", tv)
+
+
+    def _load_model():
+        """Blocking model load. Runs in a thread so the event loop stays free to
+        serve /health (returning 503) during the cold load + first HF pull."""
+        global MODEL, LOAD_ERROR, LOADED_AT
+        try:
+            # Surface the GPU arch early — sm_120 (12, 0) on RTX PRO 6000 Blackwell.
+            try:
+                cap = torch.cuda.get_device_capability()
+                log.info("torch %s | cuda_available=%s | device_capability=%s",
+                         torch.__version__, torch.cuda.is_available(), cap)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not read device capability: %s", exc)
+
+            dtype = getattr(torch, DTYPE_NAME)
+            log.info("Loading %s on %s (dtype=%s, attn=%s) ...",
+                     MODEL_ID, DEVICE, DTYPE_NAME, ATTN_IMPL)
+            t0 = time.time()
+            # CRITICAL: apply the transformers-4.57 compat shim BEFORE importing
+            # qwen_tts. Without it the 0.1.1 wheel's `check_model_inputs` import
+            # fails on 4.57.3, the sub-config classes never register, and the nested
+            # configs load as None -> "default values" -> deterministic load hang.
+            _patch_qwen_tts_for_transformers_457()
+
+            # !!! HIGHEST-RISK LINE on first boot. If qwen-tts's API drifts, this is
+            # where it shows: from_pretrained signature (device_map/dtype/
+            # attn_implementation) or the import path qwen_tts.Qwen3TTSModel.
+            from qwen_tts import Qwen3TTSModel
+            # Qwen3TTSConfig (and its sub-config classes) are NOT re-exported from the
+            # top-level qwen_tts package; they live in core.models. Verified against
+            # source: qwen_tts/core/models/__init__.py re-exports Qwen3TTSConfig from
+            # qwen_tts/core/models/configuration_qwen3_tts.py, which is also where
+            # Qwen3TTSTalkerConfig is defined (the talker class is NOT re-exported at
+            # the package __init__, so we import both straight from the module).
+            from qwen_tts.core.models.configuration_qwen3_tts import (
+                Qwen3TTSConfig,
+                Qwen3TTSTalkerConfig,
+            )
+            from huggingface_hub import hf_hub_download
+            import json
+
+            # !!! REAL ROOT-CAUSE FIX for the "talker_config is None / default values"
+            # deadlock (diagnosed June 2026 by reading source + config.json) !!!
+            #
+            # config.json for Qwen3-TTS-12Hz-1.7B-CustomVoice has `talker_config` at
+            # top level (with `code_predictor_config` nested INSIDE it); there is NO
+            # top-level speaker_encoder_config. Qwen3TTSConfig.__init__ does, for a
+            # missing sub-config: `if talker_config is None: talker_config = {}` then
+            # `self.talker_config = Qwen3TTSTalkerConfig(**talker_config)` — i.e. a
+            # DEFAULT-sized talker (+ default code_predictor). The class also sets
+            #   sub_configs = {"talker_config": Qwen3TTSTalkerConfig,
+            #                  "speaker_encoder_config": Qwen3TTSSpeakerEncoderConfig}.
+            # On transformers 4.57.3 the PretrainedConfig.from_dict / sub_configs
+            # processing does NOT forward the real `talker_config` dict into __init__
+            # (the sub_configs path consumes/mishandles it), so __init__ sees
+            # talker_config=None -> builds a default-shaped talker + code_predictor ->
+            # the multi-component build DEADLOCKS (the reported hang). This persisted
+            # through device_map removal, version pins, and the check_model_inputs
+            # shim because the real fault is from_dict dropping talker_config.
+            #
+            # Fix: build the config EXPLICITLY from config.json and pass it via
+            # config= so the real nested talker_config dict reaches __init__ directly,
+            # bypassing from_dict's sub_configs path. qwen-tts's wrapper
+            # from_pretrained forwards **kwargs straight to AutoModel.from_pretrained
+            # (verified in source: qwen_tts/inference/qwen3_tts_model.py — the body is
+            # `model = AutoModel.from_pretrained(path, **kwargs)`), and
+            # AutoModel.from_pretrained HONORS a passed `config=` (it does NOT re-run
+            # from_dict when an explicit config object is supplied). So config= reaches
+            # the real load and is used as-is.
+            log.info("downloading config.json to build Qwen3TTSConfig explicitly ...")
+            cfg_path = hf_hub_download(MODEL_ID, "config.json")
+            with open(cfg_path) as _f:
+                cfg = json.load(_f)
+            # Passing the nested talker_config dict directly to __init__ means
+            # self.talker_config is built from the REAL dict, not defaults.
+            config = Qwen3TTSConfig(**cfg)
+            # FALLBACK: if a future Qwen3TTSConfig(**cfg) still loses talker_config
+            # (e.g. __init__ consumes it before assigning the sub-config), force it:
+            #   if "talker_config" in cfg and not isinstance(
+            #       getattr(config, "talker_config", None), Qwen3TTSTalkerConfig):
+            #       config.talker_config = Qwen3TTSTalkerConfig(**cfg["talker_config"])
+            if "talker_config" in cfg and not isinstance(
+                getattr(config, "talker_config", None), Qwen3TTSTalkerConfig
+            ):
+                log.warning("Qwen3TTSConfig dropped talker_config; rebuilding it from config.json")
+                config.talker_config = Qwen3TTSTalkerConfig(**cfg["talker_config"])
+            # Prove the fix at boot: talker_config must be a real Qwen3TTSTalkerConfig
+            # carrying the nested code_predictor_config, NOT a default.
+            _talker = getattr(config, "talker_config", None)
+            _has_cp = (
+                hasattr(_talker, "code_predictor_config")
+                and getattr(_talker, "code_predictor_config", None) is not None
+            )
+            log.info(
+                "explicit config built: talker_config=%s code_predictor_present=%s",
+                type(_talker).__name__, _has_cp,
+            )
+
+            # The README example passes device_map="cuda:0", but accelerate dispatch
+            # on this multi-component model is fragile (and the original hang report
+            # reproduced with AND without device_map — that hang was the None-config
+            # bug above, now fixed by the explicit config). We still load WITHOUT
+            # device_map for determinism on the single sm_120 slice, then move to GPU
+            # explicitly. If a future qwen-tts requires device_map for correct
+            # sub-module placement, pass device_map=DEVICE here instead of the .to()
+            # below.
+            #
+            # config=config flows through qwen-tts's wrapper (**kwargs) into
+            # AutoModel.from_pretrained, which uses the supplied config object as-is
+            # rather than re-deriving it from config.json via from_dict.
+            log.info("from_pretrained (explicit config, no device_map) ...")
+            model = Qwen3TTSModel.from_pretrained(
+                MODEL_ID,
+                config=config,
+                dtype=dtype,
+                attn_implementation=ATTN_IMPL,
+            )
+            log.info("from_pretrained done in %.1fs; moving to %s ...", time.time() - t0, DEVICE)
+            try:
+                model = model.to(DEVICE)
+            except Exception as move_exc:  # noqa: BLE001
+                log.warning("model.to(%s) raised (%s); some wrappers place sub-modules internally", DEVICE, move_exc)
+            MODEL = model
+            LOADED_AT = time.time()
+            log.info("Model loaded in %.1fs", LOADED_AT - t0)
+        except Exception as exc:  # noqa: BLE001
+            LOAD_ERROR = repr(exc)
+            log.exception("Model load FAILED: %s", exc)
+
+
+    @app.on_event("startup")
+    async def _startup():
+        # Fire-and-forget background load; do NOT block container start.
+        asyncio.create_task(asyncio.to_thread(_load_model))
+
+
+    @app.get("/health")
+    async def health():
+        if MODEL is not None:
+            return JSONResponse({"status": "ok", "model": MODEL_NAME}, status_code=200)
+        body = {"status": "loading", "model": MODEL_NAME}
+        if LOAD_ERROR is not None:
+            body = {"status": "error", "detail": LOAD_ERROR}
+        return JSONResponse(body, status_code=503)
+
+
+    @app.get("/v1/voices")
+    async def voices():
+        return {"openai_aliases": sorted(OPENAI_VOICE_MAP), "native_speakers": NATIVE_SPEAKERS}
+
+
+    class SpeechRequest(BaseModel):
+        """OpenAI POST /v1/audio/speech body. `model` is accepted for contract
+        compatibility (we always serve the loaded MODEL_ID)."""
+        model: str = Field(default="tts-1")
+        input: str = Field(..., description="Text to synthesize")
+        voice: str = Field(default="alloy")
+        response_format: Literal["wav", "mp3", "opus", "aac", "flac", "pcm"] = "wav"
+        speed: float = Field(default=1.0, ge=0.25, le=4.0)
+        # Non-OpenAI extras: steer Qwen3-TTS directly.
+        language: Optional[str] = None
+        instruct: Optional[str] = None
+
+
+    def _encode(wav: np.ndarray, sr: int, fmt: str) -> tuple[bytes, str]:
+        """Encode a float waveform into the requested container."""
+        wav = np.asarray(wav, dtype=np.float32).squeeze()
+        if fmt in SF_FORMATS:
+            sf_format, subtype = SF_FORMATS[fmt]
+            if fmt == "pcm":
+                pcm16 = np.clip(wav, -1.0, 1.0)
+                pcm16 = (pcm16 * 32767.0).astype("<i2")
+                return pcm16.tobytes(), CONTENT_TYPES[fmt]
+            buf = io.BytesIO()
+            sf.write(buf, wav, sr, format=sf_format, subtype=subtype)
+            return buf.getvalue(), CONTENT_TYPES[fmt]
+        if fmt in FFMPEG_FORMATS:
+            wav_buf = io.BytesIO()
+            sf.write(wav_buf, wav, sr, format="WAV", subtype="PCM_16")
+            ffmpeg_fmt, ctype = FFMPEG_FORMATS[fmt]
+            proc = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                 "-i", "pipe:0", "-f", ffmpeg_fmt, "pipe:1"],
+                input=wav_buf.getvalue(),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            if proc.returncode != 0:
+                raise HTTPException(500, f"ffmpeg {fmt} encode failed: "
+                                         f"{proc.stderr.decode(errors='ignore')[:500]}")
+            return proc.stdout, ctype
+        raise HTTPException(400, f"unsupported response_format: {fmt}")
+
+
+    @app.post("/v1/audio/speech")
+    async def speech(req: SpeechRequest) -> Response:
+        if MODEL is None:
+            raise HTTPException(503, "model still loading" if LOAD_ERROR is None
+                                else f"model load failed: {LOAD_ERROR}")
+        if not req.input.strip():
+            raise HTTPException(400, "input is empty")
+
+        speaker = OPENAI_VOICE_MAP.get(req.voice.lower(), req.voice)
+        language = req.language or DEFAULT_LANGUAGE
+        t0 = time.time()
+
+        def _run():
+            # generate_custom_voice returns (wavs, sr); wavs is a list of np arrays.
+            return MODEL.generate_custom_voice(
+                text=req.input,
+                language=language,
+                speaker=speaker,
+                instruct=req.instruct,
+            )
+
+        try:
+            async with GPU_LOCK:
+                wavs, sr = await asyncio.to_thread(_run)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("synthesis failed")
+            raise HTTPException(500, f"synthesis failed: {exc}") from exc
+
+        wav = wavs[0] if isinstance(wavs, (list, tuple)) else wavs
+        if SAMPLE_RATE_OVERRIDE:
+            sr = int(SAMPLE_RATE_OVERRIDE)
+        # OpenAI `speed` is not natively honored; apply a cheap playback-rate change
+        # (slightly shifts pitch). For true time-stretch, swap in an ffmpeg atempo
+        # filter — kept simple here per the drop-in brief.
+        if abs(req.speed - 1.0) > 1e-3:
+            sr = int(sr * req.speed)
+
+        audio_bytes, content_type = _encode(wav, int(sr), req.response_format)
+        log.info("synth voice=%s lang=%s chars=%d -> %s %dB in %.2fs",
+                 speaker, language, len(req.input), req.response_format,
+                 len(audio_bytes), time.time() - t0)
+        return Response(content=audio_bytes, media_type=content_type)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: fastapi-qwen-tts
+    isa-model/model-id: "qwen3-tts"
+    isa-model/instance-group: "specialty"
+spec:
+  # One pod on the specialty node, one MPS time-slice.
+  replicas: 1
+  # Cold start (apt git + pip install + first HF pull + model load) can run long;
+  # give the rollout room before it declares the Deployment failed.
+  progressDeadlineSeconds: 3600
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-tts
+  template:
+    metadata:
+      labels:
+        app: qwen3-tts
+        engine: fastapi-qwen-tts
+        isa-model/model-id: "qwen3-tts"
+        isa-model/instance-group: "specialty"
+    spec:
+      enableServiceLinks: false
+      # Base image runs as root (writes to /root/.cache/huggingface).
+      securityContext:
+        runAsNonRoot: false
+      # Harbor pull secret — the base image is mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
+      containers:
+        - name: qwen3-tts
+          # Blackwell-safe base: cu128 torch (sm_120) already baked. NO custom
+          # build — only the small TTS stack is pip-installed at startup.
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: TTS_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_MODEL_ID
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: MODEL_NAME
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: PORT
+            - name: DEVICE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: DEVICE
+            - name: TTS_DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DTYPE
+            - name: TTS_DEFAULT_LANGUAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DEFAULT_LANGUAGE
+            - name: TTS_DEFAULT_SPEAKER
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_DEFAULT_SPEAKER
+            - name: TTS_ATTN_IMPL
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_ATTN_IMPL
+            - name: TTS_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: TTS_SAMPLE_RATE
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: LOG_LEVEL
+            - name: HF_HUB_DISABLE_XET
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: HF_HUB_DISABLE_XET
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-tts-config
+                  key: HF_HUB_ENABLE_HF_TRANSFER
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # (a) git + ffmpeg + libsndfile. git lets pip fall back to the
+              #     qwen-tts source install if the PyPI wheel ever misbehaves;
+              #     ffmpeg encodes mp3/opus/aac; libsndfile backs soundfile.
+              echo "[startup] apt: git ffmpeg libsndfile1 ..."
+              for attempt in 1 2 3; do
+                apt-get update && apt-get install -y --no-install-recommends \
+                  git ffmpeg libsndfile1 && break
+                echo "[startup] apt attempt $attempt failed; retrying in 10s..."
+                sleep 10
+              done
+              # Record the BAKED torch build so we can prove pip didn't clobber it.
+              TORCH_BEFORE="$(python -c 'import torch; print(torch.__version__)')"
+              echo "[startup] baked torch = ${TORCH_BEFORE} (must stay +cu128)"
+              # (b) Install the SMALL TTS stack only. torch is baked (sm_120 cu128)
+              #     and NOT in requirements.txt. Retry loop — SN egress to PyPI is
+              #     intermittently flaky; a single timed-out wheel must not kill it.
+              echo "[startup] installing TTS stack (torch is pre-baked) ..."
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                  -r /etc/qwen3-tts/requirements.txt && break
+                echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
+                sleep 15
+              done
+              # (c) Assert imports AND that pip did not replace the cu128 torch
+              #     (qwen-tts pulls torchaudio, which is torch-version-locked and is
+              #     the most likely thing to drag in a wrong torch). Fail loud.
+              python - <<'PY'
+              import sys, torch
+              v = torch.__version__
+              print(f"[startup] torch after install = {v}")
+              assert "+cu128" in v, (
+                  f"FATAL: torch is '{v}', not a +cu128 build — pip clobbered the "
+                  "baked Blackwell torch (likely via torchaudio). Pin torchaudio to "
+                  "the cu128-matched build in requirements.txt (see manifest note)."
+              )
+              import qwen_tts  # noqa: F401
+              from qwen_tts import Qwen3TTSModel  # noqa: F401
+              import soundfile, transformers  # noqa: F401
+              print("[startup] imports OK; torch is +cu128")
+              PY
+              echo "[startup] launching FastAPI server ..."
+              # Single worker: the model is held in VRAM and the server serializes
+              # GPU work via an asyncio lock.
+              exec uvicorn server:app \
+                --app-dir /etc/qwen3-tts \
+                --host "$HOST" \
+                --port "$PORT" \
+                --workers 1 \
+                --log-level "$LOG_LEVEL"
+          resources:
+            requests:
+              memory: "24Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "24Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          # startupProbe gates liveness/readiness during the slow COLD start
+          # (apt + pip + first HF pull + model load). 60 + 1320*15 = ~5.5h budget.
+          # /health returns 503 until the background load finishes, so the probe
+          # stays in "starting" and liveness NEVER fires mid-load.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            # ~5.5h: the FIRST cold pull over the slow SN->HF link can be long (it
+            # caches to the PVC, so later starts are fast). Do not SIGKILL it.
+            failureThreshold: 1320
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Liveness only begins firing after startupProbe succeeds, so its modest
+          # budget cannot kill the boot. It catches a hung server post-load.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: qwen3-tts-config
+              mountPath: /etc/qwen3-tts
+              readOnly: true
+            # qwen-tts + transformers can spill large temporaries; back /dev/shm
+            # with RAM so codec buffers don't hit the 64 MB default.
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-qwen3-tts
+        - name: qwen3-tts-config
+          configMap:
+            name: qwen3-tts-config
+            items:
+              - key: server.py
+                path: server.py
+              - key: requirements.txt
+                path: requirements.txt
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+      # SPECIALTY-node affinity per ADR 0010. The two nodeSelectorTerms are OR'd,
+      # matching either label scheme (isa.io/* or sn.io/*).
+      #
+      # !!! RELABEL DEPENDENCY — confirm the specialty node is labeled before
+      #   applying, or the pod stays Pending.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    engine: fastapi-qwen-tts
+    isa-model/model-id: "qwen3-tts"
+    isa-model/instance-group: "specialty"
+spec:
+  type: ClusterIP
+  selector:
+    app: qwen3-tts
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    isa-model/model-id: "qwen3-tts"
+    isa-model/instance-group: "specialty"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 1.7B bf16 weights (~4 GB) + HF blob/snapshot duplication + tokenizer.
+      storage: 30Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qwen3-tts
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-tts
+    isa-model/model-id: "qwen3-tts"
+    isa-model/instance-group: "specialty"
+spec:
+  # Single-replica GPU pod: allow voluntary eviction (node drain) rather than
+  # blocking it, matching the kokoro/specialty pattern.
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: qwen3-tts

@@ -1,0 +1,226 @@
+# Kokoro FastAPI Production Runtime (GPU / MPS variant) — local TTS (tts-1)
+#
+# OpenAI-compatible TTS runtime for `provider=isa, service_type=audio,
+# task=synthesize`. The production deploy script rewrites namespace:
+# isa-cloud-production to the requested NAMESPACE, e.g. sn-cloud-production.
+#
+# THIS REPLACES THE CPU INTERIM (kokoro-tts-deployment.yaml) ONCE MPS IS ACTIVE
+# (ADR 0010). Under NVIDIA MPS on k8s-03 (specialty, replicas=4 → 24 GB slices,
+# renameByDefault=false) the pod keeps requesting `nvidia.com/gpu: 1` and gets
+# ONE 24 GB slice — Kokoro (~0.5 GB) co-tenants with whisper/embedding/asr/tts/
+# rerank on the specialty node. Apply this in place of the CPU interim during
+# the repack step (ADR 0010 rollout step 5); do NOT run both at once.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-kokoro
+  namespace: isa-cloud-production
+  labels:
+    app: kokoro-tts
+    isa-model/model-id: kokoro
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kokoro-tts-config
+  namespace: isa-cloud-production
+  labels:
+    app: kokoro-tts
+    engine: kokoro-fastapi
+data:
+  HOST: "0.0.0.0"
+  PORT: "8880"
+  # GPU under MPS (reverts the CPU interim).
+  USE_GPU: "true"
+  DEVICE_TYPE: cuda
+  DEFAULT_VOICE: af_nicole
+  API_LOG_LEVEL: INFO
+  CORS_ENABLED: "true"
+  ENABLE_WEB_PLAYER: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokoro-tts
+  namespace: isa-cloud-production
+  labels:
+    app: kokoro-tts
+    engine: kokoro-fastapi
+    isa-model/instance-group: specialty
+    isa-model/model-id: kokoro
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kokoro-tts
+  template:
+    metadata:
+      labels:
+        app: kokoro-tts
+        engine: kokoro-fastapi
+        isa-model/instance-group: specialty
+        isa-model/model-id: kokoro
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      # Restored specialty GPU affinity (matches whisper/embedding/qwen-image):
+      # land on the specialty node (k8s-03) where the 24 GB MPS slices live.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: kokoro-fastapi
+          image: core.harbor.domain/isa/kokoro-fastapi-gpu:v0.3.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8880
+              name: http
+          env:
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: PORT
+            - name: USE_GPU
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: USE_GPU
+            - name: DEVICE_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: DEVICE_TYPE
+            - name: DEFAULT_VOICE
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: DEFAULT_VOICE
+            - name: API_LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: API_LOG_LEVEL
+            - name: CORS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: CORS_ENABLED
+            - name: ENABLE_WEB_PLAYER
+              valueFrom:
+                configMapKeyRef:
+                  name: kokoro-tts-config
+                  key: ENABLE_WEB_PLAYER
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: 4Gi
+              # One MPS slice (renameByDefault=false → 24 GB slice on k8s-03).
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8000m"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8880
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8880
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8880
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-kokoro
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kokoro-tts
+  namespace: isa-cloud-production
+  labels:
+    app: kokoro-tts
+    engine: kokoro-fastapi
+spec:
+  type: ClusterIP
+  selector:
+    app: kokoro-tts
+  ports:
+    - name: http
+      port: 8880
+      targetPort: 8880
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kokoro-tts
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: kokoro-tts

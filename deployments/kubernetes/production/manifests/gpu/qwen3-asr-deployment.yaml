@@ -1,0 +1,306 @@
+# Qwen3-ASR Production Runtime — Qwen/Qwen3-ASR-1.7B (STT)
+#
+# Authored from web research + read-only cluster inspection (June 2026).
+# Not yet applied or smoke-tested on any cluster.
+#
+# OpenAI-compatible STT runtime for `provider=isa, service_type=audio,
+# task=transcribe`, serving the /v1/audio/transcriptions endpoint as the
+# accuracy/speed default ahead of faster-whisper (which is retained for
+# 99-language coverage). See local-inference-catalog.yaml models.yaml.
+#
+# SERVING PATH (official vLLM):
+#   vLLM ships first-party Qwen3-ASR support. `vllm serve Qwen/Qwen3-ASR-1.7B`
+#   exposes the OpenAI Audio Transcriptions API at /v1/audio/transcriptions on
+#   :8000 — the same image (vllm/vllm-openai:cu130-nightly) and contract the
+#   chat LLM (deploy `vllm`) and the embedding engine (deploy
+#   `vllm-qwen3-embedding-8b`) already run from Docker Hub on these cards, so
+#   it matches house style (vllm-deployment.yaml / vllm-embedding-deployment.yaml)
+#   and is already proven Blackwell-OK.
+#
+#   IMPORTANT — audio extra is NOT in the image. The official vllm/vllm-openai
+#   images deliberately ship WITHOUT the optional `vllm[audio]` extra
+#   (librosa/soundfile/soxr) to avoid bundling those licenses. Serving any
+#   transcription model without it crashes at request time with
+#   "ImportError: Please install vllm[audio] for audio support"
+#   (vllm-project/vllm#13675; image-inclusion still open as #15087). So this
+#   deployment pip-installs the audio extra in an initContainer-equivalent step
+#   inside the container command before `exec vllm serve`. (A pre-baked image
+#   built FROM vllm/vllm-openai:cu130-nightly + `pip install vllm[audio]`,
+#   mirrored to core.harbor.domain/isa/vllm-openai-audio:cu130-nightly, is the
+#   cleaner long-term option — see /tmp/mirror notes — but is a docker build,
+#   out of scope here.)
+#   Sources:
+#     - https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3-ASR.html
+#     - https://docs.vllm.ai/en/latest/contributing/model/transcription/
+#     - https://huggingface.co/Qwen/Qwen3-ASR-1.7B
+#     - https://github.com/QwenLM/Qwen3-ASR
+#     - https://github.com/vllm-project/vllm/issues/13675  (vllm[audio] required)
+#     - https://github.com/vllm-project/vllm/issues/15087  (audio not in image)
+#   A community OpenAI-compatible wrapper image also exists if a thinner runtime
+#   is preferred (ghcr.io/malaiwah/qwen3-asr-server:latest,
+#   https://github.com/malaiwah/qwen3-asr-server) — NOT used here; we stay on
+#   the official vLLM image for supply-chain hygiene.
+#
+# PLACEMENT: specialty group, k8s-03 (the only node carrying both
+# isa.io/gpu-role-specialty=true AND sn.io/gpu-role=specialty — verified
+# read-only), ~24 GB MPS slice (ADR 0010). Model is 1.7B (~4 GB bf16 weights);
+# --gpu-memory-utilization is capped LOW (0.25 -> ~20 GB of a 96 GB card) so it
+# fits a shared slice with no hard VRAM isolation, alongside the rest of the
+# specialty-audio pack. Pod requests nvidia.com/gpu: 1 (MPS/time-slice
+# renameByDefault=false -> one slice).
+#
+# The production deploy script rewrites namespace: isa-cloud-production to the
+# requested NAMESPACE, e.g. sn-cloud-production for SN bootstrap deployments.
+#
+# RISK / UNKNOWN:
+#   - Audio extra install happens at pod start (network pip from PyPI). If the
+#     cluster lacks egress, pre-bake the image instead. First start is slower.
+#   - Word/segment timestamps: the Qwen3-ASR HF card notes timestamps are NOT
+#     produced by the vLLM serving path directly (forced-aligner is a separate
+#     step). verbose_json timestamp fields should be smoke-tested before cutting
+#     traffic off faster-whisper.
+#   - gpu_memory_utilization vs the shared MPS slice budget needs a live check.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-qwen3-asr
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-asr
+    isa-model/model-id: qwen3-asr-1.7b
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 40Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-asr-config
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-asr
+    engine: vllm
+data:
+  MODEL_ID: "Qwen/Qwen3-ASR-1.7B"
+  SERVED_MODEL_NAME: "qwen3-asr-1.7b"
+  # Capped LOW for a shared MPS/time-slice with no hard VRAM isolation: 0.25 of
+  # a 96 GB card is ~24 GB ceiling, leaving headroom for the rest of the
+  # specialty-audio pack. 1.7B bf16 weights are ~4 GB; the rest is KV cache +
+  # audio buffers. Live check (ADR 0010 2026-06-11b): at 0.25 it reserved 24GB
+  # (3.87GB weights + 15.59GiB KV / 291k tokens / 71x concurrency) — wildly
+  # over-provisioned for short 4k-ctx ASR @ 8 seqs (~1.8GB KV needed). 0.10
+  # (~9.6GB) = weights + ample KV + headroom; frees ~14GB on the k8s-03 slice.
+  GPU_MEMORY_UTILIZATION: "0.10"
+  MAX_MODEL_LEN: "4096"
+  MAX_NUM_SEQS: "8"
+  KV_CACHE_DTYPE: "fp8"
+  DTYPE: "bfloat16"
+  PORT: "8000"
+  # vllm[audio] (librosa/soundfile/soxr) is NOT in the official image and must
+  # be installed before serving a transcription model (vllm#13675). Set false
+  # only when running a pre-baked image that already bundles the extra.
+  INSTALL_AUDIO_EXTRA: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-asr
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-asr
+    engine: vllm
+    isa-model/instance-group: specialty
+    isa-model/model-id: qwen3-asr-1.7b
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2400
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-asr
+  template:
+    metadata:
+      labels:
+        app: qwen3-asr
+        engine: vllm
+        isa-model/instance-group: specialty
+        isa-model/model-id: qwen3-asr-1.7b
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:cu130-nightly
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: MODEL_ID
+            - name: SERVED_MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: SERVED_MODEL_NAME
+            - name: GPU_MEMORY_UTILIZATION
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: GPU_MEMORY_UTILIZATION
+            - name: MAX_MODEL_LEN
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: MAX_MODEL_LEN
+            - name: MAX_NUM_SEQS
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: MAX_NUM_SEQS
+            - name: KV_CACHE_DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: KV_CACHE_DTYPE
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: DTYPE
+            - name: INSTALL_AUDIO_EXTRA
+              valueFrom:
+                configMapKeyRef:
+                  name: qwen3-asr-config
+                  key: INSTALL_AUDIO_EXTRA
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -eu
+              # The official vllm/vllm-openai image does NOT bundle the audio
+              # extra; a transcription model crashes without it (vllm#13675).
+              # Install librosa/soundfile/soxr before serving unless a pre-baked
+              # image already includes them (INSTALL_AUDIO_EXTRA=false).
+              if [ "${INSTALL_AUDIO_EXTRA:-true}" = "true" ]; then
+                python -c "import librosa, soundfile" 2>/dev/null || \
+                  pip install --no-cache-dir "vllm[audio]"
+              fi
+              # NOTE: this vLLM (cu130-nightly) dropped --task; transcription
+              # models are auto-detected and expose /v1/audio/transcriptions.
+              exec vllm serve "${MODEL_ID}" \
+                --served-model-name "${SERVED_MODEL_NAME}" \
+                --trust-remote-code \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+                --max-model-len "${MAX_MODEL_LEN}" \
+                --max-num-seqs "${MAX_NUM_SEQS}" \
+                --kv-cache-dtype "${KV_CACHE_DTYPE}" \
+                --dtype "${DTYPE}" \
+                --host 0.0.0.0 --port 8000
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "6000m"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 240
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-qwen3-asr
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-asr
+  namespace: isa-cloud-production
+  labels:
+    app: qwen3-asr
+    engine: vllm
+spec:
+  type: ClusterIP
+  selector:
+    app: qwen3-asr
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qwen3-asr
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: qwen3-asr

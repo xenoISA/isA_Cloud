@@ -71,9 +71,9 @@ data:
   ISA_RERANK_BACKEND: local_embedding
   LOCAL_RERANK_EMBEDDING_MODEL: qwen3-embedding-8b
   ISA_RERANK_ALLOW_MODAL_FALLBACK: 'false'
-  LOCAL_TTS_BASE_URL: http://fish-speech-tts.sn-cloud-production.svc.cluster.local:8000
-  LOCAL_TTS_RUNTIME_MODEL: fish-speech
-  LOCAL_TTS_DEFAULT_VOICE: default
+  LOCAL_TTS_BASE_URL: http://kokoro-gpu.sn-cloud-production.svc.cluster.local:8880
+  LOCAL_TTS_RUNTIME_MODEL: kokoro
+  LOCAL_TTS_DEFAULT_VOICE: af_nicole
   LOCAL_TTS_RESPONSE_FORMAT: wav
   LOCAL_IMAGE_BASE_URL: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
   LOCAL_IMAGE_RUNTIME_MODEL: qwen-image-2.0

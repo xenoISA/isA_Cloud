@@ -1,0 +1,54 @@
+# In-cluster Kaniko build for kokoro-gpu (issue #408).
+# Builds entirely cluster-side (no laptop link), pushes to Harbor using the
+# harbor-isa dockerconfig secret (mounted, not extracted). hostAliases resolves
+# core.harbor.domain (pod DNS doesn't) to the harbor-harbor LB ClusterIP;
+# --insecure/--skip-tls-verify for Harbor's internal cert.
+#
+# Context ConfigMap (Dockerfile + server.py):
+#   kubectl -n sn-cloud-production create configmap kokoro-gpu-build-ctx \
+#     --from-file=Dockerfile --from-file=server.py
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-kokoro-gpu
+  namespace: isa-cloud-production
+  labels: { app: kokoro-gpu, role: image-build }
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 7200
+  template:
+    metadata:
+      labels: { app: kokoro-gpu, role: image-build }
+    spec:
+      restartPolicy: Never
+      hostAliases:
+        - ip: "10.43.56.153"          # harbor-harbor LB ClusterIP
+          hostnames: ["core.harbor.domain"]
+      tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:v1.23.2
+          args:
+            - --context=dir:///workspace
+            - --dockerfile=/workspace/Dockerfile
+            - --destination=core.harbor.domain/isa/kokoro-gpu:cu128-v1
+            - --insecure
+            - --skip-tls-verify
+            - --insecure-pull
+            - --skip-tls-verify-pull
+            - --cache=false
+            - --verbosity=info
+          resources:
+            requests: { cpu: "2", memory: "6Gi" }
+            limits: { cpu: "6", memory: "12Gi" }
+          volumeMounts:
+            - { name: ctx, mountPath: /workspace }
+            - { name: docker-config, mountPath: /kaniko/.docker }
+      volumes:
+        - name: ctx
+          configMap: { name: kokoro-gpu-build-ctx }
+        - name: docker-config
+          secret:
+            secretName: harbor-isa
+            items: [ { key: .dockerconfigjson, path: config.json } ]

@@ -1,0 +1,583 @@
+# Wan2.2 Video Engine — text/image-to-video on the `generative` GPU group
+# Service name kept as `triton-wan-2-2` for routing-adapter stability, but this
+# is NO LONGER Triton — it is a standalone FastAPI + diffusers server.
+#
+# DRAFT / UNVERIFIED — authored from web research (June 2026), NOT applied or
+# smoke-tested on any cluster. Blackwell/VRAM/timing claims are reasoned from
+# NVIDIA/PyTorch/diffusers/HF docs, not from a live sm_120 run. Smoke-test on a
+# real RTX PRO 6000 (sm_120) node before relying on it.
+#
+# WHY THE REWRITE (was: Triton python-backend):
+#   The Triton python-backend draft failed repeatedly in production — probe
+#   SIGKILL during the long cold start, a missing/packed python_env path
+#   ("Failed to get the canonical path for .../python_env"), and opaque stub
+#   load failures with no useful diagnostics. We replace it with a plain
+#   FastAPI/uvicorn server we fully control, converging on the same base
+#   architecture as the qwen-image / flux reworks: a cu128 torch baked into the
+#   base image, a server materialised from a ConfigMap, a startup pip of only
+#   the small stack, weights on a PVC-backed HF cache, and gated /health probes.
+#
+# !!! ASYNC JOB MODEL — video generation takes MINUTES per clip !!!
+#   Wan2.2-TI2V-5B generates a 5s 720p@24fps clip in UNDER ~9 min on a single
+#   consumer 4090 with no optimization (HF model card); with model_cpu_offload +
+#   VAE tiling (needed to fit) it is SLOWER. A synchronous HTTP request WILL
+#   exceed normal client/ingress timeouts. So this server is ASYNC:
+#
+#     POST /v1/videos/generations
+#       body: {"prompt": str, "negative_prompt"?: str, "height"?, "width"?,
+#              "num_frames"?, "num_inference_steps"?, "guidance_scale"?,
+#              "fps"?, "seed"?, "image"?(b64 for image-to-video)}
+#       -> 202 Accepted, {"job_id": "<uuid>", "status": "queued"}
+#          returns IMMEDIATELY; generation runs on a background worker.
+#
+#     GET /v1/videos/generations/{job_id}
+#       -> 200 {"status": "queued"|"running"|"done"|"error", ...}
+#          when done:  {"status":"done","video_b64":"<base64 mp4>",
+#                       "video_url":"/v1/videos/generations/{job_id}/video",
+#                       "fps":24,"num_frames":121,...}
+#          on error:   {"status":"error","error":"<message>"}
+#
+#     GET /v1/videos/generations/{job_id}/video
+#       -> 200 the raw mp4 (Content-Type: video/mp4) from the in-pod file,
+#          or 409 if not done. (URL is in-pod; the caller proxies/relays it.)
+#
+#     GET /health -> 503 until the pipeline is loaded, 200 once ready.
+#                    (used by startup/readiness/liveness probes)
+#
+#   Concurrency: SINGLE in-flight generation. One worker thread drains a simple
+#   in-memory FIFO queue (a CUDA diffusion pipeline is not safe to share across
+#   concurrent calls, and a second concurrent decode would OOM the slice). Jobs
+#   and their mp4s live in-pod (in-memory dict + /tmp); they do NOT survive a
+#   pod restart — this is overflow/batch capacity, not a durable job store. If
+#   durability is needed, front this with the platform async task path.
+#
+# !!! BLACKWELL HARD REQUIREMENT (sm_120) !!!
+#   SN production GPUs are NVIDIA RTX PRO 6000 Blackwell (compute capability
+#   sm_120 / cc 12.0). torch MUST carry sm_120 kernels or the first CUDA call
+#   dies with "CUDA error: no kernel image is available for execution on the
+#   device". This is handled by BAKING torch into the base image:
+#     pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime  -> torch 2.8.0+cu128.
+#   cu128 is the sm_120 floor (CUDA 12.8 added sm_120); torch 2.8 ships the
+#   Blackwell kernels. NO runtime torch install — the startup pip installs ONLY
+#   the small stack (diffusers, transformers, accelerate, safetensors, ftfy,
+#   imageio, imageio-ffmpeg, fastapi, uvicorn) and must NOT pull a non-cu128
+#   torch (it won't: torch is already satisfied by the base).
+#   Verify in pod logs: torch.cuda.get_device_capability() == (12, 0).
+#   Sources:
+#     - Base tag exists on Docker Hub (torch 2.8.0 + CUDA 12.8 + cuDNN 9):
+#       https://hub.docker.com/layers/pytorch/pytorch/2.8.0-cuda12.8-cudnn9-runtime/images/sha256-417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385
+#     - torch 2.8+cu128 runs sm_120 (RTX PRO 6000 Blackwell):
+#       https://github.com/pytorch/pytorch/issues/159207
+#       https://download.pytorch.org/whl/cu128
+#   Base must be MIRRORED to core.harbor.domain/isa first (cluster cannot pull
+#   docker.io directly): core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+#
+# MODEL / SERVING PATH:
+#   Wan-AI/Wan2.2-TI2V-5B-Diffusers (Apache-2.0, ~24 GB, NOT gated -> HF_TOKEN
+#   optional). The 5B dense TI2V model does BOTH text- and image-to-video at
+#   720p@24fps via HF diffusers `WanPipeline`. The VAE (AutoencoderKLWan) MUST
+#   be loaded SEPARATELY in float32 — bf16 VAE produces NaNs / garbage frames.
+#   export_to_video needs an ffmpeg binary; imageio-ffmpeg bundles one.
+#   !!! diffusers MAIN BRANCH REQUIRED — the HF card states Wan2.2 TI2V-5B is
+#       "currently available only in the main branch of diffusers; the latest
+#       stable PyPI release does not yet include these updates." The startup pip
+#       therefore installs diffusers from git main, pinnable to a commit for
+#       reproducibility (UPDATE DIFFUSERS_GIT_REF when re-baking). The A14B MoE
+#       variant is higher quality but needs 40-80 GB and will NOT fit a slice.
+#   Sources:
+#     - https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers
+#     - https://huggingface.co/docs/diffusers/main/en/api/pipelines/wan
+#     - https://github.com/huggingface/diffusers/blob/main/docs/source/en/api/pipelines/wan.md
+#     - https://github.com/Wan-Video/Wan2.2
+#
+# PLACEMENT: generative group, namespace isa-cloud-production (the production
+#   deploy script rewrites the namespace, e.g. sn-cloud-production). The two
+#   nodeSelectorTerms are OR'd to match either label scheme.
+#
+# RISKS / UNKNOWNS:
+#   - VRAM / OFFLOAD: model-card floor is 24 GB; with enable_model_cpu_offload
+#     + vae.enable_tiling() the 5B fits a single slice but is slower and pushes
+#     working set into host RAM (hence 64 Gi mem req/limit). At default
+#     704x1280x121f it may still OOM a tight slice — drop num_frames first.
+#   - diffusers MAIN dep: a moving target. Pin the commit; the import of
+#     WanPipeline/AutoencoderKLWan is the canary — if it fails, bump the pin.
+#   - ffmpeg: export_to_video needs it; imageio-ffmpeg provides a static binary,
+#     verified at startup (a missing ffmpeg makes every job error at the export
+#     step only — after the expensive generation — so we check it up front).
+#   - GEN TIME: minutes per clip. Probes watch /health (loaded), NOT generation;
+#     a slow job never trips liveness because the worker runs off the request path.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triton-wan-2-2-config
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "generative"
+data:
+  MODEL_ID: "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+  MODEL_NAME: "wan-2-2"
+  # Model-card defaults for TI2V-5B: 720p (704x1280), 121 frames, 24 fps,
+  # 50 steps, guidance 5.0. Lower NUM_FRAMES if VRAM forces it (see header).
+  DEFAULT_HEIGHT: "704"
+  DEFAULT_WIDTH: "1280"
+  DEFAULT_NUM_FRAMES: "121"
+  DEFAULT_FPS: "24"
+  DEFAULT_NUM_INFERENCE_STEPS: "50"
+  DEFAULT_GUIDANCE_SCALE: "5.0"
+  LOG_VERBOSE: "1"
+  # Pin diffusers to a git-main ref (Wan2.2 TI2V-5B is main-only as of June
+  # 2026). UPDATE this to a commit SHA when re-baking; "main" -> tip of main.
+  DIFFUSERS_GIT_REF: "main"
+  # Server requirements — small stack ONLY. torch/torchvision are already baked
+  # into the base image (cu128, sm_120); they are intentionally absent here so
+  # pip cannot replace the Blackwell torch with a non-cu128 wheel.
+  REQUIREMENTS_TXT: |
+    transformers>=4.51
+    accelerate>=0.34
+    safetensors>=0.4
+    ftfy>=6.1
+    imageio>=2.34
+    imageio-ffmpeg>=0.5
+    fastapi>=0.110
+    uvicorn[standard]>=0.29
+  # FastAPI server. Loads WanPipeline in a startup BACKGROUND task (so /health
+  # can return 503 while loading), runs ONE async generation worker draining an
+  # in-memory FIFO queue. See header for the full async contract.
+  SERVER_PY: |
+    """Standalone FastAPI + diffusers server for Wan2.2-TI2V-5B (text/image->video).
+
+    ASYNC: POST returns 202 + job_id immediately; a single background worker
+    runs the (minutes-long) generation; GET polls status and fetches the mp4.
+    """
+    import base64
+    import io
+    import os
+    import queue
+    import threading
+    import time
+    import traceback
+    import uuid
+
+    import torch
+    import uvicorn
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import FileResponse, JSONResponse
+    from pydantic import BaseModel
+
+    MODEL_ID = os.environ.get("MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B-Diffusers")
+    DEF_H = int(os.environ.get("DEFAULT_HEIGHT", "704"))
+    DEF_W = int(os.environ.get("DEFAULT_WIDTH", "1280"))
+    DEF_FRAMES = int(os.environ.get("DEFAULT_NUM_FRAMES", "121"))
+    DEF_FPS = int(os.environ.get("DEFAULT_FPS", "24"))
+    DEF_STEPS = int(os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "50"))
+    DEF_GUIDANCE = float(os.environ.get("DEFAULT_GUIDANCE_SCALE", "5.0"))
+    OUTDIR = os.environ.get("VIDEO_OUTPUT_DIR", "/tmp/wan-videos")
+    os.makedirs(OUTDIR, exist_ok=True)
+
+    app = FastAPI(title="wan-2-2", version="1.0")
+
+    # ---- shared state -------------------------------------------------------
+    STATE = {"pipe": None, "ready": False, "load_error": None, "export": None}
+    JOBS = {}                       # job_id -> dict(status, ...)
+    JOBS_LOCK = threading.Lock()
+    JOB_Q: "queue.Queue[str]" = queue.Queue()
+
+    class GenRequest(BaseModel):
+        prompt: str
+        negative_prompt: str | None = None
+        height: int | None = None
+        width: int | None = None
+        num_frames: int | None = None
+        num_inference_steps: int | None = None
+        guidance_scale: float | None = None
+        fps: int | None = None
+        seed: int | None = None
+        image: str | None = None    # base64-encoded init image (image-to-video)
+
+    # ---- model load (runs in a startup background thread) -------------------
+    def _load_model():
+        try:
+            from diffusers import AutoencoderKLWan, WanPipeline
+            from diffusers.utils import export_to_video
+            # VAE in float32 — bf16 VAE -> NaNs for Wan (HF model card).
+            vae = AutoencoderKLWan.from_pretrained(
+                MODEL_ID, subfolder="vae", torch_dtype=torch.float32
+            )
+            pipe = WanPipeline.from_pretrained(
+                MODEL_ID, vae=vae, torch_dtype=torch.bfloat16
+            )
+            # Fit a single slice: CPU offload + VAE tiling (slower, less VRAM).
+            pipe.enable_model_cpu_offload()
+            pipe.vae.enable_tiling()
+            pipe.set_progress_bar_config(disable=True)
+            if torch.cuda.is_available():
+                cap = torch.cuda.get_device_capability()
+                print(f"[wan] CUDA device capability {cap} (expect (12, 0))",
+                      flush=True)
+            STATE["export"] = export_to_video
+            STATE["pipe"] = pipe
+            STATE["ready"] = True
+            print("[wan] pipeline loaded; ready", flush=True)
+        except Exception as exc:  # surface a clear, non-opaque load failure
+            STATE["load_error"] = f"{type(exc).__name__}: {exc}"
+            print("[wan] LOAD FAILED:\n" + traceback.format_exc(), flush=True)
+
+    def _decode_image(b64):
+        from PIL import Image
+        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+
+    # ---- single background generation worker --------------------------------
+    def _worker():
+        while True:
+            job_id = JOB_Q.get()
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+            if not job:
+                JOB_Q.task_done()
+                continue
+            with JOBS_LOCK:
+                job["status"] = "running"
+                job["started_at"] = time.time()
+            try:
+                req = job["req"]
+                kwargs = dict(
+                    prompt=req["prompt"],
+                    negative_prompt=req.get("negative_prompt") or None,
+                    height=req.get("height") or DEF_H,
+                    width=req.get("width") or DEF_W,
+                    num_frames=req.get("num_frames") or DEF_FRAMES,
+                    num_inference_steps=req.get("num_inference_steps") or DEF_STEPS,
+                    guidance_scale=req.get("guidance_scale") or DEF_GUIDANCE,
+                )
+                if req.get("seed") is not None and int(req["seed"]) >= 0:
+                    kwargs["generator"] = torch.Generator(
+                        device="cuda"
+                    ).manual_seed(int(req["seed"]))
+                if req.get("image"):
+                    kwargs["image"] = _decode_image(req["image"])
+                frames = STATE["pipe"](**kwargs).frames[0]
+                fps = req.get("fps") or DEF_FPS
+                path = os.path.join(OUTDIR, f"{job_id}.mp4")
+                STATE["export"](frames, path, fps=fps)
+                with open(path, "rb") as fh:
+                    b64 = base64.b64encode(fh.read()).decode("ascii")
+                with JOBS_LOCK:
+                    job.update(
+                        status="done", path=path, video_b64=b64, fps=fps,
+                        num_frames=kwargs["num_frames"], finished_at=time.time(),
+                    )
+            except Exception as exc:
+                with JOBS_LOCK:
+                    job.update(status="error",
+                               error=f"{type(exc).__name__}: {exc}")
+                print("[wan] JOB FAILED:\n" + traceback.format_exc(), flush=True)
+            finally:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                JOB_Q.task_done()
+
+    @app.on_event("startup")
+    def _startup():
+        threading.Thread(target=_load_model, daemon=True).start()
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ---- routes -------------------------------------------------------------
+    @app.get("/health")
+    def health():
+        if STATE["ready"]:
+            return {"status": "ok", "model": MODEL_ID}
+        body = {"status": "loading"}
+        if STATE["load_error"]:
+            body = {"status": "error", "error": STATE["load_error"]}
+        return JSONResponse(status_code=503, content=body)
+
+    @app.post("/v1/videos/generations", status_code=202)
+    def submit(req: GenRequest):
+        if not STATE["ready"]:
+            raise HTTPException(status_code=503, detail="model not loaded")
+        job_id = str(uuid.uuid4())
+        with JOBS_LOCK:
+            JOBS[job_id] = {"status": "queued", "req": req.model_dump(),
+                            "queued_at": time.time()}
+        JOB_Q.put(job_id)
+        return {"job_id": job_id, "status": "queued",
+                "queue_position": JOB_Q.qsize()}
+
+    @app.get("/v1/videos/generations/{job_id}")
+    def status(job_id: str):
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="unknown job_id")
+            out = {k: v for k, v in job.items() if k != "req"}
+        if out.get("status") == "done":
+            out["video_url"] = f"/v1/videos/generations/{job_id}/video"
+        return out
+
+    @app.get("/v1/videos/generations/{job_id}/video")
+    def fetch(job_id: str):
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="unknown job_id")
+        if job.get("status") != "done":
+            raise HTTPException(status_code=409, detail=f"job {job['status']}")
+        return FileResponse(job["path"], media_type="video/mp4",
+                            filename=f"{job_id}.mp4")
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+  labels:
+    app: triton-wan-2-2
+    engine: fastapi-diffusers
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "generative"
+spec:
+  replicas: 1
+  # Recreate: a single GPU slice, no rolling overlap (the old pod must release
+  # the slice before the new one binds it).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: triton-wan-2-2
+  template:
+    metadata:
+      labels:
+        app: triton-wan-2-2
+        engine: fastapi-diffusers
+        isa-model/model-id: "wan-2.2"
+        isa-model/instance-group: "generative"
+    spec:
+      # Harbor pull secret — the base image is mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: wan
+          # Blackwell-safe base: torch 2.8.0 + CUDA 12.8 + cuDNN 9 (sm_120).
+          # Mirror to Harbor first; cluster cannot pull docker.io directly.
+          # Upstream: docker.io/pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: MODEL_ID
+            - name: DEFAULT_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_HEIGHT
+            - name: DEFAULT_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_WIDTH
+            - name: DEFAULT_NUM_FRAMES
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_NUM_FRAMES
+            - name: DEFAULT_FPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_FPS
+            - name: DEFAULT_NUM_INFERENCE_STEPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_NUM_INFERENCE_STEPS
+            - name: DEFAULT_GUIDANCE_SCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DEFAULT_GUIDANCE_SCALE
+            - name: DIFFUSERS_GIT_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-wan-2-2-config
+                  key: DIFFUSERS_GIT_REF
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            # Force standard LFS download (xet read-token endpoint times out on
+            # this network and stalls the pull).
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # diffusers is installed from git main (Wan2.2 TI2V-5B is main-only),
+              # but the pytorch base image has no `git`. Install it first.
+              if ! command -v git >/dev/null 2>&1; then
+                echo "[startup] installing git (needed for pip install git+...)"
+                for attempt in 1 2 3 4; do
+                  (apt-get update && apt-get install -y --no-install-recommends git) && break
+                  echo "[startup] apt git attempt $attempt failed; retry 15s..."; sleep 15
+                done
+              fi
+              # Small stack ONLY — torch is already baked (cu128/sm_120). pip
+              # must NOT pull a torch wheel; the requirements omit it on purpose.
+              # Retry loops — SN egress to PyPI/GitHub is intermittently flaky.
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 -r /etc/wan-config/requirements.txt && break
+                echo "[startup] pip(reqs) attempt $attempt failed; retry 15s..."; sleep 15
+              done
+              # diffusers from git MAIN — Wan2.2 TI2V-5B is main-only (June 2026).
+              # Pin DIFFUSERS_GIT_REF to a commit for reproducible re-bakes.
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                  "git+https://github.com/huggingface/diffusers@${DIFFUSERS_GIT_REF}" && break
+                echo "[startup] pip(diffusers-git) attempt $attempt failed; retry 15s..."; sleep 15
+              done
+              python -c "import diffusers" || { echo "diffusers missing after retries"; exit 1; }
+              # Verify ffmpeg resolves up front (export_to_video needs it) — fail
+              # fast rather than after a minutes-long generation.
+              python -c "import imageio_ffmpeg; print('ffmpeg:', imageio_ffmpeg.get_ffmpeg_exe())"
+              exec uvicorn server:app --host 0.0.0.0 --port 8000 \
+                --app-dir /etc/wan-config --log-level info
+          resources:
+            requests:
+              memory: "64Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "64Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          # Cold start: per-pod pip (small stack + diffusers git) + ~24 GB HF
+          # download + model load. startupProbe gates liveness/readiness so a
+          # slow cold boot is never SIGKILLed (the failure we hit on Triton).
+          # 60 + 240*15 = ~60 min budget. /health is 503 until loaded, 200 after.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            # ~5.5h: first cold HF pull (~24GB) over the slow SN egress.
+            failureThreshold: 1320
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: wan-config
+              mountPath: /etc/wan-config
+              readOnly: true
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: triton-wan-2-2-cache
+        - name: wan-config
+          configMap:
+            name: triton-wan-2-2-config
+            items:
+              - key: SERVER_PY
+                path: server.py
+              - key: REQUIREMENTS_TXT
+                path: requirements.txt
+      # GENERATIVE-node affinity. The two nodeSelectorTerms are OR'd, matching
+      # either label scheme (isa.io/* or sn.io/*).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-generative
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["generative"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+  labels:
+    app: triton-wan-2-2
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "generative"
+spec:
+  selector:
+    app: triton-wan-2-2
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-wan-2-2-cache
+  namespace: isa-cloud-production
+  labels:
+    isa-model/model-id: "wan-2.2"
+    isa-model/instance-group: "generative"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # ~24 GB weights + HF cache overhead; headroom for re-downloads.
+      storage: 120Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: triton-wan-2-2
+  namespace: isa-cloud-production
+  labels:
+    app: triton-wan-2-2
+    isa-model/model-id: "wan-2.2"
+spec:
+  # Single-replica overflow engine — allow voluntary disruption (drain/repack).
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: triton-wan-2-2

@@ -1,0 +1,591 @@
+# Qwen-Image GPU Engine — standalone FastAPI + diffusers (NOT Triton) (#956)
+#
+# REWRITTEN 2026-06-10 from the failed Triton python-backend draft to a robust
+# standalone FastAPI/uvicorn server. AUTHORED FROM WEB RESEARCH — NOT yet built,
+# mirrored, or applied to any cluster. Smoke-test on a real RTX PRO 6000 (sm_120)
+# node before relying on it.
+#
+# ── WHY THE TRITON APPROACH WAS REPLACED ──────────────────────────────────────
+#   The previous gpu/qwen-image-deployment.yaml wrapped diffusers in a Triton
+#   python backend and failed in production 3x:
+#     1. 9-minute probe SIGKILL — liveness/readiness fired while the ~40 GB model
+#        was still loading inside initialize(); kubelet killed the pod mid-load.
+#     2. "Failed to get the canonical path for .../python_env" — a packed
+#        EXECUTION_ENV_PATH that did not exist in the image.
+#     3. Opaque "failed to load all models" — the python-backend stub process
+#        dies loading 40 GB inside initialize(); Triton surfaces no useful error.
+#   Root cause class: Triton loads models *synchronously inside model init*, with
+#   no "still loading" health state. There is no clean way to say "alive but not
+#   ready yet" for a 20-40 min cold load. FastAPI fixes this structurally: the
+#   pipeline loads in a startup BACKGROUND task and /health returns 503 until the
+#   load completes, so startup/readiness probes gate correctly and liveness never
+#   fires during the load.
+#
+# ── SHARED ARCHITECTURE (qwen-image / flux-2 / wan-2.2 all converge here) ──────
+#   1. Base image with cu128 torch ALREADY baked (no runtime torch install):
+#        pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+#      mirrored to core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime.
+#      Only the small diffusers stack is pip-installed at startup (from a
+#      ConfigMap-mounted requirements.txt) — torch is NEVER reinstalled.
+#   2. Server = FastAPI/uvicorn, materialised from this ConfigMap (server.py),
+#      NOT Triton. OpenAI-compatible image API.
+#   3. Weights → PVC HF cache at /root/.cache/huggingface (HF_HOME). Download
+#      happens during the startup background load, gated by /health.
+#   4. Resources: mem 64Gi req/limit (was 32Gi — too low for a ~40 GB load),
+#      cpu 4/8, nvidia.com/gpu:1 (one MPS time-slice).
+#   5. Probes: startupProbe on /health with ~60 min budget; readiness + liveness
+#      on /health (liveness only fires after startup passes).
+#   6. Placement: generative node, nodeAffinity isa.io/gpu-role-generative=true
+#      OR sn.io/gpu-role=generative; toleration nvidia.com/gpu Exists.
+#
+# ── BLACKWELL (sm_120) CONTRACT ───────────────────────────────────────────────
+#   SN production GPUs are NVIDIA RTX PRO 6000 Blackwell (sm_120). The base image
+#   torch MUST carry sm_120 kernels or it crashes at first CUDA call with
+#   "CUDA error: no kernel image is available for execution on the device".
+#   pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime is built FROM the cu128 wheels;
+#   PyTorch 2.7+ ships pre-built CUDA 12.8 (cu128) wheels with Blackwell kernels,
+#   and RTX PRO 6000 Blackwell is documented running torch 2.8.0+cu128 on sm_120.
+#   (sm_121/sm_122 minor variants run sm_120 kernels via Blackwell SASS/PTX
+#   forward-compat.) Sources:
+#     - PyTorch 2.7 blog (Blackwell support, ships cu128 prebuilt wheels):
+#       https://pytorch.org/blog/pytorch-2-7/
+#     - pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime on Docker Hub:
+#       https://hub.docker.com/r/pytorch/pytorch/tags
+#     - CUDA 12.8 adds sm_120 (Blackwell):
+#       https://forums.developer.nvidia.com/t/cuda-toolkit-12-8-what-gpu-is-sm-120/322128
+#
+# ── MODEL ─────────────────────────────────────────────────────────────────────
+#   Qwen/Qwen-Image via diffusers QwenImagePipeline (Apache-2.0). bf16,
+#   ~40 GB working set. QwenImagePipeline shipped in diffusers 0.35.0 (Aug 2025);
+#   DiffusionPipeline.from_pretrained("Qwen/Qwen-Image") auto-resolves to it.
+#   We pin diffusers>=0.36 (post-0.35 stability fixes; latest is 0.38.0, May 2026).
+#   IMPORTANT: Qwen-Image uses `true_cfg_scale` (default 4.0) for classifier-free
+#   guidance; the pipeline's `guidance_scale` is INEFFECTIVE (reserved for future
+#   distilled models). The old Triton model.py passed guidance_scale — a real bug
+#   that this server fixes. Sources:
+#     - https://github.com/huggingface/diffusers/releases/tag/v0.35.0
+#     - https://huggingface.co/docs/diffusers/main/en/api/pipelines/qwenimage
+#     - https://huggingface.co/Qwen/Qwen-Image
+#
+# ── API CONTRACT (OpenAI-compatible — matches LOCAL_IMAGE_BASE_URL) ────────────
+#   GET  /health                  -> 503 while loading, 200 once pipeline ready.
+#   GET  /v1/models               -> lists the served model id.
+#   POST /v1/images/generations   -> body {prompt, n, size="WxH",
+#                                    response_format=b64_json|url,
+#                                    negative_prompt?, steps?, true_cfg_scale?,
+#                                    seed?}; returns {created, data:[{b64_json}]}
+#                                    with b64 PNG. (response_format=url is not
+#                                    supported by a stateless server and returns
+#                                    400 with a clear message — clients use
+#                                    b64_json, the orchestrator default.)
+#
+# Service name `triton-qwen-image-2-0` is KEPT for the route contract (the
+# isa-model orchestrator + ingress already point at it); only the implementation
+# changed, not the addressable name. Port 8000.
+#
+# The production deploy script rewrites `namespace: isa-cloud-production` to the
+# requested NAMESPACE (e.g. sn-cloud-production).
+#
+# Health check after apply:
+#   kubectl -n isa-cloud-production get pods -l app=triton-qwen-image-2-0
+#   kubectl -n isa-cloud-production port-forward svc/triton-qwen-image-2-0 8000:8000 &
+#   curl http://localhost:8000/health
+#   curl -s http://localhost:8000/v1/images/generations \
+#     -H 'content-type: application/json' \
+#     -d '{"prompt":"a cat holding a sign that says hello","size":"1024x1024"}' \
+#     | python -c 'import sys,json,base64;d=json.load(sys.stdin);open("o.png","wb").write(base64.b64decode(d["data"][0]["b64_json"]))'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triton-qwen-image-2-0-config
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    engine: fastapi-diffusers
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "generative"
+data:
+  # ── runtime env (non-secret) ────────────────────────────────────────────────
+  MODEL_ID: "Qwen/Qwen-Image"
+  MODEL_NAME: "qwen-image-2.0"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  DTYPE: "bfloat16"
+  DEFAULT_HEIGHT: "1024"
+  DEFAULT_WIDTH: "1024"
+  DEFAULT_NUM_INFERENCE_STEPS: "50"
+  # Qwen-Image CFG knob is true_cfg_scale (default 4.0). guidance_scale is a no-op.
+  DEFAULT_TRUE_CFG_SCALE: "4.0"
+  MAX_HEIGHT: "1536"
+  MAX_WIDTH: "1536"
+  LOG_LEVEL: "info"
+  # Enable HF fast transfer for the ~40 GB cold download.
+  HF_HUB_ENABLE_HF_TRANSFER: "1"
+
+  # ── pip requirements (diffusers stack ONLY — torch is baked in the base) ─────
+  # Installed at startup into the system python of the cu128 base image. Floors
+  # chosen so QwenImagePipeline + true_cfg_scale are present. torch/torchvision
+  # are intentionally ABSENT — the base image already provides the sm_120 cu128
+  # build and pip must not replace it.
+  requirements.txt: |
+    diffusers>=0.36
+    transformers>=4.51
+    accelerate>=1.0
+    safetensors>=0.4
+    sentencepiece>=0.2
+    fastapi>=0.110
+    uvicorn[standard]>=0.30
+    pillow>=10.0
+    hf_transfer>=0.1.6
+
+  # ── FastAPI server ───────────────────────────────────────────────────────────
+  server.py: |
+    """Standalone FastAPI server for Qwen-Image via diffusers.
+
+    Loads QwenImagePipeline in a startup BACKGROUND task. /health is 503 until
+    the pipeline is fully loaded, then 200 — this is what makes the k8s probes
+    gate correctly and prevents the probe-kill / stub-timeout failure class that
+    sank the Triton python-backend approach.
+    """
+    import asyncio
+    import base64
+    import io
+    import os
+    import time
+    import logging
+    from typing import Optional
+
+    import torch
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse
+    from pydantic import BaseModel, Field
+
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "info").upper())
+    log = logging.getLogger("qwen-image")
+
+    MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen-Image")
+    MODEL_NAME = os.environ.get("MODEL_NAME", "qwen-image-2.0")
+    DTYPE = (
+        torch.bfloat16
+        if os.environ.get("DTYPE", "bfloat16") == "bfloat16"
+        else torch.float16
+    )
+    DEFAULT_HEIGHT = int(os.environ.get("DEFAULT_HEIGHT", "1024"))
+    DEFAULT_WIDTH = int(os.environ.get("DEFAULT_WIDTH", "1024"))
+    DEFAULT_STEPS = int(os.environ.get("DEFAULT_NUM_INFERENCE_STEPS", "50"))
+    DEFAULT_TRUE_CFG = float(os.environ.get("DEFAULT_TRUE_CFG_SCALE", "4.0"))
+    MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "1536"))
+    MAX_WIDTH = int(os.environ.get("MAX_WIDTH", "1536"))
+
+    app = FastAPI(title="qwen-image", version="2.0")
+
+    # Module-level load state. PIPE is None until the background task finishes.
+    PIPE = None
+    LOAD_ERROR: Optional[str] = None
+    LOADED_AT: Optional[float] = None
+    # Serialize GPU work — a diffusion CUDA context is not safe to share across
+    # concurrent requests. One in-flight generation at a time.
+    GPU_LOCK = asyncio.Lock()
+
+
+    def _load_pipeline():
+        """Blocking pipeline load. Runs in a thread so the event loop stays free
+        to serve /health (returning 503) during the ~20-40 min cold load."""
+        global PIPE, LOAD_ERROR, LOADED_AT
+        try:
+            log.info("Loading %s (dtype=%s) ...", MODEL_ID, DTYPE)
+            t0 = time.time()
+            # DiffusionPipeline auto-resolves Qwen/Qwen-Image -> QwenImagePipeline.
+            from diffusers import DiffusionPipeline
+
+            pipe = DiffusionPipeline.from_pretrained(MODEL_ID, torch_dtype=DTYPE)
+            pipe = pipe.to("cuda")
+            pipe.set_progress_bar_config(disable=True)
+            PIPE = pipe
+            LOADED_AT = time.time()
+            log.info("Pipeline loaded in %.1fs", LOADED_AT - t0)
+        except Exception as exc:  # noqa: BLE001
+            LOAD_ERROR = repr(exc)
+            log.exception("Pipeline load FAILED: %s", exc)
+
+
+    @app.on_event("startup")
+    async def _startup():
+        # Fire-and-forget background load; do NOT block container start.
+        asyncio.create_task(asyncio.to_thread(_load_pipeline))
+
+
+    @app.get("/health")
+    async def health():
+        if PIPE is not None:
+            return JSONResponse({"status": "ok", "model": MODEL_NAME}, status_code=200)
+        body = {"status": "loading", "model": MODEL_NAME}
+        if LOAD_ERROR is not None:
+            body = {"status": "error", "detail": LOAD_ERROR}
+        return JSONResponse(body, status_code=503)
+
+
+    @app.get("/v1/models")
+    async def list_models():
+        return {
+            "object": "list",
+            "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "isa"}],
+        }
+
+
+    class ImageRequest(BaseModel):
+        prompt: str
+        n: int = Field(default=1, ge=1, le=4)
+        size: str = "1024x1024"
+        response_format: str = "b64_json"
+        negative_prompt: Optional[str] = None
+        steps: Optional[int] = None
+        true_cfg_scale: Optional[float] = None
+        seed: Optional[int] = None
+
+
+    def _parse_size(size: str) -> tuple[int, int]:
+        try:
+            w, h = (int(x) for x in size.lower().split("x"))
+        except Exception:  # noqa: BLE001
+            raise HTTPException(400, f"invalid size '{size}', expected WxH")
+        return min(w, MAX_WIDTH), min(h, MAX_HEIGHT)
+
+
+    @app.post("/v1/images/generations")
+    async def generate(req: ImageRequest):
+        if PIPE is None:
+            raise HTTPException(503, "pipeline still loading" if LOAD_ERROR is None
+                                else f"pipeline load failed: {LOAD_ERROR}")
+        if req.response_format != "b64_json":
+            raise HTTPException(
+                400,
+                "only response_format=b64_json is supported (stateless server "
+                "cannot host a url); the orchestrator default is b64_json",
+            )
+        width, height = _parse_size(req.size)
+        steps = req.steps or DEFAULT_STEPS
+        true_cfg = req.true_cfg_scale if req.true_cfg_scale is not None else DEFAULT_TRUE_CFG
+        # Qwen-Image: CFG requires true_cfg_scale>1 AND a (possibly empty) negative.
+        negative = req.negative_prompt if req.negative_prompt is not None else " "
+
+        def _run():
+            generator = None
+            if req.seed is not None and req.seed >= 0:
+                generator = torch.Generator(device="cuda").manual_seed(req.seed)
+            images = []
+            for _ in range(req.n):
+                out = PIPE(
+                    prompt=req.prompt,
+                    negative_prompt=negative,
+                    height=height,
+                    width=width,
+                    num_inference_steps=steps,
+                    true_cfg_scale=true_cfg,
+                    generator=generator,
+                )
+                images.append(out.images[0])
+            return images
+
+        async with GPU_LOCK:
+            images = await asyncio.to_thread(_run)
+
+        data = []
+        for img in images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            data.append({"b64_json": base64.b64encode(buf.getvalue()).decode("ascii")})
+        return {"created": int(time.time()), "data": data}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-qwen-image-2-0
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    engine: fastapi-diffusers
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "generative"
+spec:
+  # One pod on the generative node per ADR 0010, one MPS time-slice.
+  replicas: 1
+  # Cold load (pip install + ~40 GB HF download + model load) can run 20-40 min;
+  # give the rollout room before it declares the Deployment failed.
+  progressDeadlineSeconds: 3600
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: triton-qwen-image-2-0
+  template:
+    metadata:
+      labels:
+        app: triton-qwen-image-2-0
+        engine: fastapi-diffusers
+        isa-model/model-id: "qwen-image-2.0"
+        isa-model/instance-group: "generative"
+    spec:
+      enableServiceLinks: false
+      # Base image runs as root (writes to /root/.cache/huggingface).
+      securityContext:
+        runAsNonRoot: false
+      # Harbor pull secret — the base image is mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
+      containers:
+        - name: qwen-image
+          # Blackwell-safe base: cu128 torch (sm_120) already baked. Mirror
+          # upstream pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime into Harbor;
+          # the cluster cannot pull docker.io directly.
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MODEL_ID
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MODEL_NAME
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: PORT
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DTYPE
+            - name: DEFAULT_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_HEIGHT
+            - name: DEFAULT_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_WIDTH
+            - name: DEFAULT_NUM_INFERENCE_STEPS
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_NUM_INFERENCE_STEPS
+            - name: DEFAULT_TRUE_CFG_SCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: DEFAULT_TRUE_CFG_SCALE
+            - name: MAX_HEIGHT
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MAX_HEIGHT
+            - name: MAX_WIDTH
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: MAX_WIDTH
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: LOG_LEVEL
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              valueFrom:
+                configMapKeyRef:
+                  name: triton-qwen-image-2-0-config
+                  key: HF_HUB_ENABLE_HF_TRANSFER
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Install the SMALL diffusers stack only. torch/torchvision are
+              # baked into the cu128 base (sm_120) and are NOT in requirements.txt
+              # — pip must not replace the GPU-correct torch. If pip ever tries to
+              # pull torch as a transitive dep, that is a bug in a floor pin.
+              echo "[startup] installing diffusers stack (torch is pre-baked) ..."
+              # Retry loop — SN egress to PyPI is intermittently flaky; a single
+              # timed-out wheel must not kill the pod (incomplete-download).
+              for attempt in 1 2 3 4 5 6; do
+                pip install --no-cache-dir --retries 10 --timeout 120 \
+                  -r /etc/qwen-image/requirements.txt && break
+                echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
+                sleep 15
+              done
+              python -c "import diffusers, transformers" || { echo "[startup] deps missing after retries"; exit 1; }
+              echo "[startup] launching FastAPI server ..."
+              # Single worker: the diffusion CUDA context is not fork-safe and the
+              # server serializes GPU work via an asyncio lock. Throughput comes
+              # from batching, not workers.
+              exec uvicorn server:app \
+                --app-dir /etc/qwen-image \
+                --host "$HOST" \
+                --port "$PORT" \
+                --workers 1 \
+                --log-level "$LOG_LEVEL"
+          resources:
+            requests:
+              memory: "64Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "64Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          # startupProbe gates liveness/readiness during the slow COLD start
+          # (pip install + ~40 GB HF download + model load). 60 + 240*15 = ~60 min
+          # budget. /health returns 503 until the background load finishes, so the
+          # probe stays in "starting" and liveness NEVER fires mid-load — this is
+          # the structural fix for the 9-min SIGKILL we hit on Triton.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            # ~5.5h budget: the FIRST cold pull of ~40GB over the slow SN->HF
+            # link can take hours (it caches to the PVC, so later starts are
+            # fast). Do not let the probe SIGKILL the one-time download.
+            failureThreshold: 1320
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Liveness only begins firing after startupProbe succeeds, so its modest
+          # budget cannot kill the boot. It catches a hung server post-load.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: qwen-image-config
+              mountPath: /etc/qwen-image
+              readOnly: true
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: triton-qwen-image-2-0-cache
+        - name: qwen-image-config
+          configMap:
+            name: triton-qwen-image-2-0-config
+            items:
+              - key: server.py
+                path: server.py
+              - key: requirements.txt
+                path: requirements.txt
+      # GENERATIVE-node affinity per ADR 0010. The two nodeSelectorTerms are OR'd,
+      # matching either label scheme (isa.io/* or sn.io/*).
+      #
+      # !!! RELABEL DEPENDENCY — confirm the generative node is labeled before
+      #   applying, or the pod stays Pending. See ADR 0010 §Rollout and
+      #   docs/runbooks/mps-fleet-repack.md.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-generative
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["generative"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-qwen-image-2-0
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    engine: fastapi-diffusers
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "generative"
+spec:
+  type: ClusterIP
+  selector:
+    app: triton-qwen-image-2-0
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-qwen-image-2-0-cache
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "generative"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # ~40 GB bf16 weights + HF blob/snapshot duplication headroom.
+      storage: 100Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: triton-qwen-image-2-0
+  namespace: isa-cloud-production
+  labels:
+    app: triton-qwen-image-2-0
+    isa-model/model-id: "qwen-image-2.0"
+    isa-model/instance-group: "generative"
+spec:
+  # Single-replica GPU pod: allow voluntary eviction (node drain) rather than
+  # blocking it, matching the kokoro/specialty pattern.
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: triton-qwen-image-2-0

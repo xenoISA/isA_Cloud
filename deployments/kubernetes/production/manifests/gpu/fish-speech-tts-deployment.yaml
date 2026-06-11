@@ -1,0 +1,674 @@
+# Fish-Speech TTS Engine — official api_server + OpenAI /v1/audio/speech shim
+#
+# AUTHORED 2026-06-11 FROM WEB RESEARCH — NOT yet built, mirrored, or applied to
+# any cluster. Smoke-test on a real RTX PRO 6000 (sm_120) node before relying on
+# it. Replaces the flaky CPU kokoro runtime for `tts-1`-class synthesis.
+#
+# ── FLASH-ATTN VERDICT (the qwen-tts blocker does NOT apply) ──────────────────
+#   Fish-Speech does NOT depend on the flash-attn package, at all:
+#     * pyproject.toml (main @ e5e2926) lists NO flash-attn / xformers. It pins
+#       torch==2.8.0 — the EXACT version baked in our base image (PEP 440:
+#       `==2.8.0` is satisfied by `2.8.0+cu128`, so pip does NOT reinstall torch).
+#     * The text2semantic backbone (fish_speech/models/text2semantic/llama.py)
+#       implements attention with torch-native F.scaled_dot_product_attention
+#       (SDPA) plus a pure-eager math fallback (eq_scaled_dot_product_attention).
+#       Imports are only `from torch.nn.attention import SDPBackend, sdpa_kernel`.
+#     * DECISIVE for sm_120: the inference path (forward_generate, llama.py:441)
+#       ALWAYS builds an explicit causal mask from the KV-cache and calls
+#       F.scaled_dot_product_attention(..., attn_mask=mask) — the generic SDPA
+#       dispatcher (memory-efficient / math / cuDNN backends), which exists on
+#       every CUDA arch. The strict `sdpa_kernel(SDPBackend.FLASH_ATTENTION)`
+#       context (llama.py:918) only fires in the TRAINING forward when mask is
+#       None, and is never reached by tools/api_server inference.
+#   The known Blackwell failures in fishaudio/fish-speech#1224 / #1126 are the
+#   OFFICIAL DOCKER IMAGE shipping an old torch (sm_50..sm_90 only) — i.e. the
+#   exact problem our cu128 sm_120 base image solves; community installs on
+#   RTX 50-series with torch cu128 work.
+#   Sources:
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/fish_speech/models/text2semantic/llama.py
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/pyproject.toml
+#     - https://github.com/fishaudio/fish-speech/issues/1224
+#     - https://github.com/fishaudio/fish-speech/issues/1126
+#     - https://sneekes.app/posts/fish_speech_installation_guide_for_rtx_5070_on_wsl2/
+#
+# ── MODEL (verified June 2026) ────────────────────────────────────────────────
+#   PRIMARY: fishaudio/s2-pro — Fish Audio S2 Pro, 4B params, ~11 GB on disk
+#   (model-0000{1,2}-of-00002.safetensors 9.1 GB + codec.pth 1.87 GB). HF repo is
+#   NOT gated (gated: false), last modified 2026-03-11, 128k+ downloads.
+#   NOTE — premise correction: S2 Pro stopped being hosted-API-only; the weights
+#   were published to HF on 2026-03-11 and the fish-speech v2.0.0 main branch
+#   defaults to `checkpoints/s2-pro` (tools/server/api_utils.py parse_args).
+#   Docs state 24 GB GPU memory for inference; RTF 0.195 on H200.
+#   FALLBACK: fishaudio/s1-mini (alias: fishaudio/openaudio-s1-mini — the HF API
+#   redirects both ids to the same repo), 0.5B distilled, ~3.6 GB, but it is
+#   GATED (gated: "auto" — an org account must click-accept on HF first and the
+#   pod then needs HF_TOKEN). Same codec arch (modded_dac_vq), same launch flags.
+#   ⚠ LICENSE — BOTH are non-commercial without a separate Fish Audio license:
+#     * fish-speech code + S2 Pro weights: "Fish Audio Research License"
+#       (updated 2026-03-07) — research/non-commercial free; ANY commercial use
+#       (incl. internal business operations or a hosted service) requires a
+#       separate written license from Fish Audio (business@fish.audio).
+#     * s1-mini weights: CC-BY-NC-SA-4.0 (also non-commercial).
+#   Clear this with legal/Fish Audio BEFORE serving production traffic.
+#   Sources:
+#     - https://huggingface.co/fishaudio/s2-pro
+#     - https://huggingface.co/fishaudio/s1-mini
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/LICENSE
+#     - https://github.com/fishaudio/fish-speech
+#     - https://docs.fish.audio/developer-guide/self-hosting/running-inference
+#
+# ── SERVING ARCHITECTURE ──────────────────────────────────────────────────────
+#   Two processes in one container (no custom image build):
+#   1. OFFICIAL fish-speech API server (kui/uvicorn, loads models inside the
+#      ASGI startup hook — it does not accept connections until the model is
+#      fully loaded, which makes upstream reachability a truthful ready signal):
+#        python -m tools.api_server --listen 0.0.0.0:8080 \
+#          --llama-checkpoint-path <ckpt> \
+#          --decoder-checkpoint-path <ckpt>/codec.pth \
+#          --decoder-config-name modded_dac_vq
+#      Native API: POST /v1/tts (accepts application/json OR application/msgpack;
+#      ServeTTSRequest: text, format wav|pcm|mp3|opus, references[],
+#      reference_id, seed, chunk_length 100..1000, normalize, streaming,
+#      max_new_tokens, top_p, repetition_penalty, temperature), GET /v1/health,
+#      POST /v1/references/add (voice-clone registration), /v1/vqgan/{encode,decode}.
+#      The native API is NOT OpenAI-shaped, hence the shim below.
+#   2. THIN OpenAI shim (FastAPI/uvicorn from this ConfigMap's server.py, :8000):
+#        GET  /health             -> 503 until upstream /v1/health answers 200
+#                                    (i.e. until weights downloaded + loaded),
+#                                    then 200. Probes gate on this.
+#        GET  /v1/models          -> lists the served model id.
+#        POST /v1/audio/speech    -> OpenAI body {model, input, voice,
+#                                    response_format, speed?} translated to
+#                                    /v1/tts; returns raw audio bytes
+#                                    (mp3|wav|opus|pcm; aac/flac -> 400).
+#                                    voice: OpenAI builtin names / "default" =
+#                                    model default voice; any other value is
+#                                    passed as a fish-speech reference_id
+#                                    (register clones via :8080/v1/references/add).
+#      Output sample rate is read from the codec by the official server
+#      (modded DAC, 44.1 kHz family).
+#   Sources:
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/tools/api_server.py
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/tools/server/views.py
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/tools/server/api_utils.py
+#     - https://raw.githubusercontent.com/fishaudio/fish-speech/main/fish_speech/utils/schema.py
+#
+# ── BLACKWELL (sm_120) CONTRACT — same as qwen-image ──────────────────────────
+#   Base image core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+#   already carries torch 2.8.0+cu128 with sm_120 kernels. fish-speech pins
+#   torch==2.8.0, satisfied by the baked build, so pip never replaces it; a
+#   guard asserts `+cu128` survives before either server starts.
+#
+# ── STARTUP PIP/APT SET (verified against repo main @ e5e2926) ────────────────
+#   apt: git ffmpeg build-essential portaudio19-dev libsox-dev
+#        (official docs: `apt install portaudio19-dev libsox-dev ffmpeg`;
+#        build-essential because PyAudio 0.2.14 ships NO Linux wheels and must
+#        compile against portaudio. https://pypi.org/project/PyAudio/)
+#   pip: `pip install -e /opt/fish-speech` (deps incl. descript-audio-codec for
+#        the DAC decoder, kui, ormsgpack, librosa/soundfile, tiktoken — NO torch
+#        reinstall) + shim extras + an explicit `protobuf>=3.20,<6` override
+#        (mirrors fish-speech's [tool.uv] override-dependencies, which plain pip
+#        does not honor: descript-audiotools pins protobuf<3.20 but fish_speech
+#        generated proto code needs >=3.20 — the pip "incompatible" warning on
+#        this line is EXPECTED).
+#   Source: https://github.com/fishaudio/fish-speech/blob/main/docs/en/install.md
+#
+# ── FIRST-BOOT WATCH ITEM ─────────────────────────────────────────────────────
+#   Highest-risk line: the `python -m tools.api_server ...` launch (model load
+#   on sm_120). If it crashes, /health stays 503 and the pod CrashLoops at the
+#   startup guard — check `kubectl logs` for the fish-speech traceback.
+#   FISH_COMPILE defaults to "false" (eager decode) for a deterministic first
+#   boot; flip to "true" (adds --compile, torch.compile/Triton, ~10x decode
+#   speedup per upstream docs) after the eager path is proven. If compile
+#   misbehaves on sm_120, set it back to "false" — eager SDPA is the
+#   known-working floor.
+#
+# The production deploy script rewrites `namespace: isa-cloud-production` to the
+# requested NAMESPACE (e.g. sn-cloud-production).
+#
+# Health check after apply:
+#   kubectl -n isa-cloud-production get pods -l app=fish-speech-tts
+#   kubectl -n isa-cloud-production port-forward svc/fish-speech-tts 8000:8000 &
+#   curl http://localhost:8000/health
+#   curl -s http://localhost:8000/v1/audio/speech \
+#     -H 'content-type: application/json' \
+#     -d '{"model":"fish-speech-s2-pro","input":"Hello from fish speech.","voice":"default","response_format":"mp3"}' \
+#     -o /tmp/fish-test.mp3 && file /tmp/fish-test.mp3
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fish-speech-tts-config
+  namespace: isa-cloud-production
+  labels:
+    app: fish-speech-tts
+    engine: fish-speech-api
+    isa-model/model-id: "fish-speech-s2-pro"
+    isa-model/instance-group: "specialty"
+data:
+  # ── runtime env (non-secret) ────────────────────────────────────────────────
+  # PRIMARY open checkpoint (ungated). Fallback: "fishaudio/s1-mini" (0.5B,
+  # GATED — requires click-accept on HF + HF_TOKEN; also change MODEL_NAME and
+  # CHECKPOINT_DIR accordingly).
+  MODEL_REPO: "fishaudio/s2-pro"
+  MODEL_NAME: "fish-speech-s2-pro"
+  # On the PVC (mounted at /root/.cache/huggingface) so re-boots skip the pull.
+  CHECKPOINT_DIR: "/root/.cache/huggingface/checkpoints/s2-pro"
+  DECODER_CONFIG_NAME: "modded_dac_vq"
+  # Pinned fish-speech ref = main @ 2026-06-11 (v2.0.0; nearest tag v2.0.0-beta
+  # = 3578e4e). Every code claim in this file was verified at this commit.
+  FISH_SPEECH_REF: "e5e292632cb11e7a27b2b7487f58f612bc101e13"
+  # "true" adds --compile (torch.compile/Triton, ~10x decode speedup). Keep
+  # "false" for first boot — eager SDPA is the verified sm_120 floor.
+  FISH_COMPILE: "false"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  # Official fish-speech api_server port (exposed on the Service as http-native
+  # for voice-reference management and the raw /v1/tts API).
+  UPSTREAM_PORT: "8080"
+  LOG_LEVEL: "info"
+  # Xet backend is flaky through the SN egress; force classic HTTP downloads.
+  HF_HUB_DISABLE_XET: "1"
+
+  # ── shim extras (fish-speech itself installs editable from the git clone; ──
+  #    torch/torchaudio are NOT here — torch is baked, torchaudio==2.8.0 comes
+  #    via fish-speech's own pin and is a no-op if already in the base image)
+  requirements-extra.txt: |
+    fastapi>=0.110
+    httpx>=0.27
+    huggingface_hub[cli]>=0.34
+    # Mirrors fish-speech [tool.uv] override-dependencies (pip ignores uv
+    # overrides): descript-audiotools pins protobuf<3.20, fish_speech generated
+    # proto needs >=3.20. The pip dependency-conflict WARNING here is expected.
+    protobuf>=3.20.0,<6.0.0
+
+  # ── OpenAI /v1/audio/speech shim ────────────────────────────────────────────
+  server.py: |
+    """Thin OpenAI-compatible shim in front of the official fish-speech api_server.
+
+    /health is 503 until the upstream (which only starts listening AFTER its
+    models are fully loaded inside the ASGI startup hook) answers /v1/health —
+    this is what makes the k8s startup/readiness probes gate correctly during
+    the cold download + load, and keeps liveness from killing the boot.
+    """
+    import logging
+    import os
+    from typing import Optional
+
+    import httpx
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse, Response
+    from pydantic import BaseModel, Field
+
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "info").upper())
+    log = logging.getLogger("fish-speech-shim")
+
+    MODEL_NAME = os.environ.get("MODEL_NAME", "fish-speech-s2-pro")
+    UPSTREAM = f"http://127.0.0.1:{os.environ.get('UPSTREAM_PORT', '8080')}"
+
+    # fish-speech ServeTTSRequest formats -> response content types.
+    FORMATS = {
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "opus": "audio/ogg",
+        "pcm": "application/octet-stream",
+    }
+    # OpenAI builtin voice names map to the model's default voice (fish-speech
+    # has no fixed voice bank); anything else is treated as a fish-speech
+    # reference_id (register clones via :8080/v1/references/add).
+    BUILTIN_VOICES = {
+        "", "default", "alloy", "ash", "ballad", "coral", "echo",
+        "fable", "onyx", "nova", "sage", "shimmer", "verse",
+    }
+
+    app = FastAPI(title="fish-speech-tts", version="2.0")
+
+
+    class SpeechRequest(BaseModel):
+        model: str = MODEL_NAME
+        input: str
+        voice: str = "default"
+        response_format: str = "mp3"
+        # OpenAI `speed` is NOT supported by fish-speech; accepted and ignored
+        # (logged) so existing kokoro clients do not break.
+        speed: Optional[float] = None
+        # fish-speech passthrough knobs (optional extensions).
+        temperature: Optional[float] = Field(default=None, ge=0.1, le=1.0)
+        top_p: Optional[float] = Field(default=None, ge=0.1, le=1.0)
+        seed: Optional[int] = None
+        max_new_tokens: Optional[int] = None
+        chunk_length: Optional[int] = Field(default=None, ge=100, le=1000)
+
+
+    async def _upstream_ok() -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(f"{UPSTREAM}/v1/health")
+            return r.status_code == 200
+        except Exception:  # noqa: BLE001 — unreachable = still loading
+            return False
+
+
+    @app.get("/health")
+    async def health():
+        if await _upstream_ok():
+            return JSONResponse({"status": "ok", "model": MODEL_NAME}, status_code=200)
+        return JSONResponse({"status": "loading", "model": MODEL_NAME}, status_code=503)
+
+
+    @app.get("/v1/models")
+    async def list_models():
+        return {
+            "object": "list",
+            "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "isa"}],
+        }
+
+
+    @app.post("/v1/audio/speech")
+    async def speech(req: SpeechRequest):
+        fmt = req.response_format.lower()
+        if fmt not in FORMATS:
+            raise HTTPException(
+                400,
+                f"response_format '{req.response_format}' not supported by "
+                f"fish-speech; use one of {sorted(FORMATS)}",
+            )
+        if req.speed is not None and req.speed != 1.0:
+            log.warning("ignoring unsupported speed=%s", req.speed)
+
+        payload = {
+            "text": req.input,
+            "format": fmt,
+            "normalize": True,
+            "streaming": False,
+        }
+        if req.voice and req.voice.lower() not in BUILTIN_VOICES:
+            payload["reference_id"] = req.voice
+        if req.temperature is not None:
+            payload["temperature"] = req.temperature
+        if req.top_p is not None:
+            payload["top_p"] = req.top_p
+        if req.seed is not None:
+            payload["seed"] = req.seed
+        if req.max_new_tokens is not None:
+            payload["max_new_tokens"] = req.max_new_tokens
+        if req.chunk_length is not None:
+            payload["chunk_length"] = req.chunk_length
+
+        try:
+            # Long texts in eager (non-compile) mode can take minutes.
+            timeout = httpx.Timeout(900.0, connect=5.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                r = await client.post(f"{UPSTREAM}/v1/tts", json=payload)
+        except httpx.ConnectError:
+            raise HTTPException(503, "fish-speech engine still loading")
+        except httpx.TimeoutException:
+            raise HTTPException(504, "fish-speech synthesis timed out")
+
+        if r.status_code != 200:
+            detail = r.text[:500] if r.text else f"upstream status {r.status_code}"
+            raise HTTPException(502, f"fish-speech /v1/tts failed: {detail}")
+
+        return Response(
+            content=r.content,
+            media_type=r.headers.get("content-type", FORMATS[fmt]),
+        )
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fish-speech-tts
+  namespace: isa-cloud-production
+  labels:
+    app: fish-speech-tts
+    engine: fish-speech-api
+    isa-model/model-id: "fish-speech-s2-pro"
+    isa-model/instance-group: "specialty"
+spec:
+  # One pod on a specialty node, one MPS time-slice (ADR 0010 pattern).
+  replicas: 1
+  # Cold start = apt + git clone + pip (~2 GB of wheels) + ~11 GB HF download +
+  # model load. Match the startupProbe's ~5.5 h worst-case budget.
+  progressDeadlineSeconds: 21600
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fish-speech-tts
+  template:
+    metadata:
+      labels:
+        app: fish-speech-tts
+        engine: fish-speech-api
+        isa-model/model-id: "fish-speech-s2-pro"
+        isa-model/instance-group: "specialty"
+    spec:
+      enableServiceLinks: false
+      # Base image runs as root (apt-get, /root/.cache/huggingface).
+      securityContext:
+        runAsNonRoot: false
+      # Harbor pull secret — the base image is mirrored to core.harbor.domain.
+      imagePullSecrets:
+        - name: harbor-isa
+      containers:
+        - name: fish-speech
+          # Blackwell-safe base: cu128 torch (sm_120) already baked. Mirrored
+          # from pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime; the cluster
+          # cannot pull docker.io directly.
+          image: core.harbor.domain/isa/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+            - containerPort: 8080
+              name: http-native
+          env:
+            - name: MODEL_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: MODEL_REPO
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: MODEL_NAME
+            - name: CHECKPOINT_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: CHECKPOINT_DIR
+            - name: DECODER_CONFIG_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: DECODER_CONFIG_NAME
+            - name: FISH_SPEECH_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: FISH_SPEECH_REF
+            - name: FISH_COMPILE
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: FISH_COMPILE
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: PORT
+            - name: UPSTREAM_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: UPSTREAM_PORT
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: LOG_LEVEL
+            - name: HF_HUB_DISABLE_XET
+              valueFrom:
+                configMapKeyRef:
+                  name: fish-speech-tts-config
+                  key: HF_HUB_DISABLE_XET
+            - name: HF_HOME
+              value: "/root/.cache/huggingface"
+            # Optional: only needed if MODEL_REPO is flipped to the GATED
+            # fishaudio/s1-mini fallback (s2-pro is ungated).
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # ── 1. system deps (retry — SN egress is intermittently flaky) ──
+              # build-essential + portaudio19-dev: PyAudio (a hard fish-speech
+              # dep) ships no Linux wheels and compiles from source.
+              echo "[startup] apt: git ffmpeg build-essential portaudio19-dev libsox-dev ..."
+              for attempt in 1 2 3 4 5 6; do
+                apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                  git ffmpeg build-essential portaudio19-dev libsox-dev && break
+                echo "[startup] apt attempt $attempt failed; retrying in 15s..."
+                sleep 15
+              done
+              command -v git >/dev/null 2>&1 || { echo "[startup] git missing after retries"; exit 1; }
+              command -v ffmpeg >/dev/null 2>&1 || { echo "[startup] ffmpeg missing after retries"; exit 1; }
+
+              # ── 2. fish-speech source at the pinned, verified commit ────────
+              echo "[startup] cloning fish-speech @ ${FISH_SPEECH_REF} ..."
+              for attempt in 1 2 3 4 5 6; do
+                rm -rf /opt/fish-speech
+                git clone https://github.com/fishaudio/fish-speech /opt/fish-speech \
+                  && git -C /opt/fish-speech checkout "${FISH_SPEECH_REF}" && break
+                echo "[startup] clone attempt $attempt failed; retrying in 15s..."
+                sleep 15
+              done
+              test -f /opt/fish-speech/pyproject.toml || { echo "[startup] clone failed after retries"; exit 1; }
+
+              # ── 3. pip install (NO torch — baked cu128 satisfies torch==2.8.0;
+              #      pip must not replace the sm_120 build) ─────────────────────
+              # Constraints kill resolver backtracking: without them pip walked
+              # werkzeug 3.1.4 -> 2.0.x one metadata fetch at a time (~11s each,
+              # observed live) hunting a version satisfying tensorboard+gradio.
+              # Pin the contested packages; if a pin truly conflicts pip now
+              # fails FAST with the real error instead of spiralling.
+              # The real trigger for resolver backtracking is metadata-fetch
+              # TIMEOUTS on the flaky SN->PyPI link: a timed-out .whl.metadata
+              # reads as "version unavailable" so pip walks to the next version,
+              # cascading down the whole range. Two levers: (1) a long per-fetch
+              # timeout (PIP_DEFAULT_TIMEOUT=300) so fetches almost never give up,
+              # and (2) pin the packages seen walking so even a miss can't spiral.
+              cat > /tmp/pip-constraints.txt <<'CONSTRAINTS'
+              werkzeug==3.0.6
+              tensorboard==2.18.0
+              sentry-sdk==2.40.0
+              wandb==0.19.11
+              gitpython==3.1.43
+              gitdb==4.0.11
+              smmap==5.0.1
+              cachetools==5.5.2
+              zstandard==0.23.0
+              CONSTRAINTS
+              sed -i 's/^              //' /tmp/pip-constraints.txt
+              export PIP_DEFAULT_TIMEOUT=300
+              echo "[startup] pip installing fish-speech + shim extras (torch is pre-baked) ..."
+              for attempt in 1 2 3 4 5 6; do
+                pip install --retries 10 --timeout 300 --prefer-binary \
+                     -c /tmp/pip-constraints.txt -e /opt/fish-speech \
+                  && pip install --retries 10 --timeout 300 --prefer-binary \
+                       -c /tmp/pip-constraints.txt \
+                       -r /etc/fish-speech/requirements-extra.txt && break
+                echo "[startup] pip attempt $attempt failed (network); retrying in 15s..."
+                sleep 15
+              done
+
+              # ── 4. torch-clobber guard + import smoke test BEFORE launch ────
+              python -c "import torch; v = torch.__version__; assert '+cu128' in v, 'torch was clobbered: %s (need +cu128 sm_120 build)' % v; import torchaudio, soundfile, fish_speech, tools.api_server; print('[guard] torch %s OK; fish_speech + official api_server import OK' % v)" \
+                || { echo "[startup] guard failed — deps broken or torch clobbered"; exit 1; }
+
+              # ── 5. model weights -> PVC (idempotent/resumable; skipped warm) ─
+              echo "[startup] downloading ${MODEL_REPO} -> ${CHECKPOINT_DIR} ..."
+              for attempt in 1 2 3 4 5 6; do
+                hf download "${MODEL_REPO}" --local-dir "${CHECKPOINT_DIR}" && break
+                echo "[startup] hf download attempt $attempt failed; retrying in 30s..."
+                sleep 30
+              done
+              test -f "${CHECKPOINT_DIR}/codec.pth" || { echo "[startup] model download incomplete (codec.pth missing)"; exit 1; }
+
+              # ── 6. launch official api_server (loopback-bound model engine is
+              #      on UPSTREAM_PORT; it accepts connections only AFTER models
+              #      load in its startup hook) + exec the OpenAI shim ───────────
+              COMPILE_FLAG=""
+              if [ "${FISH_COMPILE}" = "true" ]; then COMPILE_FLAG="--compile"; fi
+              echo "[startup] launching fish-speech api_server (compile='${COMPILE_FLAG}') ..."
+              cd /opt/fish-speech
+              python -m tools.api_server \
+                --listen "0.0.0.0:${UPSTREAM_PORT}" \
+                --llama-checkpoint-path "${CHECKPOINT_DIR}" \
+                --decoder-checkpoint-path "${CHECKPOINT_DIR}/codec.pth" \
+                --decoder-config-name "${DECODER_CONFIG_NAME}" \
+                ${COMPILE_FLAG} &
+              echo "[startup] launching OpenAI /v1/audio/speech shim ..."
+              # Single worker: one GPU engine behind it; the official server
+              # serializes GPU work with its own lock.
+              exec uvicorn server:app \
+                --app-dir /etc/fish-speech \
+                --host "$HOST" \
+                --port "$PORT" \
+                --workers 1 \
+                --log-level "$LOG_LEVEL"
+          resources:
+            requests:
+              memory: "24Gi"
+              cpu: "4"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "24Gi"
+              cpu: "8"
+              nvidia.com/gpu: "1"
+          # startupProbe gates liveness/readiness during the slow COLD start
+          # (apt + pip + ~11 GB HF download + model load). /health is 503 (or
+          # connection-refused) until the official engine is fully up, so
+          # liveness NEVER fires mid-load. 60 + 1320*15 ≈ 5.5 h worst-case
+          # budget for the one-time pull over the slow SN->HF link (cached on
+          # the PVC; warm restarts are minutes).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 1320
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Liveness only begins firing after startupProbe succeeds; it catches
+          # a hung/dead engine post-load (shim reports 503 if upstream dies).
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+            - name: fish-speech-config
+              mountPath: /etc/fish-speech
+              readOnly: true
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: fish-speech-tts-cache
+        - name: fish-speech-config
+          configMap:
+            name: fish-speech-tts-config
+            items:
+              - key: server.py
+                path: server.py
+              - key: requirements-extra.txt
+                path: requirements-extra.txt
+      # SPECIALTY-node affinity (audio bundle) per ADR 0010. The two
+      # nodeSelectorTerms are OR'd, matching either label scheme.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-specialty
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["specialty"]
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fish-speech-tts
+  namespace: isa-cloud-production
+  labels:
+    app: fish-speech-tts
+    engine: fish-speech-api
+    isa-model/model-id: "fish-speech-s2-pro"
+    isa-model/instance-group: "specialty"
+spec:
+  type: ClusterIP
+  selector:
+    app: fish-speech-tts
+  ports:
+    # OpenAI-compatible shim (/health, /v1/models, /v1/audio/speech).
+    - name: http
+      port: 8000
+      targetPort: 8000
+    # Official fish-speech native API (/v1/tts msgpack|json, /v1/references/*,
+    # /v1/vqgan/*) — used for voice-clone reference management.
+    - name: http-native
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fish-speech-tts-cache
+  namespace: isa-cloud-production
+  labels:
+    app: fish-speech-tts
+    isa-model/model-id: "fish-speech-s2-pro"
+    isa-model/instance-group: "specialty"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # s2-pro is ~11 GB (+ optional s1-mini fallback ~3.6 GB) + HF metadata
+      # headroom.
+      storage: 30Gi
+  storageClassName: local-replica2-delay-bind
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fish-speech-tts
+  namespace: isa-cloud-production
+  labels:
+    app: fish-speech-tts
+    isa-model/model-id: "fish-speech-s2-pro"
+    isa-model/instance-group: "specialty"
+spec:
+  # Single-replica GPU pod: allow voluntary eviction (node drain) rather than
+  # blocking it, matching the kokoro/specialty pattern.
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: fish-speech-tts
