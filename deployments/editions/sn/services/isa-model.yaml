@@ -8,7 +8,11 @@ port: 8082
 replicas: 1
 resources:
   requests: {cpu: "250m", memory: "512Mi"}
-  limits: {cpu: "2", memory: "2Gi"}
+  # 4Gi (was 2Gi): steady-state ~490Mi, but a replica OOMKilled (exit 137) during
+  # a multi-pod rollout — the gateway's startup (init of many local-model clients
+  # + backends/health) spikes over 2Gi. Headroom for the startup peak so rollouts
+  # don't crash-loop a replica. Gateway only; GPU serving (Ray/vLLM) is separate.
+  limits: {cpu: "2", memory: "4Gi"}
 health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
 liveness: {path: /health, initialDelaySeconds: 20, periodSeconds: 20}
 env:
