@@ -1,0 +1,84 @@
+# isa-model schema migration (SN edition).
+#
+# INTERIM: applies the `model`/config DDL that isa-model's admin config API
+# (/api/v1/config/{providers,settings,backups,environments}) needs. Mirrors
+# isa-model alembic 003_create_provider_configs + 004_config_admin_tables, but
+# the isa-model GPU image does NOT bundle deployment/alembic, so we can't run
+# `alembic upgrade` from it. DDL is idempotent (CREATE ... IF NOT EXISTS).
+#
+# PROPER FIX (tracked, isA_Model): bundle the alembic migrations in the image and
+# replace this with an `alembic upgrade head` job (like isa-user-migrate-job.yaml).
+#
+#   kubectl apply -f isa-model-migrate-job.yaml
+#   kubectl logs job/isa-model-migrate -n sn-cloud-production
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: isa-model-migrate
+  namespace: sn-cloud-production
+data:
+  model_migrate.py: |
+    import asyncio, os
+    DDL = [
+        "CREATE SCHEMA IF NOT EXISTS model;",
+        """CREATE TABLE IF NOT EXISTS model.provider_configs (
+             name TEXT PRIMARY KEY, config_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+             is_active BOOLEAN NOT NULL DEFAULT TRUE,
+             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+             last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW());""",
+        "CREATE INDEX IF NOT EXISTS idx_provider_configs_active ON model.provider_configs(is_active);",
+        """CREATE TABLE IF NOT EXISTS public.env_configs (
+             name TEXT PRIMARY KEY, config JSONB NOT NULL DEFAULT '{}'::jsonb,
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT);""",
+        "CREATE INDEX IF NOT EXISTS idx_env_configs_updated_at ON public.env_configs(updated_at DESC);",
+        """CREATE TABLE IF NOT EXISTS public.system_settings (
+             key TEXT PRIMARY KEY, value JSONB,
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT);""",
+        "CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at ON public.system_settings(updated_at DESC);",
+        """CREATE TABLE IF NOT EXISTS public.config_backups (
+             backup_id TEXT PRIMARY KEY, name TEXT NOT NULL,
+             include_secrets BOOLEAN NOT NULL DEFAULT FALSE, components JSONB NOT NULL DEFAULT '[]'::jsonb,
+             schema_version TEXT NOT NULL, manifest_json JSONB NOT NULL,
+             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_by TEXT);""",
+        "CREATE INDEX IF NOT EXISTS idx_config_backups_created_at ON public.config_backups(created_at DESC);",
+        "CREATE INDEX IF NOT EXISTS idx_config_backups_name ON public.config_backups(name);",
+    ]
+    async def main():
+        import asyncpg
+        c = await asyncpg.connect(
+            host=os.getenv("POSTGRES_HOST"), port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.getenv("POSTGRES_DB"), user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
+        )
+        for stmt in DDL:
+            await c.execute(stmt)
+        print("isa-model migration applied:", len(DDL), "statements")
+        await c.close()
+    asyncio.run(main())
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: isa-model-migrate
+  namespace: sn-cloud-production
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      annotations: {consul.hashicorp.com/connect-inject: "false"}
+    spec:
+      restartPolicy: Never
+      imagePullSecrets: [{name: harbor-isa}]
+      containers:
+        - name: migrate
+          image: core.harbor.domain/isa/isa-model:gpu-local-multimodal-20260609-r12
+          command: ["python", "/suite/model_migrate.py"]
+          envFrom:
+            - configMapRef: {name: isa-platform-env}
+            - secretRef: {name: isa-platform-secrets}
+          volumeMounts:
+            - {name: suite, mountPath: /suite}
+      volumes:
+        - name: suite
+          configMap: {name: isa-model-migrate}
