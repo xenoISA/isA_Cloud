@@ -3,9 +3,11 @@
 name: isa-mcp
 image:
   repository: isa/isa-mcp
-  # 0.1.4: consul_* MCP tools honor CONSUL_HOST/CONSUL_PORT (were defaulting to
-  # localhost:8500 in-cluster). Found via deep MCP-client functional testing.
-  tag: "0.1.4"
+  # 0.1.5: digital_tools return JSON strings (not raw dicts) so FastMCP output
+  # validation accepts them — fixes digital_service_health_check
+  # ResponseValidationError (isA_MCP#733). 0.1.4: consul_* MCP tools honor
+  # CONSUL_HOST/CONSUL_PORT. Both found via deep MCP-client functional testing.
+  tag: "0.1.5"
 port: 8081
 replicas: 1
 resources:
