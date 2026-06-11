@@ -26,35 +26,34 @@ SN-specific source divergence — which the gate measures.
 
 ---
 
-## 2. Platform mirrors — archive candidates (sync-diff gate first)
+## 2. Platform mirrors — VERIFIED 2026-06-11 (divergence gate run)
 
-Commit counts are shallow and frozen at the 2026-05-25 bulk sanitizer sync → pure
-mirrors. `model`/`training`/`cloud` diverge later → verify before archiving.
+Each local mirror was diffed against its isA upstream (commit history + tree diff +
+content spot-check). Result is **not** "archive all" — 2 are real customer logic:
 
-| sn repo | isA upstream | local activity | divergence risk | action |
-|---|---|---|:---:|---|
-| sn_agent | isA_Agent | 16 commits, all 05-25 | low | gate → archive |
-| sn_app_sdk | isA_App_SDK | 2 commits, ≤05-25 | low | gate → archive |
-| sn_console | isA_Console | 10 commits, all 05-25 | low | gate → archive |
-| sn_docs | isA_Docs | 4 commits, all 05-25 | low | gate → archive |
-| sn_marketing | isA_Marketing | 3 commits, ≤05-25 | low | gate → archive |
-| sn_mate | isA_Mate | 5 commits, all 05-25 | low | gate → archive |
-| sn_user | isA_user | 2 commits, ≤05-25 | low | gate → archive |
-| sn_model | isA_Model | 14 commits, →06-03 | **medium** | gate → archive **or** push delta upstream |
-| sn_training | isA_Training | 2 commits, →06-08 | **medium** | gate → decide |
-| **sn_cloud** | isA_Cloud | active (06-11) | **KEEP** | **not a pure mirror — see §4** |
-| *(not cloned locally)* sn_agent_sdk, sn_creative, sn_data, sn_mcp, sn_os, sn_vibe, sn_admin | isA_* | — | — | gate at source repo → archive |
+| sn repo | verdict | finding | action |
+|---|---|---|---|
+| **sn_app_sdk** | ✅ CLEAN | branding-only, behind upstream | **archive now** |
+| **sn_docs** | ✅ CLEAN | branding-only, 0 SN-only files | **archive now** |
+| **sn_marketing** | ✅ CLEAN | branding-only, 0 SN-only files | **archive now** |
+| **sn_user** | ✅ CLEAN | "SN-only" migrations are identical-modulo-renumber; behind upstream | **archive now** |
+| **sn_agent** | 🟡 small delta | 3 SN-only docs/ops: `docs/scheduler.md`, `docs/deployment/multi-tenant-playbook.md`, `deployment/local-dev-crud.sh` (document features already in isA) | **port up → isA_Agent, then archive** |
+| **sn_console** | 🟡 small delta | 7 SN-only test files (tenant/schedule/billing — source is upstream, tests weren't); CI workflows + `.d.ts` shims are white-label scaffolding | **port 7 tests → isA_Console; reclassify scaffolding; then archive** |
+| **sn_mate** | 🟡 stale | only code delta is SN *behind* isA's #590/#901 proxy-ownership refactor; 1 SN-only test covers deleted behavior | **confirm nobody wants self-hosted proxy → archive (nothing to preserve)** |
+| **sn_model** | 🔴 RECLASSIFY | full SweetNight **SCM sales-forecast ML product** (LightGBM/backtest/eval-gate/MLflow/notebooks/25+ tests), coupled to `sn_data` forecast product | **NOT a mirror → customer-specific (§3); do NOT archive** |
+| **sn_training** | 🔴 RECLASSIFY | divergent sibling: SweetNight business-ized training content / case libraries / PRD / decks; drops the isA training-service half entirely | **NOT a mirror → customer-specific (§3); do NOT archive** |
+| **sn_cloud** | KEEP | carries SN delivery/ops content with no isA equivalent | **keep — see §4** |
+| *(not cloned locally)* sn_agent_sdk, sn_creative, sn_data, sn_mcp, sn_os, sn_vibe, sn_admin | ⬜ ungated | can't verify locally | **run the gate at the source repo before archiving** |
 
-**Sync-diff gate (per repo):**
-```
-# dry-run the isA upstream → sn fork sanitize; reports add/delete/modify, touches nothing
-/sync-diff <repo>           # or xenoISA/sn-platform sanitizer dry-run
-```
-- **No SN-only delta** (everything would come from isA) → archive the GitHub repo
-  (Settings → Archive: read-only), drop it from the sanitizer set, remove the local clone.
-- **SN-only delta exists** → that code must land somewhere first: push it back to the
-  isA upstream as an optional/edition feature, *then* archive; or, if truly SN-only,
-  reclassify it out of "platform mirror" and keep.
+> sn_model + sn_training are moved to §3/§B in `edition-boundary.md`. They are exactly
+> the SN business logic that ADR 0010 (`isa_data_product`) aims to give a platform home.
+
+**Net:** 4 archive-clean today · 3 archive after a small fixup · 2 reclassify-and-keep ·
+1 keep (sn_cloud) · 7 ungated (verify at source).
+
+The heuristic gate above is strong; for the final archive, a `/sync-diff` (or sanitizer
+dry-run) per repo is the authoritative confirmation. Archive = GitHub Settings → Archive
+(read-only, reversible), drop from the sanitizer `PLATFORM_REPOS`, remove the local clone.
 
 ---
 
