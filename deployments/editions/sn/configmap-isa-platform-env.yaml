@@ -32,6 +32,12 @@ data:
   # localhost:8082 → consumers couldn't reach isa-model (model_service is also
   # unhealthy in Consul). Set both so every consumer resolves isa-model.
   ISA_SERVICE_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  # The isa-mcp speech tools (text_to_speech / transcribe_*) resolve isa-model via
+  # ISA_MODEL_BASE_URL FIRST (older builds default it to localhost:8082 with no
+  # fallback → TTS/ASR fail in-cluster). Newer builds fall back to
+  # services.model_service_url (ISA_MODEL_URL) but still honor this first, so set
+  # it explicitly for both. Alias of ISA_MODEL_URL. See isA_MCP speech_tools.py.
+  ISA_MODEL_BASE_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
   ISA_MULTI_TENANT: 'false'
   LOCAL_GPU_DISPATCH_MODE: vllm
   LOKI_ENABLED: 'false'

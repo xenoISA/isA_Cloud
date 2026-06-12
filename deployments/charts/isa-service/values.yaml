@@ -248,6 +248,15 @@ strategy:
 # Environment variables (from ConfigMap)
 configMapRef: ""
 
+# Primary infra credentials secret (ESO-synced) — env-var-named keys.
+secretRef: ""
+
+# Additional secrets mounted as envFrom (optional:true so a not-yet-synced
+# secret never blocks pod start). Use for ESO-synced external LLM provider keys
+# (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) kept in a separate failure domain
+# from the critical infra secretRef.
+extraSecretRefs: []
+
 # Observability (shared across all isA services)
 observability:
   # Tempo distributed tracing (OTLP gRPC)

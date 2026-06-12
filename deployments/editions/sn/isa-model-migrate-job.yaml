@@ -72,7 +72,7 @@ spec:
       imagePullSecrets: [{name: harbor-isa}]
       containers:
         - name: migrate
-          image: core.harbor.domain/isa/isa-model:gpu-local-multimodal-20260609-r12
+          image: core.harbor.domain/isa/isa-model:gpu-local-multimodal-20260611-r16
           command: ["python", "/suite/model_migrate.py"]
           envFrom:
             - configMapRef: {name: isa-platform-env}

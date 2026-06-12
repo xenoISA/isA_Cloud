@@ -1,0 +1,91 @@
+# FalkorDB for the SN edition — graph store behind isa-mcp (Skill/Tool/Prompt/
+# Resource graphs + vector indexes, ADR-0001 in isA_MCP). Reached via
+# FALKOR_HOST=falkordb.sn-cloud-production.svc.cluster.local:6379 (isa-platform-env).
+#
+# This is a RAW manifest, applied with `kubectl apply -f`, NOT a Helm release.
+# It reconciles the live falkordb that had been hand-applied off-repo and was
+# OOMKilled (exit 137) at a 2Gi limit for ~4 days — crash-looping, 0 endpoints —
+# which blocked isa-mcp startup (isa-mcp retries FalkorDB on /health). See
+# xenoISA/isA_Cloud#407.
+#
+# Why not kubernetes/production/values/falkordb.yaml? That values file targets the
+# bitnami/redis chart pulled from docker.io with a 50Gi PVC, replication, auth and
+# a ServiceMonitor — none of which is deployable in SN's air-gapped cluster (no
+# docker.io egress, no monitoring ns, no provisioned StorageClass/secret here).
+# This manifest is the pragmatic air-gapped equivalent: Harbor-mirrored image,
+# single replica, emptyDir. Known trade-offs (tracked, out of #407's scope):
+#   - emptyDir => graph data is rebuilt by isa-mcp on restart (not persisted).
+#   - single replica, no auth => validation-cluster posture, not HA/hardened.
+# 8Gi limit: FalkorDB loads graphs + a Next.js browser UI and exceeded 2Gi.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falkordb
+  namespace: sn-cloud-production
+  labels:
+    app: falkordb
+    tier: infrastructure
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: falkordb
+  template:
+    metadata:
+      labels:
+        app: falkordb
+        tier: infrastructure
+    spec:
+      containers:
+        - name: falkordb
+          image: core.harbor.domain/falkordb/falkordb:v4.8.7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "2Gi"
+            limits:
+              # 8Gi (was 2Gi): graphs + the bundled Next.js browser UI OOMKilled
+              # the pod at 2Gi (exit 137, 13+ restarts). isA_Cloud#407.
+              cpu: "1"
+              memory: "8Gi"
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb
+  namespace: sn-cloud-production
+  labels:
+    app: falkordb
+spec:
+  type: ClusterIP
+  selector:
+    app: falkordb
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
