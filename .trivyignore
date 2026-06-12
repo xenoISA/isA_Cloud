@@ -1,0 +1,18 @@
+# Trivy fs-scan suppressions for isA_Cloud. See issue #443.
+#
+# CVE-2026-1839 — HuggingFace transformers: arbitrary code execution in the
+# Trainer class (_load_rng_state() calls torch.load() without weights_only=True,
+# exploitable by resuming training from a malicious rng_state.pth checkpoint).
+#
+# NOT EXPLOITABLE in this repo's runtimes, on two independent grounds:
+#   1. Inference-only. The transformers pins (perception-bundle = Florence-2/SAM/
+#      SigLIP, qwen3-tts, triton-flux) never use the Trainer class and never resume
+#      from untrusted training checkpoints — there is no rng_state.pth load path.
+#   2. PyTorch >= 2.6. All three run on the cu128/sm_120 base (torch 2.8.0), where
+#      torch.load defaults to weights_only and safe_globals() protection applies.
+#      The CVE explicitly requires PyTorch < 2.6.
+#
+# The only fix is transformers 5.0.0rc3 (a prerelease); a 4.x -> 5.x bump breaks the
+# deliberate SigLIP (4.49.0) and Qwen3ForCausalLM (>=4.57) pins. Revisit when
+# transformers 5.x reaches stable GA and the runtimes can be revalidated (target ~2026-09).
+CVE-2026-1839
