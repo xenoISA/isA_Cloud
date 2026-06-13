@@ -12,6 +12,39 @@
 > inaccessible.** Do it in a maintenance window, with the current Shamir unseal
 > keys + root token on hand, and follow the rollback section if anything diverges.
 
+## ✅ Status: DONE — migrated & verified 2026-06-13
+
+Live in `sn-cloud-production`: `vault-0` is transit-sealed and auto-unseals on
+restart (verified: pod delete → self-unseal, 0 manual steps); the dedicated
+`vault-unseal` is auto-unsealed by a `vault-unseal-unsealer` Deployment
+(verified: pod delete → auto-recovered); all 7 ExternalSecrets `SecretSynced`.
+Helm releases (`vault` rev 8, `vault-unseal` rev 2) store the final config.
+
+## ⚠️⚠️ CRITICAL GOTCHA — bind listeners to `0.0.0.0`, NOT `[::]`
+
+**This caused hours of CrashLoopBackOff during the migration.** The SN nodes run
+with IPv6 `bindv6only`, so a listener on `[::]:8200` (IPv6 wildcard) **refuses
+all IPv4 connections** to the pod IP. Pod IPs here are IPv4 (`10.42.x.x`), so
+that single misconfig broke everything:
+
+- **vault-unseal** on `[::]` → the **transit seal was unreachable cross-node**
+  (vault-0 on k8s-02 → vault-unseal on k8s-01 = `connection refused`), so
+  `vault-0` couldn't auto-unseal at boot and **crash-looped** (Vault hard-exits
+  if its seal backend is unreachable at startup). Same-node traffic happened to
+  work, which made it look intermittent.
+- **vault-0** on `[::]` → the **kubelet liveness/readiness probes** (which hit
+  the IPv4 pod IP) got `connection refused`; with `failureThreshold: 2` the
+  probe killed a fully-unsealed, healthy Vault ~74s after every boot.
+
+**Fix:** set the listener `address`/`cluster_address` to `0.0.0.0:8200`/`:8201`
+on **both** Vaults. This is baked into the values below. If you ever see Vault
+crash-looping with `connection refused` to its own pod IP or to the unseal Vault,
+check the listener bind first.
+
+> A second gotcha: the `vault-unseal-unsealer` needs **≥256Mi memory** — at 64Mi
+> the `vault` CLI it shells out to gets OOM-killed (`Killed` in its log) and never
+> completes the unseal.
+
 ## Current state (verified 2026-06-12)
 
 | Fact | Value |
@@ -71,8 +104,8 @@ server:
     config: |
       ui = false
       listener "tcp" {
-        address = "[::]:8200"
-        cluster_address = "[::]:8201"
+        address = "0.0.0.0:8200"        # IPv4 — NOT [::] (see Critical Gotcha)
+        cluster_address = "0.0.0.0:8201"
         tls_cert_file = "/vault/userconfig/vault-server-tls/tls.crt"
         tls_key_file  = "/vault/userconfig/vault-server-tls/tls.key"
       }
@@ -130,12 +163,15 @@ Edit the main Vault helm values (`server.ha.config` HCL) and `server.extraEnviro
 **Add** (do not remove storage/listener):
 
 ```hcl
+# NOTE: point at the POD's headless DNS (publishNotReadyAddresses=true), NOT the
+# ready-gated `vault-unseal` ClusterIP service — the service won't route to a
+# sealed (=not-ready) unseal Vault, deadlocking auto-unseal.
 seal "transit" {
-  address            = "https://vault-unseal.sn-cloud-production.svc.cluster.local:8200"
+  address            = "https://vault-unseal-0.vault-unseal-internal.sn-cloud-production.svc.cluster.local:8200"
   disable_renewal    = "false"
   key_name           = "autounseal"
   mount_path         = "transit/"
-  tls_ca_cert        = "/vault/userconfig/vault-server-tls/ca.crt"
+  tls_skip_verify    = "true"   # cert lacks a vault-unseal SAN; in-cluster hop
   # token comes from VAULT_TOKEN env (Step 4 secret), NOT inlined here
 }
 ```
