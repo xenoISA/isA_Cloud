@@ -3,6 +3,8 @@
 > Phased migration of all isA services to shared `isa_common` observability clients.
 > Last updated: 2026-04-10
 
+Canonical contract: [isA Platform Observability Contract](observability-contract.md)
+
 ## Goal
 
 Migrate all isA services from per-service instrumentation (custom Prometheus middleware, raw OpenTelemetry SDK, ad-hoc logging) to the shared `isa_common` observability clients (`setup_observability()`, `setup_metrics()`, `setup_tracing()`).
@@ -73,6 +75,7 @@ Migrate all isA services from per-service instrumentation (custom Prometheus mid
 
 For each service, verify after migration:
 
+- [ ] Service startup follows the [observability contract](observability-contract.md)
 - [ ] No duplicate `/metrics` endpoints (only one, from isa_common)
 - [ ] No raw `prometheus_client` imports (use isa_common factories)
 - [ ] No custom `PrometheusMiddleware` (use isa_common middleware)
