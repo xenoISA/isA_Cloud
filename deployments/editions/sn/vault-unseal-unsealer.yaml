@@ -1,0 +1,46 @@
+# Auto-unsealer for the dedicated transit "unseal Vault".
+# Decoupled loop: if vault-unseal is sealed, unseal it from an in-cluster key.
+# Safe-by-design: if this fails, vault-unseal simply stays sealed (same as no
+# unsealer) — it cannot crash or disrupt anything. Holds only the unseal key of
+# the EMPTY transit Vault (no real secrets), so blast radius is minimal.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-unseal-unsealer
+  namespace: sn-cloud-production
+  labels: { app: vault-unseal-unsealer }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: vault-unseal-unsealer } }
+  template:
+    metadata: { labels: { app: vault-unseal-unsealer } }
+    spec:
+      imagePullSecrets: [{ name: harbor-isa }]
+      containers:
+        - name: unsealer
+          image: core.harbor.domain/hashicorp/vault:1.21.2
+          env:
+            # Hit the POD directly via headless per-pod DNS — the regular Service
+            # only routes to READY pods, and a sealed Vault is NOT ready, so the
+            # Service could never reach it to unseal it (chicken-and-egg).
+            - name: VAULT_ADDR
+              value: https://vault-unseal-0.vault-unseal-internal.sn-cloud-production.svc.cluster.local:8200
+            - name: VAULT_SKIP_VERIFY
+              value: "true"
+            - name: UNSEAL_KEY
+              valueFrom: { secretKeyRef: { name: vault-unseal-key, key: key } }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "vault-unseal auto-unsealer started"
+              while true; do
+                if vault status -format=json 2>/dev/null | grep -q '"sealed": *true'; then
+                  vault operator unseal "$UNSEAL_KEY" >/dev/null 2>&1 \
+                    && echo "$(date -u) unsealed vault-unseal" \
+                    || echo "$(date -u) unseal attempt failed"
+                fi
+                sleep 15
+              done
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }

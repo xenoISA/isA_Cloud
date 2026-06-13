@@ -1,0 +1,48 @@
+# SN production "unseal Vault" — Helm values (chart hashicorp/vault 0.32.0).
+# Apply: helm upgrade vault-unseal hashicorp/vault --version 0.32.0 -n sn-cloud-production -f deployments/editions/sn/vault-unseal.yaml
+# Provides the transit key that auto-unseals vault-0; itself auto-unsealed by
+# vault-unseal-unsealer.yaml. Runbook: docs/runbooks/vault-transit-auto-unseal.md
+# Dedicated transit "unseal Vault" for SN production auto-unseal (#426).
+# Minimal, isolated release. Holds ONLY a transit wrapping key (no real secrets),
+# so its blast radius is tiny. Reuses the existing vault-server-tls cert; the main
+# Vault's seal stanza uses tls_skip_verify (cert lacks a vault-unseal SAN).
+global:
+  enabled: true
+  tlsDisable: false
+  imagePullSecrets:
+    - name: harbor-isa
+injector:
+  enabled: false
+server:
+  image:
+    repository: core.harbor.domain/hashicorp/vault
+    tag: 1.21.2
+  imagePullSecrets:
+    - name: harbor-isa
+  dataStorage:
+    enabled: true
+    size: 2Gi
+    storageClass: local-replica2-delay-bind
+  extraEnvironmentVars:
+    VAULT_ADDR: https://127.0.0.1:8200
+    VAULT_CACERT: /vault/userconfig/vault-server-tls/ca.crt
+  extraVolumes:
+    - name: vault-server-tls
+      type: secret
+  standalone:
+    enabled: true
+    config: |
+      ui = false
+      listener "tcp" {
+        address = "0.0.0.0:8200"
+        cluster_address = "0.0.0.0:8201"
+        tls_cert_file = "/vault/userconfig/vault-server-tls/tls.crt"
+        tls_key_file  = "/vault/userconfig/vault-server-tls/tls.key"
+      }
+      storage "raft" {
+        path = "/vault/data"
+      }
+  ha:
+    enabled: false
+ui:
+  enabled: false
