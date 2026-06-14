@@ -1,0 +1,53 @@
+# =============================================================================
+# Edition profile — SaaS (isA self-hosted, multi-tenant)  xenoISA/isA_Cloud #316
+# =============================================================================
+# Overlay on top of values-base.yaml. The managed isA SaaS at api.isa.xxx:
+#   * multi-tenant + charging ON   (registration / API key / metering / billing)
+#   * big-data umbrella NEVER installed (SaaS = lightweight stores only)
+#   * brand = isA (NOT white-labelled — SaaS-only modules must not sync to sn_*)
+#
+# Matrix: docs/saas-deployment/README.md / saas-production-architecture-design.md
+#
+#   helm install isa-saas ./deployments/charts/isa-service \
+#     -f deployments/editions/values-base.yaml \
+#     -f deployments/editions/values-saas.yaml
+# =============================================================================
+
+# Big-data umbrella stays OFF for SaaS — never install isa-bigdata here.
+bigdata:
+  enabled: false
+
+modules:
+  metering: true
+  charging: true       # SaaS: customer billing ON
+  multiTenant: true    # SaaS: multi-tenant ON
+
+# Full env list (list values replace, not merge — restate all keys). Brand stays
+# isA; the SaaS edition is not white-labelled.
+env:
+  # --- Edition contract (#317) ---
+  - name: ISA_EDITION
+    value: "saas"
+  - name: ISA_BIGDATA_ENABLED
+    value: "false"
+  - name: ISA_METERING_ENABLED
+    value: "true"
+  - name: ISA_CHARGING_ENABLED
+    value: "true"
+  - name: ISA_MULTI_TENANT
+    value: "true"
+  # --- Brand: isA defaults ---
+  - name: BRAND_NAME
+    value: "isA"
+  - name: BRAND_DISPLAY_NAME
+    value: "isA Platform"
+  - name: BRAND_ORG_NAME
+    value: "isA"
+  - name: BRAND_SUPPORT_EMAIL
+    value: "dev@iapro.ai"
+  - name: AUTH_COOKIE_DOMAIN
+    value: ".iapro.ai"
+  - name: BRAND_PRIMARY_HOST
+    value: "isa.dev"
+  - name: BRAND_DOCS_URL
+    value: "docs.isa.dev"

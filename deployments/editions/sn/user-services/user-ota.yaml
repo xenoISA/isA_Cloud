@@ -1,0 +1,13 @@
+name: user-ota
+image:
+  repository: isa/user-ota
+  # 0.1.1: HTTPException guards + ValueError->400 in handlers (a missing
+  # firmware on campaign create raised ValueError that was swallowed into a
+  # 500; should be 4xx) + isa_common pgbouncer transaction-pooling fix.
+  tag: "0.1.1"
+port: 8221
+env:
+  - {name: SERVICE_NAME, value: "ota_service"}
+  - {name: SERVICE_PORT, value: "8221"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

@@ -1,0 +1,12 @@
+name: isa-docs
+image:
+  repository: isa/isa-docs
+  tag: "0.1.0"
+port: 4300
+replicas: 1
+resources:
+  requests: {cpu: "100m", memory: "256Mi"}
+  limits: {cpu: "1", memory: "1Gi"}
+# docs has no /api/health route; probe the homepage under basePath /docs.
+health: {path: /docs, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /docs, initialDelaySeconds: 40, periodSeconds: 20}

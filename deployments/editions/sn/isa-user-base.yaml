@@ -1,0 +1,24 @@
+# Base for isa_user microservices (same standard as /tmp/isa-svc-base.yaml,
+# but env from isa-user-env ConfigMap + isa-platform-secrets Secret).
+namespace: sn-cloud-production
+replicas: 2
+image:
+  registry: core.harbor.domain
+  pullPolicy: Always
+configMapRef: isa-user-env
+secretRef: isa-platform-secrets
+rollout: {enabled: false}
+# HA + autoscale (perf baseline 2026-06-09: single pod was CPU-limit-bound ~580 rps,
+# scale-out linear). SERVICE_HOST=podIP is injected by the chart for Consul routing.
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilization: 70}
+consul: {enabled: false}
+startupProbe: {enabled: false}
+podDisruptionBudget: {enabled: false}
+metrics: {enabled: false}
+networkPolicy: {enabled: false}
+observability: null
+securityContext: null
+podSecurityContext: null
+resources:
+  requests: {cpu: "150m", memory: "192Mi"}
+  limits: {cpu: "500m", memory: "512Mi"}

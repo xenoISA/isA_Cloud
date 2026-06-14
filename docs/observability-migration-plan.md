@@ -1,7 +1,9 @@
 # isA Platform — Observability Migration Plan
 
 > Phased migration of all isA services to shared `isa_common` observability clients.
-> Last updated: 2026-04-10
+> Last updated: 2026-06-13
+
+Canonical contract: [isA Platform Observability Contract](observability-contract.md)
 
 ## Goal
 
@@ -73,6 +75,7 @@ Migrate all isA services from per-service instrumentation (custom Prometheus mid
 
 For each service, verify after migration:
 
+- [ ] Service startup follows the [observability contract](observability-contract.md)
 - [ ] No duplicate `/metrics` endpoints (only one, from isa_common)
 - [ ] No raw `prometheus_client` imports (use isa_common factories)
 - [ ] No custom `PrometheusMiddleware` (use isa_common middleware)
@@ -81,6 +84,28 @@ For each service, verify after migration:
 - [ ] Service registers with Consul including metrics port
 - [ ] ServiceMonitor exists in production manifests
 - [ ] Grafana dashboard updated to use new metric names (if changed)
+
+## Preflight Scanner
+
+Use the lightweight scanner before opening or merging a service migration PR:
+
+```bash
+python scripts/observability_contract_scan.py \
+  /path/to/service/src \
+  --repo-root /path/to/isA_Cloud \
+  --service isa-agent
+```
+
+The scanner reports likely contract drift:
+
+- raw `prometheus_client` or `prometheus-fastapi-instrumentator` usage outside `isa_common`
+- custom `/metrics` routes
+- custom `PrometheusMiddleware`
+- raw `TracerProvider` or `set_tracer_provider`
+- more than one `setup_observability()` call under the scanned service root
+- missing production `ServiceMonitor` references for configured services
+
+The scanner intentionally skips docs, examples, tests, virtualenvs, and the approved `isa_common` implementation paths by default. Use `--warn-only` during discovery, `--skip-service-monitor-check` for local-only scans, and `--allow-path` for reviewed exceptions.
 
 ## Success Criteria
 

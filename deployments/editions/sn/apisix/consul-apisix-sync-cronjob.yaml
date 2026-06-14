@@ -1,0 +1,32 @@
+# SN prod: provisions APISIX routes from Consul services (consul-discovery upstreams).
+# Image built from ./Dockerfile + ./sync_routes.sh (isa/consul-apisix-sync:0.1.2).
+# Fixes vs the staging manifest: (1) limit-count uses redis_password (Redis is auth'd),
+# (2) removed redundant ACTIVE health checks (consul discovery already filters healthy nodes;
+#     active checks on ~50 upstreams saturated APISIX worker_events).
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: consul-apisix-sync, namespace: sn-cloud-production}
+spec:
+  schedule: "*/15 * * * *"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata: {annotations: {consul.hashicorp.com/connect-inject: "false"}}
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets: [{name: harbor-isa}]
+          containers:
+            - name: sync
+              image: core.harbor.domain/isa/consul-apisix-sync:0.1.2
+              command: ["bash","/scripts/sync_routes.sh"]
+              env:
+                - {name: CONSUL_URL, value: "http://consul-server.sn-cloud-production.svc.cluster.local:8500"}
+                - {name: APISIX_ADMIN_URL, value: "http://apisix-admin.sn-cloud-production.svc.cluster.local:9180"}
+                - {name: APISIX_ADMIN_KEY, valueFrom: {secretKeyRef: {name: apisix-secret, key: admin-key}}}
+                - {name: REDIS_HOST, value: "redis-cluster.sn-cloud-production.svc.cluster.local"}
+                - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: isa-platform-secrets, key: REDIS_PASSWORD}}}
+                - {name: COOKIE_DOMAIN, value: ".sn.local"}
+                - {name: CORS_ALLOWED_ORIGINS, value: "https://app.sn.local,https://console.sn.local"}

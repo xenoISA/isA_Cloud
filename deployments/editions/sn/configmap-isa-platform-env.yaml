@@ -1,0 +1,101 @@
+apiVersion: v1
+data:
+  BRAND_DISPLAY_NAME: SN Platform
+  BRAND_NAME: SN
+  BRAND_ORG_NAME: SN
+  CONSUL_ENABLED: 'true'
+  CONSUL_HOST: consul-server.sn-cloud-production.svc.cluster.local
+  CONSUL_PORT: '8500'
+  FALKOR_HOST: falkordb.sn-cloud-production.svc.cluster.local
+  FALKOR_PORT: '6379'
+  ISA_BACKEND_PREFERENCE: local_gpu,modal,local
+  ISA_BIGDATA_ENABLED: 'true'
+  ISA_CHARGING_ENABLED: 'false'
+  ISA_DEFAULT_PROVIDER: isa
+  ISA_DEFAULT_MODEL: qwen2.5
+  ISA_EDITION: on-prem-full
+  # --- License & entitlement (ADR 0008 §3, §6) — SN on-prem-full ENFORCES. ---
+  # SCOPED TO SN: this ConfigMap is the SN edition's env source (configMapRef in
+  # isa-svc-base.yaml). SaaS/lite swap this whole ConfigMap and DO NOT set
+  # ISA_LICENSE_ENFORCE → their license stays UNLICENSED + enforcement off
+  # (isa_common/licensing.py: enforce reads ISA_LICENSE_ENFORCE; unset/false = off).
+  ISA_LICENSE_ENFORCE: 'true'
+  # Path to the signed license.json mounted read-only from the isa-license
+  # ConfigMap (see isa-svc-base.yaml volumes + the configmap-isa-license.yaml /
+  # offline-bundle handoff). Read by isa_common/license.py (ISA_LICENSE_FILE).
+  ISA_LICENSE_FILE: /etc/isa-license/license.json
+  ISA_METERING_ENABLED: 'true'
+  ISA_MODEL_PROVIDER: local
+  ISA_MODEL_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  # Alias of ISA_MODEL_URL. The isa-mcp model client (core/config/mcp_config.py)
+  # reads ISA_SERVICE_URL (not ISA_MODEL_URL) and otherwise defaults to
+  # localhost:8082 → consumers couldn't reach isa-model (model_service is also
+  # unhealthy in Consul). Set both so every consumer resolves isa-model.
+  ISA_SERVICE_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  # The isa-mcp speech tools (text_to_speech / transcribe_*) resolve isa-model via
+  # ISA_MODEL_BASE_URL FIRST (older builds default it to localhost:8082 with no
+  # fallback → TTS/ASR fail in-cluster). Newer builds fall back to
+  # services.model_service_url (ISA_MODEL_URL) but still honor this first, so set
+  # it explicitly for both. Alias of ISA_MODEL_URL. See isA_MCP speech_tools.py.
+  ISA_MODEL_BASE_URL: http://isa-model.sn-cloud-production.svc.cluster.local:8082
+  ISA_MULTI_TENANT: 'false'
+  LOCAL_GPU_DISPATCH_MODE: vllm
+  LOKI_ENABLED: 'false'
+  LOKI_URL: ''
+  MINIO_ENDPOINT: minio.sn-cloud-production.svc.cluster.local:9000
+  MINIO_HOST: minio.sn-cloud-production.svc.cluster.local
+  MINIO_PORT: '9000'
+  MINIO_SECURE: 'false'
+  NATS_HOST: nats.sn-cloud-production.svc.cluster.local
+  NATS_PORT: '4222'
+  NATS_URL: nats://nats.sn-cloud-production.svc.cluster.local:4222
+  NEO4J_AVAILABLE: 'false'
+  POSTGRES_DB: postgres
+  POSTGRES_HOST: postgresql.sn-cloud-production.svc.cluster.local
+  POSTGRES_PORT: '5432'
+  POSTGRES_USER: postgres
+  QDRANT_HOST: qdrant.sn-cloud-production.svc.cluster.local
+  QDRANT_PORT: '6333'
+  RAY_ADDRESS: ray://ray-head-svc.sn-cloud-production.svc.cluster.local:10001
+  RAY_IGNORE_VERSION_MISMATCH: '1'
+  RAY_NAMESPACE: isa-model
+  RAY_SERVE_ENABLED: 'true'
+  RAY_SERVE_HTTP_URL: http://ray-head-svc.sn-cloud-production.svc.cluster.local:8000
+  REDIS_HOST: redis-cluster.sn-cloud-production.svc.cluster.local
+  REDIS_PORT: '6379'
+  REDIS_URL: redis://redis-cluster.sn-cloud-production.svc.cluster.local:6379
+  VLLM_BASE_URL: http://vllm-qwen36-27b-pool.sn-cloud-production.svc.cluster.local:8000
+  VLLM_DEFAULT_MODEL: qwen3.6-27b
+  VLLM_ENABLED: 'true'
+  VLLM_GPU_COUNT: '4'
+  VLLM_MODEL_ALIASES: Qwen/Qwen3.6-27B-FP8=qwen3.6-27b,Qwen/Qwen3.6-27B=qwen3.6-27b,qwen3.6-27b-fp8=qwen3.6-27b
+  VLLM_SERVED_MODEL_NAME: qwen3.6-27b
+  VLLM_EMBEDDING_BASE_URL: http://vllm-qwen3-embedding-8b.sn-cloud-production.svc.cluster.local:8000
+  VLLM_EMBEDDING_MODEL: qwen3-embedding-8b
+  VLLM_EMBEDDING_MODEL_ALIASES: Qwen/Qwen3-Embedding-8B=qwen3-embedding-8b,text-embedding-3-large=qwen3-embedding-8b,text-embedding-3-small=qwen3-embedding-8b,text-embedding-ada-002=qwen3-embedding-8b,ada-002=qwen3-embedding-8b,bge-large-en-v1.5=qwen3-embedding-8b
+  VLLM_EMBEDDING_MODEL_DIMENSIONS: text-embedding-3-small=1536,text-embedding-ada-002=1536,ada-002=1536,text-embedding-3-large=3072,bge-large-en-v1.5=1024
+  ISA_RERANK_BACKEND: local_embedding
+  LOCAL_RERANK_EMBEDDING_MODEL: qwen3-embedding-8b
+  ISA_RERANK_ALLOW_MODAL_FALLBACK: 'false'
+  LOCAL_TTS_BASE_URL: http://kokoro-gpu.sn-cloud-production.svc.cluster.local:8880
+  LOCAL_TTS_RUNTIME_MODEL: kokoro
+  LOCAL_TTS_DEFAULT_VOICE: af_nicole
+  LOCAL_TTS_RESPONSE_FORMAT: wav
+  LOCAL_IMAGE_BASE_URL: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_IMAGE_RUNTIME_MODEL: qwen-image-2.0
+  LOCAL_IMAGE_BACKEND: triton
+  LOCAL_IMAGE_TIMEOUT_SECONDS: '900'
+  LOCAL_VIDEO_BASE_URL: http://triton-wan-2-2.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_VIDEO_RUNTIME_MODEL: wan-2.2
+  LOCAL_VIDEO_BACKEND: triton
+  LOCAL_VIDEO_TIMEOUT_SECONDS: '1800'
+  LOCAL_VLM_BASE_URL: http://qwen3-vl.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_VLM_RUNTIME_MODEL: qwen3-vl-8b
+  LOCAL_VLM_TIMEOUT_SECONDS: '180'
+  LOCAL_OCR_BASE_URL: http://paddleocr-vl.sn-cloud-production.svc.cluster.local:8000
+  LOCAL_OCR_RUNTIME_MODEL: paddleocr-vl
+  LOCAL_PERCEPTION_BASE_URL: http://perception-bundle.sn-cloud-production.svc.cluster.local:8000
+kind: ConfigMap
+metadata:
+  name: isa-platform-env
+  namespace: sn-cloud-production

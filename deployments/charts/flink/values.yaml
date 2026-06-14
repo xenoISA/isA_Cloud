@@ -63,6 +63,8 @@ session:
     repository: apache/flink
     tag: "1.20.0-scala_2.12-java17"
     pullPolicy: IfNotPresent
+  # Private registry pull secrets for JobManager and TaskManager runtime pods.
+  imagePullSecrets: []
 
   # JobManager spec.
   jobManager:
@@ -97,11 +99,10 @@ session:
     storageDir: "s3a://flink-checkpoints/ha/"
 
   # flink-conf.yaml entries merged into the FlinkDeployment.spec.flinkConfiguration.
-  # Keys are flat. Credentials referenced via Hadoop's ${env:VAR}
-  # interpolation — env-injected from minio-credentials Secret (#242).
+  # Keys are flat. Do not place secret values or ${VAR} placeholders here:
+  # Flink 1.20 passes unresolved S3 placeholders to Hadoop S3A. Credentials are
+  # injected as pod env-vars and read by Hadoop's environment provider.
   flinkConfiguration:
-    # Kubernetes deploy mode.
-    kubernetes.cluster-id: flink-session
     # State + checkpoints — persisted to MinIO bucket created by #242.
     state.backend.type: rocksdb
     state.backend.incremental: "true"
@@ -114,8 +115,7 @@ session:
     # S3A wiring against MinIO (chart-deployed minio Service).
     s3.endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
     s3.path.style.access: "true"
-    s3.access.key: "${env:AWS_ACCESS_KEY_ID}"
-    s3.secret.key: "${env:AWS_SECRET_ACCESS_KEY}"
+    fs.s3a.aws.credentials.provider: "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
     # Memory tuning. Override per profile.
     jobmanager.memory.process.size: "2g"
     taskmanager.memory.process.size: "2g"
@@ -139,8 +139,7 @@ icebergCatalog:
 
 # -----------------------------------------------------------------------------
 # MinIO creds — Secret produced by the minio chart (#242). Env-injected
-# into JM + TM pods so the ${env:VAR} interpolation in flinkConfiguration
-# resolves correctly.
+# into JM + TM pods and consumed by Hadoop S3A's environment credential provider.
 # -----------------------------------------------------------------------------
 minioCredentials:
   secretName: minio-credentials

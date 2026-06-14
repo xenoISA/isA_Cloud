@@ -51,9 +51,13 @@ affinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:
         - matchExpressions:
-            - key: nvidia.com/gpu.present
+            - key: isa.io/gpu-role-specialty
               operator: In
               values: ["true"]
+        - matchExpressions:
+            - key: sn.io/gpu-role
+              operator: In
+              values: ["specialty"]
 
 # Probes
 livenessProbe:

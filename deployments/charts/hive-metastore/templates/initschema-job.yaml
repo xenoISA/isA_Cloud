@@ -57,6 +57,24 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.jdbcDriver.enabled }}
+      initContainers:
+        - name: copy-postgresql-jdbc-driver
+          image: "{{ .Values.jdbcDriver.image.registry }}/{{ .Values.jdbcDriver.image.repository }}:{{ .Values.jdbcDriver.image.tag }}"
+          imagePullPolicy: {{ .Values.jdbcDriver.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              cp "{{ .Values.jdbcDriver.sourcePath }}" /jdbc/postgresql.jar
+              chmod 0444 /jdbc/postgresql.jar
+          securityContext:
+            {{- toYaml .Values.jdbcDriver.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: postgres-jdbc-driver
+              mountPath: /jdbc
+      {{- end }}
       containers:
         - name: schematool
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -69,6 +87,24 @@ spec:
             - -c
             - |
               set -e
+              render_hive_site() {
+                export HIVE_CONF_DIR=/tmp/hive-conf
+                mkdir -p "${HIVE_CONF_DIR}"
+                escape_sed() {
+                  printf '%s' "$1" | sed -e 's/[\/&|\\]/\\&/g'
+                }
+                db_user="$(escape_sed "${HIVE_DB_USERNAME}")"
+                db_pass="$(escape_sed "${HIVE_DB_PASSWORD}")"
+                aws_key="$(escape_sed "${AWS_ACCESS_KEY_ID:-}")"
+                aws_secret="$(escape_sed "${AWS_SECRET_ACCESS_KEY:-}")"
+                sed \
+                  -e "s|\${env:HIVE_DB_USERNAME}|${db_user}|g" \
+                  -e "s|\${env:HIVE_DB_PASSWORD}|${db_pass}|g" \
+                  -e "s|\${env:AWS_ACCESS_KEY_ID}|${aws_key}|g" \
+                  -e "s|\${env:AWS_SECRET_ACCESS_KEY}|${aws_secret}|g" \
+                  /opt/hive/conf/hive-site.xml > "${HIVE_CONF_DIR}/hive-site.xml"
+              }
+              render_hive_site
               echo "[init-schema] checking existing HMS schema..."
               if /opt/hive/bin/schematool -dbType postgres -info >/dev/null 2>&1; then
                 echo "[init-schema] schema already present; running upgradeSchema (no-op if at HEAD)."
@@ -103,6 +139,12 @@ spec:
               mountPath: /opt/hive/conf/hive-site.xml
               subPath: hive-site.xml
               readOnly: true
+            {{- if .Values.jdbcDriver.enabled }}
+            - name: postgres-jdbc-driver
+              mountPath: {{ .Values.jdbcDriver.mountPath }}
+              subPath: postgresql.jar
+              readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -112,6 +154,10 @@ spec:
             items:
               - key: hive-site.xml
                 path: hive-site.xml
+        {{- if .Values.jdbcDriver.enabled }}
+        - name: postgres-jdbc-driver
+          emptyDir: {}
+        {{- end }}
         - name: tmp
           emptyDir: {}
 {{- end }}

@@ -1,10 +1,18 @@
 # ADR 0004 — Actions Runner Controller (ARC) for self-hosted CI runners
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0005](./0005-revert-to-github-hosted-ci.md) on 2026-05-28
 - **Date**: 2026-05-21
 - **Author**: isA platform infra team
 - **Issue**: [xenoISA/isA_Cloud#288](https://github.com/xenoISA/isA_Cloud/issues/288) — Parent epic: [#284](https://github.com/xenoISA/isA_Cloud/issues/284)
 - **Supersedes**: n/a
+- **Superseded by**: [ADR 0005 — Revert to GitHub-hosted Actions](./0005-revert-to-github-hosted-ci.md)
+
+> **Note (2026-05-28)**: After one week in production, ARC was withdrawn. The
+> operational overhead (image rebuilds, runner registration, App-token
+> rotation, all-pool-offline outages) exceeded the cost of GitHub-hosted
+> minutes at platform scale. See [ADR 0005](./0005-revert-to-github-hosted-ci.md)
+> for the rationale and the reversal plan. The rest of this document is kept
+> for historical context.
 
 ## Context
 
@@ -32,6 +40,8 @@ Use **ARC with the scale-set model** and **GitHub App authentication**.
 - ARC controller in namespace `arc-systems`; the runner scale set, its
   listener, and ephemeral runner pods in `arc-runners`.
 - Auth via a **GitHub App** registered on the `xenoISA` org — not a PAT.
+- The scale set is assigned to an org runner group named `isA CI`, scoped to
+  the repos allowed to consume local-kind CI capacity.
 - The scale set is installed as `self-hosted` (`runnerScaleSetName`) so the
   four repos already on `runs-on: self-hosted` route to ARC unchanged.
 - Runner pods use `dind` container mode so `docker build` CI jobs work.
@@ -85,8 +95,9 @@ the GitHub Actions API; see Consequences.
   not GitHub *availability*. A full account suspension stops the Actions API;
   surviving that is [#293](https://github.com/xenoISA/isA_Cloud/issues/293)'s
   scope (repo mirror + independent CI), not #288.
-- **Org-admin prerequisite.** The live deploy needs a GitHub App registered on
-  `xenoISA` (org-admin action) — #288's config artifacts cannot self-deploy.
+- **Org-admin prerequisite.** The live deploy needs a GitHub App and an `isA CI`
+  runner group registered on `xenoISA` (org-admin actions) — #288's config
+  artifacts cannot self-deploy.
 
 ## References
 

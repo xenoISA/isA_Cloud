@@ -1,0 +1,21 @@
+# isa_data — data platform service (FastAPI, :8084). Standard infra via base.
+name: isa-data
+image:
+  repository: isa/isa-data
+  # 0.1.5: enable Consul service registration by default so isa-data registers
+  # as `data_service` like every other platform service. Before, it alone never
+  # registered, so data-service consumers' Consul discovery fell back to
+  # localhost (xenoISA/isA_MCP#731). Registration stays gated on CONSUL_ENABLED.
+  # 0.1.6: RBAC policies persisted to Redis (shared) instead of a pod-local JSON
+  # file — grant/check were inconsistent across the 4 replicas (isA_Data#432).
+  tag: "0.1.6"
+port: 8084
+replicas: 1
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  limits: {cpu: "2", memory: "4Gi"}
+health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}
+
+# HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

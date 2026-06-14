@@ -1,0 +1,14 @@
+name: user-audit
+image:
+  repository: isa/user-audit
+  # 0.1.1: isa_common pgbouncer transaction-pooling fix (see user-artifact).
+  # 0.1.2: + fix invalid EventType literal "audit.security.alert" (enum value is
+  # "security_alert") that raised a swallowed ValidationError on every alert ->
+  # 500. Both fixes needed for security/alerts to work.
+  tag: "0.1.2"
+port: 8205
+env:
+  - {name: SERVICE_NAME, value: "audit_service"}
+  - {name: SERVICE_PORT, value: "8205"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

@@ -1,0 +1,30 @@
+# Example service-plugin manifest (ADR 0006, kind=service).
+# A customer module (e.g. sn_erp) drops a plugin.yaml like this, then:
+#
+#     from isa_common import PluginServiceRegistry
+#     reg = PluginServiceRegistry.from_manifest_file("plugin.yaml", consul_host="consul")
+#     reg.register(); reg.start_maintenance()
+#
+# It self-registers in Consul; the existing Consul->APISIX route-sync exposes it
+# at `service.api_path` through the gateway. No platform fork, no new transport.
+
+id: sn_erp                       # stable, lowercase/underscore; customer-specific (never synced upstream)
+name: "SN ERP Service"
+version: 1.2.0
+kind: service                    # tool | agent | service | client
+description: "Customer ERP integration plugged into the platform as a service"
+tenant: customer-sn              # 'platform' or a customer id — isolation/ownership
+scopes:                          # permissions the plugin requests
+  - data.read
+  - data.write
+dependencies:                    # other plugin ids/constraints
+  - sn_auth>=1.0
+capabilities:                    # kind-specific free-form (here: declared routes)
+  routes:
+    - /orders
+    - /inventory
+service:                         # required for kind=service
+  api_path: /api/v1/plugins/erp  # drives APISIX route creation (meta.api_path)
+  port: 8300
+  auth_required: true
+  health_check_type: ttl         # ttl | http

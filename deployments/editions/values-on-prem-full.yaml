@@ -1,0 +1,74 @@
+# =============================================================================
+# Edition profile — On-Prem FULL (single-tenant + big-data)  isA_Cloud #316
+# =============================================================================
+# Overlay on top of values-base.yaml. The full enterprise on-prem install
+# (e.g. the SN white-label delivery):
+#   * big-data umbrella ENABLED (Kafka/Flink/StarRocks/Iceberg/Dataphin)
+#   * single-tenant — multi-tenant OFF, charging OFF (no SaaS billing on-prem)
+#   * brand WHITE-LABELABLE — overlay a values-brand-<customer>.example.yaml
+#
+# Matrix: docs/saas-deployment/README.md (企业版·全量) / ADR 0006.
+#
+#   # 1) install the platform with the full-edition env + brand overlay
+#   helm install isa-on-prem ./deployments/charts/isa-service \
+#     -f deployments/editions/values-base.yaml \
+#     -f deployments/editions/values-on-prem-full.yaml \
+#     -f deployments/editions/values-brand-sn.example.yaml
+#
+#   # 2) because bigdata.enabled=true, ALSO install the big-data umbrella:
+#   helm dependency update deployments/umbrella/isa-bigdata
+#   helm install isa-bigdata ./deployments/umbrella/isa-bigdata \
+#     -f deployments/values/customer-prod.yaml
+# =============================================================================
+
+# Big-data umbrella ENABLED for the full edition. This flag gates whether the
+# deploy tooling / ArgoCD app installs the separate isa-bigdata umbrella release
+# (deployments/umbrella/isa-bigdata, whose subcharts default `enabled: true`).
+bigdata:
+  enabled: true
+
+# Dataphin data-middle-platform — OPTIONAL on-prem-full component, default OFF.
+# Opt-in by setting `dataphin.enabled: true`. When enabled, the deploy tooling /
+# ArgoCD app additionally installs the isa-dataphin-infra umbrella release
+# (deployments/umbrella/isa-dataphin-infra: a dedicated postgres-dataphin +
+# standalone redis) into the `dataphin` namespace. Dataphin consumes the
+# lakehouse backbone (HMS/Kafka/Apicurio/MinIO/StarRocks/Flink/Iceberg) from the
+# isa-bigdata umbrella above. Absent from SaaS and on-prem-lite editions.
+dataphin:
+  enabled: false
+
+modules:
+  metering: true
+  charging: false      # on-prem single-tenant: no SaaS billing
+  multiTenant: false
+
+# Full env list. Brand keys are the isA defaults here but are MEANT to be
+# overridden by a brand overlay (values-brand-<customer>.example.yaml) for a
+# white-label delivery; the isA->SN sanitizer also rewrites them mechanically.
+env:
+  # --- Edition contract (#317) ---
+  - name: ISA_EDITION
+    value: "on-prem-full"
+  - name: ISA_BIGDATA_ENABLED
+    value: "true"
+  - name: ISA_METERING_ENABLED
+    value: "true"
+  - name: ISA_CHARGING_ENABLED
+    value: "false"
+  - name: ISA_MULTI_TENANT
+    value: "false"
+  # --- Brand: isA defaults (override via a brand overlay to white-label) ---
+  - name: BRAND_NAME
+    value: "isA"
+  - name: BRAND_DISPLAY_NAME
+    value: "isA Platform"
+  - name: BRAND_ORG_NAME
+    value: "isA"
+  - name: BRAND_SUPPORT_EMAIL
+    value: "dev@iapro.ai"
+  - name: AUTH_COOKIE_DOMAIN
+    value: ".iapro.ai"
+  - name: BRAND_PRIMARY_HOST
+    value: "isa.dev"
+  - name: BRAND_DOCS_URL
+    value: "docs.isa.dev"

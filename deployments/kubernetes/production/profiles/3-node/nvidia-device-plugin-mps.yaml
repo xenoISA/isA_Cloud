@@ -1,0 +1,164 @@
+# NVIDIA Device Plugin — 3-node MPS sharing override (ADR 0010)
+#
+# Supersedes the "no GPU sharing" stance of nvidia-device-plugin-physical-gpu.yaml
+# for the production GPU pool. Per ADR 0010 (docs/adr/0010-local-gpu-inference-
+# allocation.md) we share each RTX PRO 6000 Blackwell (96GB, no MIG, no NVLink)
+# by VRAM using CUDA MPS, with per-node uniform replicas. renameByDefault stays
+# false so pods keep requesting `nvidia.com/gpu: 1` and receive one MPS slice.
+# MPS and time-slicing are mutually exclusive — do NOT add sharing.timeSlicing
+# anywhere. migStrategy stays "none".
+#
+# ---------------------------------------------------------------------------
+# LIVE INSTALL FACTS (inspected read-only 2026-06-09, do not assume — re-verify):
+#   - Helm release : nvidia-device-plugin   (namespace: nvidia)
+#   - Chart        : nvidia-device-plugin-0.18.2  (appVersion / --version 0.18.2)
+#   - Image        : nvcr.io/nvidia/k8s-device-plugin:v0.18.2
+#   - Config wiring: config.map.<key> -> ConfigMap "nvidia-device-plugin-configs".
+#                    Live map today has ONE key "config" holding the default
+#                    (migStrategy none). config.default="" and
+#                    config.fallbackStrategies=[named, single].
+#   - Per-node selection: config-manager sidecar reads node label
+#                    NODE_LABEL = nvidia.com/device-plugin.config and copies the
+#                    matching config map key into the running plugin/daemon.
+#   - mps-control-daemon DaemonSet nodeSelector (all must match to schedule):
+#                    nvidia.com/mps.capable: "true"
+#                    gpu.infortrend.com/vgpu-mode: "false"     (already set on nodes)
+#                    gpu.infortrend.com/vm-gpu-mode: "false"   (already set on nodes)
+#   - Each node currently reports nvidia.com/gpu allocatable = 2 (2 physical cards).
+#
+# This file adds THREE NAMED config keys (mps-r1 / mps-r2 / mps-r4) to that same
+# ConfigMap via Helm's config.map, while preserving the existing "config" default
+# key so non-MPS behaviour is unchanged for any node without an MPS label.
+#
+# ===========================================================================
+# ACTIVATION PROCEDURE  (run manually — NOT executed by authoring this file)
+# ===========================================================================
+#
+# 1) Push the new config map keys via Helm (preserves vendor affinity/nodeSelector
+#    and all other live values). nvdp = https://nvidia.github.io/k8s-device-plugin
+#
+#      helm -n nvidia upgrade nvidia-device-plugin nvdp/nvidia-device-plugin \
+#        --version 0.18.2 --reuse-values \
+#        -f deployments/kubernetes/production/profiles/3-node/nvidia-device-plugin-mps.yaml
+#
+#    (Add --kubeconfig /Users/xenodennis/.kube/sn-prod.conf
+#         --kube-insecure-skip-tls-verify  for this cluster.)
+#
+# 2) Label the GPU nodes — mps.capable activates the dormant mps-control-daemon
+#    DaemonSet; device-plugin.config selects the per-node replica count:
+#
+#      kubectl label node sn-prod-k8s-01 nvidia.com/mps.capable=true nvidia.com/device-plugin.config=mps-r1 --overwrite
+#      kubectl label node sn-prod-k8s-02 nvidia.com/mps.capable=true nvidia.com/device-plugin.config=mps-r2 --overwrite
+#      kubectl label node sn-prod-k8s-03 nvidia.com/mps.capable=true nvidia.com/device-plugin.config=mps-r4 --overwrite
+#
+# 3) VERIFY — allocatable should become replicas x 2 physical cards per node:
+#
+#      kubectl get node sn-prod-k8s-01 -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'   # expect 2  (1 x 2)
+#      kubectl get node sn-prod-k8s-02 -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'   # expect 4  (2 x 2)
+#      kubectl get node sn-prod-k8s-03 -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'   # expect 8  (4 x 2)
+#      kubectl -n nvidia get ds nvidia-device-plugin-mps-control-daemon          # desired/ready -> 3
+#      kubectl -n nvidia get pods -l app.kubernetes.io/name=nvidia-device-plugin
+#
+# ===========================================================================
+# ROLLBACK
+# ===========================================================================
+#   1) Remove the MPS node labels (reverts each node to the default "config" key
+#      via fallbackStrategies, i.e. unshared physical GPUs):
+#
+#        kubectl label node sn-prod-k8s-01 nvidia.com/mps.capable- nvidia.com/device-plugin.config-
+#        kubectl label node sn-prod-k8s-02 nvidia.com/mps.capable- nvidia.com/device-plugin.config-
+#        kubectl label node sn-prod-k8s-03 nvidia.com/mps.capable- nvidia.com/device-plugin.config-
+#
+#      Removing nvidia.com/mps.capable drains the mps-control-daemon pods (desired -> 0).
+#
+#   2) (Optional) revert the config map to the physical-GPU profile and roll the
+#      plugin so only the migStrategy-none default remains:
+#
+#        helm -n nvidia upgrade nvidia-device-plugin nvdp/nvidia-device-plugin \
+#          --version 0.18.2 --reuse-values \
+#          -f deployments/kubernetes/production/profiles/3-node/nvidia-device-plugin-physical-gpu.yaml
+#        kubectl -n nvidia rollout restart ds/nvidia-device-plugin
+#        kubectl -n nvidia rollout restart ds/nvidia-device-plugin-mps-control-daemon
+#
+#   Allocatable should return to 2 per node after rollback.
+# ---------------------------------------------------------------------------
+config:
+  # default MUST name a map key when >1 config exists (plugin validation rejects
+  # an empty default with multiple configs). Point it at the existing non-MPS
+  # "config" key so any unlabelled node stays on unshared GPUs.
+  default: "config"
+  fallbackStrategies:
+    - named
+    - single
+  map:
+    # Default profile (unchanged from physical-GPU profile): no sharing.
+    config: |
+      version: v1
+      flags:
+        migStrategy: "none"
+
+    # sn-prod-k8s-01 (role: llm) — 1 replica: dedicated full 96GB card.
+    mps-r1: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        mps:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 1
+
+    # sn-prod-k8s-02 (role: generative) — 2 replicas: 48GB slices.
+    mps-r2: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        mps:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 2
+
+    # sn-prod-k8s-03 (role: specialty) — 4 replicas: 24GB slices.
+    mps-r4: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        mps:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 4
+
+    # --- time-slicing variants (no mps-control-daemon required) -------------
+    # MPS on device-plugin v0.18.2 crashes the mps-control-daemon config-manager
+    # sidecar (ADR 0010 activation blocker). time-slicing needs NO control
+    # daemon — the main plugin just advertises replicas×physical units and pods
+    # share via CUDA default time-slicing. No hard VRAM isolation, so co-tenant
+    # vLLM engines MUST cap gpu_memory_utilization; small fixed-footprint engines
+    # (whisper/kokoro/rerank) are safe. Used as the working sharing path until
+    # the MPS bug is resolved.
+    ts-r2: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        timeSlicing:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 2
+
+    ts-r4: |
+      version: v1
+      flags:
+        migStrategy: "none"
+      sharing:
+        timeSlicing:
+          renameByDefault: false
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 4

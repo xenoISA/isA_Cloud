@@ -1,0 +1,49 @@
+# In-cluster runner for the cloud-native parity suite.
+# Works in ANY K8s (SN-IDC, GCP-GKE) — set PARITY_NAMESPACE to the target ns.
+# It clones nothing: the suite is baked into a tiny configmap-mounted layer, OR
+# (simplest) run against a built test image. Here we use a generic python image
+# and pip-install pytest+redis at start, mounting the suite from a ConfigMap.
+#
+#   kubectl create configmap parity-suite --from-file=tests/parity -n <ns>
+#   kubectl apply -f run-parity-job.yaml
+#   kubectl logs job/parity -n <ns> -f
+#
+# Pulls REDIS_*/POSTGRES_* from the platform config/secret so the JWT bootstrap
+# (redis-read of the verification code) works in-cluster.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: parity
+  namespace: sn-cloud-production
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      annotations:
+        consul.hashicorp.com/connect-inject: "false"
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: harbor-isa
+      containers:
+        - name: parity
+          image: core.harbor.domain/isa/user-base:0.1.0  # has python + redis + requests
+          envFrom:
+            - configMapRef: {name: isa-platform-env}
+            - secretRef: {name: isa-platform-secrets}
+          env:
+            - {name: PARITY_TARGET, value: "incluster"}
+            - {name: PARITY_NAMESPACE, value: "sn-cloud-production"}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              pip install --quiet pytest redis >/dev/null 2>&1 || true
+              cd /suite
+              python -m pytest -q -ra --no-header -p no:cacheprovider || true
+          volumeMounts:
+            - {name: suite, mountPath: /suite}
+      volumes:
+        - name: suite
+          configMap: {name: parity-suite}

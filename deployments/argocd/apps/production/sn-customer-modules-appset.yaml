@@ -1,0 +1,167 @@
+# =============================================================================
+# SN customer-specific modules — entitlement-gated  (ApplicationSet)     (#369)
+# =============================================================================
+# Modeled on user-services-appset.yaml (same list generator + production
+# no-auto-sync syncPolicy). Difference: this appset gates which Applications get
+# instantiated on the license's `entitled_modules` (ADR 0008 §5).
+#
+# HOW THE GATE WORKS (declarative, ArgoCD-native):
+#   * The `list` generator enumerates ALL 24 SN customer-specific modules
+#     (docs/saas-deployment/edition-boundary.md §B). Each element carries an
+#     `entitled` field ("true" | "false").
+#   * `spec.selector.matchLabels: { entitled: "true" }` filters the generated
+#     parameter sets: ArgoCD only renders a template (→ creates an Application)
+#     for elements whose `entitled` value is "true". Non-entitled modules are
+#     never rendered, so they are never deployed — the primary entitlement
+#     control per ADR 0008 §5 ("don't render the app").
+#
+# SOURCE OF TRUTH:
+#   The `entitled` flags below are the deploy-time projection of the signed
+#   license's `entitled_modules` (license.json — ADR 0008 §1). The human-readable
+#   index ops edits in lock-step lives at:
+#     deployments/editions/sn/values-entitled-modules.yaml  (sn.entitledModules)
+#   On license renewal: update that file AND flip the matching `entitled` flags
+#   here. The seed set ("true" for 12 modules) mirrors ADR 0008 §1's example.
+#
+# Each module Application deploys via the shared isa-service chart, pointing at
+# the per-module SN repo's helm values (path mirrors the user-services appset's
+# valueFiles convention: ../../../<repo>/deployment/helm/...).
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: sn-customer-modules-production
+  namespace: argocd
+spec:
+  # --- ENTITLEMENT GATE: only emit Applications for entitled modules ----------
+  # A list-generator element's fields become string parameters; this selector
+  # matches against them, dropping every element where entitled != "true".
+  goTemplate: false
+  selector:
+    matchLabels:
+      entitled: "true"
+
+  generators:
+    - list:
+        elements:
+          # --- ENTITLED (license.json.entitled_modules — ADR 0008 §1) ---------
+          - name: erp               # sn_erp              — ERP
+            repo: sn_erp
+            entitled: "true"
+          - name: mes               # sn_mes              — 制造执行 MES
+            repo: sn_mes
+            entitled: "true"
+          - name: plm               # sn_plm              — 产品生命周期 PLM
+            repo: sn_plm
+            entitled: "true"
+          - name: srm               # sn_srm              — 供应商关系 SRM
+            repo: sn_srm
+            entitled: "true"
+          - name: scm-tower         # sn_scm_tower        — 供应链塔
+            repo: sn_scm_tower
+            entitled: "true"
+          - name: finance           # sn_finance          — 财务
+            repo: sn_finance
+            entitled: "true"
+          - name: commerce          # sn_commerce         — 电商
+            repo: sn_commerce
+            entitled: "true"
+          - name: commercial-tower  # sn_commercial_tower — 商业塔
+            repo: sn_commercial_tower
+            entitled: "true"
+          - name: mdm               # sn_mdm              — 主数据 MDM
+            repo: sn_mdm
+            entitled: "true"
+          - name: maestro           # sn_maestro          — Maestro 编排
+            repo: sn_maestro
+            entitled: "true"
+          - name: feishu            # sn_feishu           — 飞书集成
+            repo: sn_feishu
+            entitled: "true"
+          - name: seeyon            # sn_seeyon           — 致远 OA 集成
+            repo: sn_seeyon
+            entitled: "true"
+          # --- NOT entitled in the seed license (flip to "true" on renewal) ---
+          - name: aom               # sn_aom              — 运维/AOM
+            repo: sn_aom
+            entitled: "false"
+          - name: arch              # sn_arch             — 架构/arch
+            repo: sn_arch
+            entitled: "false"
+          - name: dtc               # sn_dtc              — DTC
+            repo: sn_dtc
+            entitled: "false"
+          - name: gcp               # sn_gcp              — GCP 相关
+            repo: sn_gcp
+            entitled: "false"
+          - name: iam               # sn_iam              — IAM
+            repo: sn_iam
+            entitled: "false"
+          - name: ipd-tower         # sn_ipd_tower        — IPD 塔
+            repo: sn_ipd_tower
+            entitled: "false"
+          - name: operation-tower   # sn_operation_tower  — 运营塔
+            repo: sn_operation_tower
+            entitled: "false"
+          - name: plan              # sn_plan             — 计划
+            repo: sn_plan
+            entitled: "false"
+          - name: pxm               # sn_pxm              — PXM
+            repo: sn_pxm
+            entitled: "false"
+          - name: tower-kit         # sn_tower_kit        — 塔工具包
+            repo: sn_tower_kit
+            entitled: "false"
+          - name: bi                # SN-BI               — BI/数仓
+            repo: SN-BI
+            entitled: "false"
+          - name: trobs             # SN-TROBS            — TROBS
+            repo: SN-TROBS
+            entitled: "false"
+
+  template:
+    metadata:
+      name: 'sn-module-{{name}}-production'
+      namespace: argocd
+      labels:
+        app: 'sn-module-{{name}}'
+        environment: production
+        tier: customer-module
+        entitled: '{{entitled}}'
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: isa-deployments
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: isa-alerts
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/xenoISA/isA_Cloud.git
+        targetRevision: production
+        path: deployments/charts/isa-service
+        helm:
+          valueFiles:
+            - ../../editions/sn/isa-svc-base.yaml
+            - ../../editions/sn/values-entitled-modules.yaml
+          parameters:
+            - name: name
+              value: 'sn-module-{{name}}'
+            - name: image.repository
+              value: 'sn/{{name}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: sn-cloud-production
+
+      # NO automated sync for production (mirrors user-services-appset.yaml).
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m

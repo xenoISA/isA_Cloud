@@ -34,6 +34,10 @@ aiomqtt==2.0.0
 # .duckdb files (default DUCKDB_DATABASE is ':memory:'), so no storage migration.
 duckdb==1.4.4
 
+# Offline ed25519 license verification (ADR 0008). Already present transitively
+# via the aioboto3 chain; pinned here as a direct dependency.
+cryptography==46.0.7
+
 # Transitive pins for the aioboto3 chain (exact-pin strategy).
 # urllib3>=2.7.0 clears CVE-2024-37891, -2025-50181, -2025-66418,
 # -2025-66471, -2026-21441, -2026-44431.

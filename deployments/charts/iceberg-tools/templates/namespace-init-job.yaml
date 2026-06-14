@@ -1,0 +1,109 @@
+{{- /*
+  Namespace bootstrap Job — ensures every catalog.databases entry exists as
+  an Iceberg namespace in HMS.
+
+  Iceberg's `CREATE TABLE iceberg_hms.<db>.<table>` does NOT auto-create <db>;
+  the consumer namespaces (e.g. a domain database, where the realtime sink
+  jobs write iceberg_hms.<db>.std_*) must exist first. Creating a
+  namespace is a catalog-metadata operation — Flink SQL `CREATE DATABASE IF
+  NOT EXISTS` runs in the planner with no job graph submitted, so we run the
+  flink-sql-runner image's sql-client in one-shot `-f` mode. No session
+  cluster needed.
+
+  Runs as a post-install/post-upgrade hook at weight 90 — after the
+  hive-metastore + minio siblings in the umbrella are up, and before the
+  iceberg-tools smoke Job (weight 100). Idempotent (IF NOT EXISTS).
+
+  helm template renders this even if the cluster/CRDs are absent — kubectl
+  apply enforces validation.
+*/ -}}
+{{- if and .Values.namespaceInit.enabled .Values.catalog.databases }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.name }}-namespace-init
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "iceberg-tools.labels" . | nindent 4 }}
+    component: namespace-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "90"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.namespaceInit.backoffLimit }}
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "iceberg-tools.labels" . | nindent 8 }}
+        component: namespace-init
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      # No podSecurityContext override here: the flink-sql-runner image runs as
+      # its own `flink` user (uid 9999) which owns /opt/flink (where sql-client
+      # writes logs). Forcing the chart's alpine-tuned runAsUser:1000 +
+      # readOnlyRootFilesystem would break sql-client startup. We keep the
+      # image default and only mount a writable /tmp for the SQL script.
+      containers:
+        - name: namespace-init
+          image: "{{ .Values.namespaceInit.image.repository }}:{{ .Values.namespaceInit.image.tag }}"
+          imagePullPolicy: {{ .Values.namespaceInit.image.pullPolicy }}
+          env:
+            # S3A creds — CREATE DATABASE materialises the namespace dir under
+            # the warehouse path, so the catalog needs MinIO access.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.s3a.credentialsSecret.name }}
+                  key: {{ .Values.s3a.credentialsSecret.accessKeyKey }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.s3a.credentialsSecret.name }}
+                  key: {{ .Values.s3a.credentialsSecret.secretKeyKey }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              SCRIPT=/tmp/namespace-init.sql
+              cat > "$SCRIPT" <<'SQL'
+              -- Register the HMS-backed Iceberg catalog as iceberg_hms, then
+              -- ensure each consumer namespace exists. Catalog/database DDL is
+              -- metadata-only; no TaskManagers required.
+              CREATE CATALOG iceberg_hms WITH (
+                'type' = 'iceberg',
+                'catalog-type' = '{{ .Values.catalog.catalogType }}',
+                'uri' = '{{ .Values.catalog.uri }}',
+                'warehouse' = '{{ .Values.catalog.warehouse }}',
+                -- Configure S3 access on the catalog itself (Iceberg S3FileIO)
+                -- so this standalone sql-client Job does not depend on the
+                -- Flink session's flinkConfiguration. Endpoint is per-env
+                -- (kind/dev use the `bigdata-minio` Service name); creds come
+                -- from the AWS_* env vars injected above.
+                'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+                's3.endpoint' = '{{ .Values.s3a.endpoint }}',
+                's3.path-style-access' = '{{ .Values.s3a.pathStyleAccess }}'
+              );
+              {{- range .Values.catalog.databases }}
+              CREATE DATABASE IF NOT EXISTS iceberg_hms.`{{ . }}`;
+              {{- end }}
+              SQL
+              echo "[iceberg-tools/namespace-init] ensuring namespaces: {{ join ", " .Values.catalog.databases }}"
+              cat "$SCRIPT"
+              # Embedded SQL client; DDL executes synchronously in the planner.
+              "${FLINK_HOME:-/opt/flink}"/bin/sql-client.sh embedded -f "$SCRIPT"
+              echo "[iceberg-tools/namespace-init] done"
+          resources:
+            {{- toYaml .Values.namespaceInit.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,14 @@
+name: user-payment
+image:
+  repository: isa/user-payment
+  # 0.1.1: isa_common pgbouncer transaction-pooling fix (insert now persists).
+  # 0.1.2: + fix row->model converters that called .replace("Z","+00:00") on
+  # asyncpg datetime objects (TypeError, swallowed) so get_subscription_plan
+  # returned None and create_plan 500'd on ResponseValidationError. Both needed.
+  tag: "0.1.2"
+port: 8207
+env:
+  - {name: SERVICE_NAME, value: "payment_service"}
+  - {name: SERVICE_PORT, value: "8207"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

@@ -1,0 +1,75 @@
+# =============================================================================
+# postgres-dataphin chart — defaults
+# =============================================================================
+# Dedicated PostgreSQL for Dataphin. Wraps bitnami/postgresql, mirroring
+# postgres-bigdata. The defaults below match the staging tier; environment
+# overrides live under deployments/values/{kind-local,dev-shared,
+# on-prem-full}.yaml (top-level key `postgres-dataphin`).
+#
+#   kind-local   : standalone, 4Gi local-path, plaintext auth (kind only)
+#   dev-shared   : standalone, 50Gi default-class PVC, existingSecret
+#   on-prem-full : standalone, 200Gi block-storage class, anti-affinity,
+#                  infra-critical priorityClass, NetworkPolicy on
+#
+# IMPORTANT — no consumer initdb here. Unlike postgres-bigdata (which
+# pre-creates apicurio / hive_metastore / dataphin databases), Dataphin's
+# own installer (init-postgresql.sh) runs as the postgres superuser and
+# creates all of its databases, schemas, and roles. This chart only has to
+# hand the installer a clean instance and the superuser password.
+# =============================================================================
+
+postgresql:
+  # Standalone for the first release. Dataphin upstream expects an HA PG
+  # (stolon); revisit replication once the backbone is stable.
+  architecture: standalone
+
+  auth:
+    # Postgres superuser — this is the credential Dataphin's
+    # init-postgresql.sh authenticates with to bootstrap its databases.
+    enablePostgresUser: true
+    postgresPassword: ""        # MUST be set per environment (or use existingSecret)
+    # We do not pre-create a Dataphin app user; the installer owns role
+    # creation. Keep a generic owner only so the bitnami chart has a
+    # default database to come up with.
+    username: dataphin
+    password: ""                # MUST be set per environment (or use existingSecret)
+    database: dataphin
+    # When non-empty, bitnami reads username/password/postgres-password
+    # from the named Secret (Vault-provisioned) and ignores the plaintext
+    # values above. Required keys: postgres-password, password.
+    existingSecret: ""
+
+  primary:
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    # Left empty on purpose — Dataphin's init-postgresql.sh provisions the
+    # schema. See the chart description.
+    initdb:
+      scripts: {}
+
+  # No read replicas in standalone mode.
+  readReplicas:
+    replicaCount: 0
+
+  networkPolicy:
+    enabled: false
+    ingressRules:
+      primaryAccessOnlyFrom:
+        enabled: false
+        customRules: []
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: prometheus

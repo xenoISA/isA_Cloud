@@ -1,0 +1,18 @@
+# NVIDIA Device Plugin — 3-node physical GPU override
+#
+# Production policy: nvidia.com/gpu must represent physical GPUs, not
+# time-sliced replicas. Apply this with --reuse-values against the existing
+# nvidia-device-plugin release so vendor affinity/nodeSelector settings are
+# preserved:
+#
+#   helm -n nvidia upgrade nvidia-device-plugin nvdp/nvidia-device-plugin \
+#     --version 0.18.2 --reuse-values \
+#     -f deployments/kubernetes/production/profiles/3-node/nvidia-device-plugin-physical-gpu.yaml
+#
+# Do not re-enable sharing.timeSlicing for the default production profile.
+config:
+  map:
+    config: |
+      version: v1
+      flags:
+        migStrategy: "none"

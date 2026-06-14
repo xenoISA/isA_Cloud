@@ -1,0 +1,12 @@
+name: user-telemetry
+image:
+  repository: isa/user-telemetry
+  # 0.1.1: isa_common pgbouncer transaction-pooling fix (see user-artifact).
+  # Telemetry metric read/create (schema=telemetry) 500'd for the same reason.
+  tag: "0.1.1"
+port: 8225
+env:
+  - {name: SERVICE_NAME, value: "telemetry_service"}
+  - {name: SERVICE_PORT, value: "8225"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

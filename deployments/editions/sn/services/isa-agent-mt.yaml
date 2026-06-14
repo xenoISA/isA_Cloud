@@ -1,0 +1,30 @@
+# isa-agent-mt — the multi-tenant agent backend (src/isa_agent.app), selected from
+# the SAME isa/isa-agent image via ISA_AGENT_APP=multitenant ("profile replaces
+# fork": one image, app chosen by config). FastAPI :8080.
+name: isa-agent-mt
+image:
+  repository: isa/isa-agent
+  tag: "0.1.4"
+port: 8080
+replicas: 1
+resources:
+  requests: {cpu: "100m", memory: "128Mi"}
+  limits: {cpu: "500m", memory: "512Mi"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}
+
+# Service-specific env (infra/brand come from isa-platform-env via the base).
+#   ISA_AGENT_APP=multitenant -> run src.isa_agent.app (tenant/character/quota/
+#                                billing/scheduler) instead of the execution app.
+#   POSTGRES_DB=isa_platform  -> the multi-tenant tables live in isa_platform
+#                                (overrides isa-platform-env's POSTGRES_DB=postgres).
+# SERVICE_HOST=podIP is injected by the chart (Consul registration).
+env:
+  - {name: ISA_AGENT_APP, value: "multitenant"}
+  - {name: POSTGRES_DB, value: "isa_platform"}
+
+# Autoscaling DISABLED on purpose: this app runs in-process singletons —
+# AgentScheduler (NATS dispatch), WriteActionApprovalExpiryJob, TenantBillingRollupJob.
+# Multiple replicas would double-fire scheduled jobs. Keep single-replica until the
+# scheduler does leader election (then it can scale).
+autoscaling: {enabled: false}

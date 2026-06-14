@@ -1,0 +1,45 @@
+# isa_model — model-as-a-service compatibility/runtime API (FastAPI, :8082).
+# Standard SN infra/model runtime settings come from isa-platform-env.
+name: isa-model
+image:
+  repository: isa/isa-model
+  tag: "gpu-local-multimodal-20260611-r17"
+port: 8082
+# External LLM provider keys (OPENAI_API_KEY, ...) — ESO-synced into a separate
+# secret (externalsecret-isa-model-providers.yaml), mounted optional:true so the
+# pod starts even before Vault is seeded. Enables provider=openai/anthropic API
+# mode without risking the infra secretRef. See the runbook for the Vault seed.
+extraSecretRefs:
+  - isa-model-provider-keys
+replicas: 1
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  # 4Gi (was 2Gi): steady-state ~490Mi, but a replica OOMKilled (exit 137) during
+  # a multi-pod rollout — the gateway's startup (init of many local-model clients
+  # + backends/health) spikes over 2Gi. Headroom for the startup peak so rollouts
+  # don't crash-loop a replica. Gateway only; GPU serving (Ray/vLLM) is separate.
+  limits: {cpu: "2", memory: "4Gi"}
+health: {path: /health, initialDelaySeconds: 10, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 20, periodSeconds: 20}
+env:
+  - name: VLLM_BASE_URL
+    value: http://vllm-qwen36-27b-pool.sn-cloud-production.svc.cluster.local:8000
+  - name: VLLM_GPU_COUNT
+    value: "4"
+  - name: VLLM_HOST
+    value: vllm-qwen36-27b-pool
+  - name: LOCAL_TTS_BASE_URL
+    value: http://kokoro-gpu.sn-cloud-production.svc.cluster.local:8880
+  - name: LOCAL_IMAGE_BASE_URL
+    value: http://triton-qwen-image-2-0.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_VIDEO_BASE_URL
+    value: http://triton-wan-2-2.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_VLM_BASE_URL
+    value: http://qwen3-vl.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_OCR_BASE_URL
+    value: http://paddleocr-vl.sn-cloud-production.svc.cluster.local:8000
+  - name: LOCAL_PERCEPTION_BASE_URL
+    value: http://perception-bundle.sn-cloud-production.svc.cluster.local:8000
+
+# HA + autoscale (perf 2026-06-09). SERVICE_HOST=podIP injected by chart.
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

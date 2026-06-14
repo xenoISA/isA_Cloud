@@ -1,0 +1,11 @@
+name: isa-admin
+image:
+  repository: isa/isa-admin
+  tag: "0.1.0"
+port: 4300
+replicas: 1
+resources:
+  requests: {cpu: "100m", memory: "256Mi"}
+  limits: {cpu: "1", memory: "1Gi"}
+health: {path: /admin/api/health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /admin/api/health, initialDelaySeconds: 40, periodSeconds: 20}

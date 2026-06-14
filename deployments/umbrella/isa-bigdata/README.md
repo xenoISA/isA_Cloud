@@ -8,17 +8,13 @@ sn-commercial-tower's `data_platform/` specs target.
 
 - `kafka` (Strimzi-managed, KRaft mode)
 - `apicurio-registry` (Apicurio 2.6, PostgreSQL backend)
-
-## Planned dependencies (not yet wired)
-
-Per `docs/design/bigdata-architecture.md` §4.1 in xenoISA/sn-commercial-tower:
-
-- `postgres-bigdata` — Postgres for HMS + Apicurio metadata
+- `postgres-bigdata` (HMS + Apicurio metadata)
 - `hive-metastore`
-- `flink-operator`, `flink-jobmanager`, `flink-taskmanager`
-- `flink-cdc-jobs`
+- `minio` lake storage
 - `iceberg-tools`
-- `starrocks-fe`, `starrocks-be`
+- `flink` operator + session cluster
+- `starrocks` FE/BE
+- `flink-cdc-jobs` (disabled until source onboarding)
 
 ## Usage
 
@@ -40,3 +36,12 @@ helm template isa-bigdata deployments/umbrella/isa-bigdata \
 `deployments/scripts/verify/verify-bigdata-charts.sh` runs `helm lint` +
 `helm template` + manifest-parse smoke checks across both profiles.
 Wire it into CI alongside the existing chart smoke jobs.
+
+## Production runbook
+
+For on-prem-full deployment order, known failure modes, and Dataphin attachment
+prep, see:
+
+```text
+docs/runbooks/on-prem-bigdata-backbone-and-dataphin-prep.md
+```

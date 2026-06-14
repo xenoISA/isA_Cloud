@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "isa-common"
-version = "0.4.0"
+version = "0.6.0"
 description = "Shared Python infrastructure library for isA platform"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -42,7 +42,14 @@ dependencies = [
     "aiosqlite>=0.19.0",  # Async SQLite
     "duckdb>=1.1.0",  # DuckDB analytics database (>=1.1.0 clears CVE-2024-41672)
     "aiohttp>=3.9.0",  # Async HTTP client (Loki)
+    "pyyaml>=6.0",  # Plugin manifest (plugin.yaml) parsing — ADR 0006
+    "cryptography>=46.0.7",  # ed25519 offline license verification — ADR 0008 (floor clears PYSEC-2026-35/36, CVE-2026-26007)
 ]
+
+[project.scripts]
+# Offline ed25519 license issuance tool (ADR 0008 §1). Issuance-side only — the
+# private key never ships; runtime images carry only the public key (license.py).
+isa-license-sign = "isa_common.license_sign:main"
 
 [project.optional-dependencies]
 metrics = [

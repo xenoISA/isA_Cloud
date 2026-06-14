@@ -1,0 +1,78 @@
+# =============================================================================
+# redis chart — defaults (Dataphin cache/lock store)
+# =============================================================================
+# Self-authored standalone Redis. Defaults below match the staging tier;
+# environment overrides live under deployments/values/{kind-local,
+# dev-shared,on-prem-full}.yaml (top-level key `redis`).
+#
+#   kind-local   : 1Gi local-path, plaintext password (kind only)
+#   dev-shared   : 8Gi default-class PVC, existingSecret
+#   on-prem-full : 8Gi block-storage class, anti-affinity, AOF on,
+#                  infra-critical priorityClass, NetworkPolicy on
+# =============================================================================
+
+# Image — pull through a private registry mirror in air-gapped deployments.
+image:
+  repository: redis
+  tag: "7.4"
+  pullPolicy: IfNotPresent
+
+# Replicas is always 1 (standalone). HA/sentinel is a follow-up; Dataphin
+# accepts a single Redis endpoint for the first release.
+fullnameOverride: "redis-dataphin"
+
+auth:
+  enabled: true
+  # Plaintext password for kind/dev. Production sets existingSecret instead.
+  password: ""
+  # Vault-provisioned Secret (External Secrets). Key: redis-password.
+  existingSecret: ""
+  existingSecretPasswordKey: redis-password
+
+service:
+  type: ClusterIP
+  port: 6379
+
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 8Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Append-only file — durable by default for a metadata-adjacent cache.
+appendonly: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Extra redis.conf lines, appended verbatim.
+extraConfig: []
+#  - "maxmemory 768mb"
+#  - "maxmemory-policy allkeys-lru"
+
+priorityClassName: ""
+
+podAntiAffinityPreset: ""   # "hard" in prod to keep off the same host
+
+nodeSelector: {}
+tolerations: []
+
+# Self-rendered NetworkPolicy (default-deny ingress, allow from the listed
+# namespaces). Off by default; prod enables and lists the dataphin namespace.
+networkPolicy:
+  enabled: false
+  allowFromNamespaces:
+    - dataphin
+
+metrics:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    labels:
+      release: prometheus

@@ -49,6 +49,15 @@ catalog:
   # Default database the consumers look up tables under. Optional —
   # downstream charts may override per-job.
   defaultDatabase: iceberg_default
+  # Databases (Iceberg namespaces) ensured at deploy time by the
+  # namespaceInit Job (templates/namespace-init-job.yaml). Iceberg's
+  # `CREATE TABLE iceberg_hms.<db>.<table>` does NOT auto-create <db> in HMS,
+  # so each consumer namespace a streaming-sink job writes into must exist
+  # first. Empty by default — downstream/edition values list the domain
+  # databases their realtime sink jobs target, e.g.:
+  #   databases:
+  #     - my_domain
+  databases: []
 
 s3a:
   endpoint: "http://minio.isa-bigdata.svc.cluster.local:9000"
@@ -133,3 +142,24 @@ securityContext:
 priorityClassName: ""
 
 podAnnotations: {}
+
+# Namespace bootstrap Job (templates/namespace-init-job.yaml). Ensures every
+# `catalog.databases` entry exists as an Iceberg namespace in HMS before any
+# streaming-sink job writes into it. Inert unless both `enabled: true` and
+# `catalog.databases` is non-empty.
+namespaceInit:
+  enabled: true
+  # The flink-sql-runner image — carries sql-client.sh + the iceberg/hive jars.
+  # Air-gapped deployments override the repository to a private registry mirror.
+  image:
+    repository: ghcr.io/xenoisa/flink-sql-runner
+    tag: "1.20.0-runner-1.10.0-iceberg-1.7.2"
+    pullPolicy: IfNotPresent
+  backoffLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

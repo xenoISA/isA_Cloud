@@ -81,10 +81,25 @@ spec:
         ports:
         - containerPort: {{ .Values.port }}
           name: http
-        {{- if .Values.configMapRef }}
+        {{- if or .Values.configMapRef .Values.secretRef .Values.extraSecretRefs }}
         envFrom:
+        {{- if .Values.configMapRef }}
         - configMapRef:
             name: {{ .Values.configMapRef }}
+        {{- end }}
+        {{- if .Values.secretRef }}
+        # infra credentials (ESO-synced from Vault) — keys are env-var names
+        # (POSTGRES_PASSWORD, REDIS_PASSWORD, ...). Hosts come from configMapRef.
+        - secretRef:
+            name: {{ .Values.secretRef }}
+        {{- end }}
+        {{- range .Values.extraSecretRefs }}
+        # extra ESO-synced secrets (e.g. external LLM provider keys). optional:true
+        # so the pod still starts if the secret isn't synced yet (Vault not seeded).
+        - secretRef:
+            name: {{ . }}
+            optional: true
+        {{- end }}
         {{- end }}
         env:
         {{- if .Values.observability }}

@@ -1,0 +1,235 @@
+# vLLM Production Runtime — Qwen3.6 27B Dense FP8
+#
+# Air-gap fallback when the external vLLM Helm OCI chart is not available.
+# The production deploy script rewrites namespace: isa-cloud-production to the
+# requested NAMESPACE, e.g. sn-cloud-production for SN bootstrap deployments.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-runtime-config
+  namespace: isa-cloud-production
+  labels:
+    app: vllm
+    engine: vllm
+data:
+  MODEL_ID: "Qwen/Qwen3.6-27B-FP8"
+  SERVED_MODEL_NAME: "qwen3.6-27b"
+  MAX_MODEL_LEN: "32768"
+  GPU_MEMORY_UTILIZATION: "0.85"
+  TENSOR_PARALLEL_SIZE: "1"
+  MAX_NUM_SEQS: "32"
+  BLOCK_SIZE: "16"
+  ENABLE_PREFIX_CACHING: "true"
+  ENABLE_CHUNKED_PREFILL: "false"
+  DTYPE: "auto"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: isa-cloud-production
+  labels:
+    app: vllm
+    engine: vllm
+    isa-model/instance-group: primary
+    isa-model/model-id: qwen3.6-27b
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+        engine: vllm
+        isa-model/instance-group: primary
+        isa-model/model-id: qwen3.6-27b
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: isa.io/gpu-role-llm
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: sn.io/gpu-role
+                    operator: In
+                    values: ["llm"]
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:cu130-nightly
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: MODEL_ID
+            - name: SERVED_MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: SERVED_MODEL_NAME
+            - name: MAX_MODEL_LEN
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: MAX_MODEL_LEN
+            - name: GPU_MEMORY_UTILIZATION
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: GPU_MEMORY_UTILIZATION
+            - name: TENSOR_PARALLEL_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: TENSOR_PARALLEL_SIZE
+            - name: MAX_NUM_SEQS
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: MAX_NUM_SEQS
+            - name: BLOCK_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: BLOCK_SIZE
+            - name: ENABLE_PREFIX_CACHING
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: ENABLE_PREFIX_CACHING
+            - name: ENABLE_CHUNKED_PREFILL
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: ENABLE_CHUNKED_PREFILL
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-runtime-config
+                  key: DTYPE
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: huggingface-token
+                  key: token
+                  optional: true
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: VLLM_PORT
+              value: "8000"
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -eu
+              ARGS="serve ${MODEL_ID} \
+                --served-model-name ${SERVED_MODEL_NAME} \
+                --max-model-len ${MAX_MODEL_LEN} \
+                --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
+                --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
+                --max-num-seqs ${MAX_NUM_SEQS} \
+                --block-size ${BLOCK_SIZE} \
+                --dtype ${DTYPE} \
+                --trust-remote-code \
+                --reasoning-parser qwen3 \
+                --language-model-only \
+                --host 0.0.0.0 --port 8000"
+              if [ "${ENABLE_PREFIX_CACHING}" = "true" ]; then
+                ARGS="${ARGS} --enable-prefix-caching"
+              fi
+              if [ "${ENABLE_CHUNKED_PREFILL}" = "true" ]; then
+                ARGS="${ARGS} --enable-chunked-prefill"
+              fi
+              exec vllm ${ARGS}
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4000m"
+              memory: "32Gi"
+              nvidia.com/gpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 300
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 900
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-vllm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: isa-cloud-production
+  labels:
+    app: vllm
+    engine: vllm
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vllm
+  namespace: isa-cloud-production
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: vllm

@@ -1,0 +1,76 @@
+# SN production Vault — Helm values (chart hashicorp/vault 0.32.0).
+# Apply: helm upgrade vault hashicorp/vault --version 0.32.0 -n sn-cloud-production -f deployments/editions/sn/vault.yaml
+# Transit auto-unseal backed by vault-unseal (seal stanza below). Runbook:
+# docs/runbooks/vault-transit-auto-unseal.md
+# CRITICAL: listeners bind 0.0.0.0 (IPv4), NEVER [::] — IPv6-only bind refuses
+# IPv4 from kubelet probes + cross-node transit (caused a vault-0 crash-loop).
+global:
+  enabled: true
+  imagePullSecrets:
+  - name: harbor-isa
+  tlsDisable: false
+injector:
+  enabled: false
+server:
+  auditStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: local-replica2-delay-bind
+  dataStorage:
+    enabled: false
+  extraEnvironmentVars:
+    VAULT_ADDR: https://127.0.0.1:8200
+    VAULT_CACERT: /vault/userconfig/vault-server-tls/ca.crt
+  extraSecretEnvironmentVars:
+  - envName: VAULT_TOKEN
+    secretName: vault-transit-token
+    secretKey: token
+  extraVolumes:
+  - name: vault-server-tls
+    type: secret
+  ha:
+    config: |
+      ui = true
+      listener "tcp" {
+        address = "0.0.0.0:8200"
+        cluster_address = "0.0.0.0:8201"
+        tls_cert_file = "/vault/userconfig/vault-server-tls/tls.crt"
+        tls_key_file  = "/vault/userconfig/vault-server-tls/tls.key"
+        tls_disable = 0
+      }
+      storage "consul" {
+        path = "vault/"
+        address = "consul-server.sn-cloud-production.svc.cluster.local:8500"
+      }
+      service_registration "kubernetes" {}
+      seal "transit" {
+        address         = "https://vault-unseal-0.vault-unseal-internal.sn-cloud-production.svc.cluster.local:8200"
+        key_name        = "autounseal"
+        mount_path      = "transit/"
+        tls_skip_verify = "true"
+      }
+    enabled: true
+    raft:
+      enabled: false
+    replicas: 1
+  image:
+    repository: core.harbor.domain/hashicorp/vault
+    tag: 1.21.2
+  imagePullSecrets:
+  - name: harbor-isa
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    path: /v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200
+  readinessProbe:
+    enabled: true
+    path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+  service:
+    enabled: true
+    port: 8200
+    type: ClusterIP
+  standalone:
+    enabled: false
+ui:
+  enabled: true
+  serviceType: ClusterIP

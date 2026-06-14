@@ -179,15 +179,18 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Set search path for schema (validate to prevent SQL injection)
-                if schema != "public":
-                    validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f"SET search_path TO {validated_schema}, public")
+                async with conn.transaction():
+                    # SET + query in one transaction so pgbouncer (transaction
+                    # pooling) keeps them on the same server connection; a bare
+                    # SET would otherwise be lost before the query runs.
+                    if schema != "public":
+                        validated_schema = _validate_identifier(schema, "schema")
+                        await conn.execute(f"SET search_path TO {validated_schema}, public")
 
-                if params:
-                    rows = await conn.fetch(sql, *params)
-                else:
-                    rows = await conn.fetch(sql)
+                    if params:
+                        rows = await conn.fetch(sql, *params)
+                    else:
+                        rows = await conn.fetch(sql)
 
                 return [dict(row) for row in rows]
 
@@ -211,19 +214,21 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Validate schema to prevent SQL injection
-                if schema != "public":
-                    validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f"SET search_path TO {validated_schema}, public")
+                async with conn.transaction():
+                    # SET + query in one transaction so pgbouncer (transaction
+                    # pooling) keeps them on the same server connection.
+                    if schema != "public":
+                        validated_schema = _validate_identifier(schema, "schema")
+                        await conn.execute(f"SET search_path TO {validated_schema}, public")
 
-                if params:
-                    row = await conn.fetchrow(sql, *params)
-                else:
-                    row = await conn.fetchrow(sql)
+                    if params:
+                        row = await conn.fetchrow(sql, *params)
+                    else:
+                        row = await conn.fetchrow(sql)
 
-                if row:
-                    return dict(row)
-                return None
+                    if row:
+                        return dict(row)
+                    return None
 
         except Exception as e:
             return self.handle_error(e, "query row")
@@ -245,15 +250,21 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Validate schema to prevent SQL injection
-                if schema != "public":
-                    validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f"SET search_path TO {validated_schema}, public")
+                async with conn.transaction():
+                    # Run SET in the SAME transaction as the statement. Under
+                    # pgbouncer transaction-pooling a bare `SET search_path`
+                    # (its own autocommit txn) and the following statement can be
+                    # routed to different server connections, losing the
+                    # search_path. Wrapping both in one transaction pins them to a
+                    # single server connection so the schema applies.
+                    if schema != "public":
+                        validated_schema = _validate_identifier(schema, "schema")
+                        await conn.execute(f"SET search_path TO {validated_schema}, public")
 
-                if params:
-                    result = await conn.execute(sql, *params)
-                else:
-                    result = await conn.execute(sql)
+                    if params:
+                        result = await conn.execute(sql, *params)
+                    else:
+                        result = await conn.execute(sql)
 
                 # Parse rows affected from result string (e.g., "UPDATE 5")
                 parts = result.split()
@@ -398,10 +409,19 @@ class AsyncPostgresClient(AsyncBaseClient):
             await self._ensure_connected()
 
             async with self._pool.acquire() as conn:
-                # Validate schema to prevent SQL injection
-                if schema != "public":
+                # Schema-qualify the table directly instead of relying on
+                # `SET search_path`. Under pgbouncer transaction-pooling the SET
+                # (its own autocommit txn) and the INSERT (a separate txn) can be
+                # routed to DIFFERENT server connections, so the search_path is
+                # lost and `INSERT INTO <table>` resolves against the default
+                # schema (public). When the table only lives in <schema>, the
+                # insert errors, handle_error swallows it, and the row is silently
+                # absent ("insert succeeded but ... not visible"). Qualifying the
+                # table makes the statement independent of session search_path.
+                target = table
+                if schema != "public" and "." not in table:
                     validated_schema = _validate_identifier(schema, "schema")
-                    await conn.execute(f"SET search_path TO {validated_schema}, public")
+                    target = f"{validated_schema}.{table}"
 
                 # Get columns from first row
                 columns = list(rows[0].keys())
@@ -409,7 +429,7 @@ class AsyncPostgresClient(AsyncBaseClient):
 
                 # Build values placeholders
                 placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
-                sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})"
+                sql = f"INSERT INTO {target} ({cols_str}) VALUES ({placeholders})"
 
                 if returning:
                     sql += " RETURNING *"

@@ -1,0 +1,10 @@
+name: user-connector
+image:
+  repository: isa/user-connector
+  tag: "0.1.0"
+port: 8292
+env:
+  - {name: SERVICE_NAME, value: "connector_service"}
+  - {name: SERVICE_PORT, value: "8292"}
+health: {path: /health, initialDelaySeconds: 30, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 60, periodSeconds: 20}

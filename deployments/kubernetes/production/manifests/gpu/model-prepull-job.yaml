@@ -25,23 +25,23 @@ spec:
             - /bin/bash
             - -c
             - |
+              set -euo pipefail
+              set -a
+              source /config/models.env
+              set +a
               pip install huggingface_hub
               python -c "
               from huggingface_hub import snapshot_download
               import os
-              model_id = os.environ.get('MODEL_ID', 'meta-llama/Llama-3.1-8B-Instruct')
-              revision = os.environ.get('MODEL_REVISION', 'main')
-              print(f'Downloading {model_id}@{revision}...')
-              snapshot_download(model_id, revision=revision, cache_dir='/models')
-              print('Download complete.')
+              revision = os.environ.get('VLLM_MODEL_REVISION', 'main')
+              raw_models = os.environ.get('MODEL_PREPULL_IDS') or os.environ.get('VLLM_MODEL_ID', 'Qwen/Qwen3.6-27B-FP8')
+              model_ids = [item.strip() for item in raw_models.replace(';', ',').split(',') if item.strip()]
+              for model_id in model_ids:
+                  print(f'Downloading {model_id}@{revision}...')
+                  snapshot_download(model_id, revision=revision, cache_dir='/models')
+              print(f'Download complete: {len(model_ids)} model(s).')
               "
           env:
-            - name: MODEL_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: model-registry
-                  key: models.env
-                  optional: true
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -51,6 +51,9 @@ spec:
           volumeMounts:
             - name: model-cache
               mountPath: /models
+            - name: model-registry
+              mountPath: /config/models.env
+              subPath: models.env
           resources:
             requests:
               cpu: "500m"
@@ -62,3 +65,6 @@ spec:
         - name: model-cache
           persistentVolumeClaim:
             claimName: model-cache-vllm
+        - name: model-registry
+          configMap:
+            name: model-registry

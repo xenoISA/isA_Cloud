@@ -1,5 +1,9 @@
 # GPU Operator — 3-node override
 # Assumes GPUs on all 3 nodes, use pre-installed drivers
+# Production physical-GPU policy requires nvidia.com/gpu to represent physical
+# cards, not time-sliced replicas. If a customer cluster was bootstrapped with
+# nvidia.com/gpu.replicas > 1, drain/rebalance GPU pods before disabling
+# sharing; otherwise existing requests can exceed post-change capacity.
 driver:
   usePreinstalled: true  # IEC likely has drivers pre-installed
 

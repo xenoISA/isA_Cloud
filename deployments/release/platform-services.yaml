@@ -1,0 +1,133 @@
+# platform-services.yaml — source list for a platform release (ADR 0007 §2, phase 1)
+#
+# Maps each of the 17 platform repos (docs/saas-deployment/edition-boundary.md §A)
+# to its GHCR source image. GHCR (ghcr.io/xenoisa/isa-<name>) is the single
+# source-of-truth registry (ADR 0007 §1). generate-release-manifest.py reads this
+# file to build releases/platform-vX.Y.Z.json + the offline-bundle CSV.
+#
+# Edit this file (NOT the generator) when the platform service set changes.
+#
+# Fields per service:
+#   image:    GHCR image name without tag/digest. Omit / set has_image:false for
+#             libs-only repos (no runtime container) — they are recorded but NOT
+#             emitted into the release manifest or the offline bundle.
+#   repo:     upstream isA_* repo (for traceability / phase-5 base-image fixes).
+#   has_image true|false
+#   approx_size: rough mirror size for the offline bundle CSV (~egress planning).
+#   note:     optional free-text (e.g. why a repo is libs-only).
+
+registry: ghcr.io/xenoisa
+
+services:
+  # --- Platform repos that ship a runtime image (have a Dockerfile in CI) ---
+  agent:
+    repo: isA_Agent
+    image: ghcr.io/xenoisa/isa-agent
+    has_image: true
+    approx_size: "~1GB"
+  agent_sdk:
+    repo: isA_Agent_SDK
+    image: ghcr.io/xenoisa/isa-agent-sdk
+    has_image: true
+    approx_size: "~1GB"
+    note: "Primarily an SDK, but ships a runnable service image (Dockerfile present)."
+  console:
+    repo: isA_Console
+    image: ghcr.io/xenoisa/isa-console
+    has_image: true
+    approx_size: "~1GB"
+  creative:
+    repo: isA_Creative
+    image: ghcr.io/xenoisa/isa-creative
+    has_image: true
+    approx_size: "~1GB"
+  data:
+    repo: isA_Data
+    image: ghcr.io/xenoisa/isa-data
+    has_image: true
+    approx_size: "~1GB"
+  docs:
+    repo: isA_Docs
+    image: ghcr.io/xenoisa/isa-docs
+    has_image: true
+    approx_size: "~1GB"
+  marketing:
+    repo: isA_Marketing
+    image: ghcr.io/xenoisa/isa-marketing
+    has_image: true
+    approx_size: "~1GB"
+  mate:
+    repo: isA_Mate
+    image: ghcr.io/xenoisa/isa-mate
+    has_image: true
+    approx_size: "~1GB"
+  mcp:
+    repo: isA_MCP
+    image: ghcr.io/xenoisa/isa-mcp
+    has_image: true
+    approx_size: "~1GB"
+    note: "Base-image outlier (ADR 0007 §1 / phase 5): build base to GHCR."
+  model:
+    repo: isA_Model
+    image: ghcr.io/xenoisa/isa-model
+    has_image: true
+    approx_size: "~1GB"
+  # isA_OS ships FOUR deployable services (separate Dockerfiles + ports): web (isa-os),
+  # cloud-os, pool-manager, python-repl. The release must build+publish all four so the
+  # SN editions overlay (editions/sn/services/{cloud-os,pool-manager,python-repl}.yaml) can
+  # pin real digests. NOTE: isA_OS CI currently builds NO images — wiring that build is part
+  # of #320 (image names below are the proposed convention; confirm against isA_OS CI).
+  os:
+    repo: isA_OS
+    image: ghcr.io/xenoisa/isa-os          # web_services (:8083)
+    has_image: true
+    approx_size: "~1GB"
+  os_cloud_os:
+    repo: isA_OS
+    image: ghcr.io/xenoisa/isa-os-cloud-os # cloud_os control service (:8086)
+    has_image: true
+    approx_size: "~1GB"
+  os_pool_manager:
+    repo: isA_OS
+    image: ghcr.io/xenoisa/isa-os-pool-manager # pool_manager (:8090)
+    has_image: true
+    approx_size: "~1GB"
+  os_python_repl:
+    repo: isA_OS
+    image: ghcr.io/xenoisa/isa-os-python-repl # python_repl sandbox (:8085)
+    has_image: true
+    approx_size: "~1GB"
+  training:
+    repo: isA_Training
+    image: ghcr.io/xenoisa/isa-training
+    has_image: true
+    approx_size: "~1GB"
+  user:
+    repo: isA_user
+    image: ghcr.io/xenoisa/isa-user
+    has_image: true
+    approx_size: "~1GB"
+    note: "Base-image outlier (ADR 0007 §1 / phase 5): build base to GHCR."
+  admin:
+    repo: isA_Admin
+    image: ghcr.io/xenoisa/isa-admin
+    has_image: true
+    approx_size: "~500MB"
+    note: >-
+      17th platform mirror (#324). Next.js admin console (build+start);
+      Dockerfile to be added under phase 5 base-image work — image name
+      pinned here now so the manifest/bundle are forward-compatible.
+
+  # --- Platform repos that are libs / tooling with NO runtime image ---
+  app_sdk:
+    repo: isA_App_SDK
+    has_image: false
+    note: "TypeScript/JS package monorepo (npm packages: core/ui/transport/...). No container image."
+  vibe:
+    repo: isA_Vibe
+    has_image: false
+    note: "AI-SDLC orchestrator CLI/tooling; only base+template Dockerfiles, no shipped service image."
+  cloud:
+    repo: isA_Cloud
+    has_image: false
+    note: "This repo — infra, Helm charts, release tooling. Delivers charts, not a service image."

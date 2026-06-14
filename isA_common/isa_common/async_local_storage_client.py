@@ -263,8 +263,9 @@ class AsyncLocalStorageClient(AsyncBaseClient):
             async with aiofiles.open(object_path, "wb") as f:
                 await f.write(data)
 
-            # Calculate ETag (MD5)
-            etag = hashlib.md5(data).hexdigest()
+            # Calculate S3-compatible ETag. MD5 is used here for object identity,
+            # not for security or password hashing.
+            etag = hashlib.md5(data, usedforsecurity=False).hexdigest()
 
             # Guess content type if not provided
             if not content_type:

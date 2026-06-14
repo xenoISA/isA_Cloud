@@ -1,9 +1,22 @@
 # Ray GPU Cluster — 3-node override
+# SN/isA production has 3 nodes x 2 physical 96 GB GPUs. Resident local
+# inference engines own the GPU policy first:
+# - LLM role nodes run vLLM primary replicas.
+# - Specialty role node is reserved for embedding/rerank/STT/TTS/image engines.
+# - Elastic/batch Ray GPU workers are opt-in and must not occupy specialty cards
+#   by default.
+#
+# Do not size this from nvidia.com/gpu=20 when the device plugin is in
+# time-slicing mode, and do not keep Ray workers resident on the specialty node
+# unless the corresponding local inference stack is intentionally paused.
 workerGroups:
   - groupName: gpu-workers
-    replicas: 1
+    replicas: 0
     minReplicas: 0
     maxReplicas: 2
+    rayStartParams:
+      num-cpus: "2"
+      num-gpus: "1"
     resources:
       requests:
         cpu: "500m"
@@ -13,3 +26,9 @@ workerGroups:
         cpu: "1000m"
         memory: "8Gi"
         nvidia.com/gpu: "1"
+    nodeSelector:
+      isa.io/gpu-role-elastic: "true"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule

@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: isa-user-migrate
+  namespace: sn-cloud-production
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      annotations:
+        consul.hashicorp.com/connect-inject: "false"
+    spec:
+      restartPolicy: Never
+      imagePullSecrets: [{name: harbor-isa}]
+      containers:
+        - name: alembic-migrate
+          image: core.harbor.domain/isa/user-auth:0.1.0   # any service image (has microservices/ + scripts/ + alembic from base)
+          workingDir: /app
+          command: ["/bin/bash","-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "--- alembic services ---"; bash scripts/migrate.sh list || true
+              echo "--- upgrade all ---"; bash scripts/migrate.sh upgrade all
+              echo "--- raw sql upgrade all ---"; bash scripts/migrate.sh sql-upgrade all || true
+              echo "--- status ---"; bash scripts/migrate.sh status all || true
+          envFrom:
+            - configMapRef: {name: isa-user-env}
+            - secretRef: {name: isa-platform-secrets}

@@ -1,0 +1,300 @@
+# Local Inference Catalog — unified isA_Cloud production profile
+#
+# This ConfigMap is the deployment-time contract that combines:
+# - isA_Model's complete local inference model catalog
+# - SN production's 3-node x 2-GPU hardware reality
+# - Kubernetes role labels as the cross-node placement authority
+#
+# It does not force every model to be resident. `residency` describes the
+# intended deployment mode so the model service can route safely before each
+# specialty engine is promoted.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-inference-catalog
+  namespace: isa-cloud-production
+  labels:
+    app: model-runtime
+    isa.io/component: local-inference-catalog
+data:
+  gpu-policy.yaml: |
+    hardware:
+      cluster_profile: sn-3node-blackwell
+      nodes: 3
+      physical_gpus_per_node: 2
+      physical_gpu_total: 6
+      per_gpu_vram_mb: 97887
+      gpu_product: NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition
+
+    role_groups:
+      llm:
+        node_labels:
+          isa.io/gpu-role-llm: "true"
+          sn.io/gpu-role: llm
+        nodes: [sn-prod-k8s-01, sn-prod-k8s-02]
+        physical_gpus: 4
+        purpose: primary text/chat inference
+        residency: always_on
+      specialty:
+        node_labels:
+          isa.io/gpu-role-specialty: "true"
+          sn.io/gpu-role: specialty
+        nodes: [sn-prod-k8s-03]
+        physical_gpus: 2
+        purpose: embedding, rerank, STT, TTS, image engines
+        residency: staged_or_elastic
+      elastic:
+        node_labels:
+          isa.io/gpu-role-elastic: "true"
+        nodes: [sn-prod-k8s-03]
+        physical_gpus: 2
+        purpose: batch, training, video, overflow
+        residency: preemptible
+
+    # Allocation policy — see ADR 0010. Cards are 96 GB Blackwell (no MIG, no
+    # NVLink). Budget by VRAM via MPS: small engines share a card as equal MPS
+    # slices; the chat LLM holds 1 card (no cross-card TP). MPS is pre-staged on
+    # the cluster (mps-control-daemon DaemonSet) and activated by node label +
+    # per-node config. Pods keep requesting nvidia.com/gpu:1 (renameByDefault
+    # false) and receive one slice.
+    allocation:
+      strategy: vram_budgeted_mps
+      gpu_sharing_plugin: mps             # pre-staged; activate per ADR 0010 §3
+      mps_rename_by_default: false        # engines keep nvidia.com/gpu:1 -> 1 slice
+      vllm_gpu_memory_utilization_cap: 0.5
+      mps_per_node:                       # device-plugin config selected by node label
+        sn-prod-k8s-01: { replicas: 1, slice_gb: 96 }   # llm dedicated (raise to 2 only for throughput)
+        sn-prod-k8s-02: { replicas: 2, slice_gb: 48 }   # generative
+        sn-prod-k8s-03: { replicas: 4, slice_gb: 24 }   # small specialty pack
+      placement:
+        sn-prod-k8s-01: [qwen3.6-27b]                    # llm (dedicated; 30B-A3B VLM could take the 2nd card)
+        sn-prod-k8s-02: [qwen-image-2.0, flux-2-schnell, wan-2.2]   # generative (1 free 48GB slice -> VLM-30B option)
+        # specialty (8x24GB slices): audio + STT/embedding + the new understanding/perception tier.
+        sn-prod-k8s-03: [qwen3-embedding-8b, whisper-large-v3-turbo, qwen3-asr-1.7b, fish-speech-tts,
+                         qwen3-vl-8b, paddleocr-vl, perception-bundle]
+      # ~7/8 specialty slices used; VLM-8B + PaddleOCR-VL + perception-bundle are the 3 new ones.
+
+    scheduler_guardrails:
+      node_local_gpu_indices_only: [0, 1]
+      disable_flat_gpu_indices_for_sn: true
+      gpu_sharing_strategy: mps                            # activate pre-staged mps-control-daemon
+      mps_replicas_uniform_per_node: true                  # equal slices -> group by VRAM per node
+      no_cross_card_tensor_parallel: true                  # PCIe Gen5 only, no NVLink
+      ray_gpu_workers_default_replicas: 0
+      reason: >
+        96 GB Blackwell cards (no MIG, no NVLink) make 1-model-per-card
+        wasteful. Engines are packed by VRAM via MPS, which the cluster operators
+        pre-staged (mps-control-daemon, gated on nvidia.com/mps.capable). Small
+        engines (embedding/STT/TTS/rerank) share one card as equal 24 GB slices;
+        the chat LLM holds a single card (no cross-card TP — PCIe Gen5 only);
+        generative engines take 48 GB slices. MPS replicas are uniform per node,
+        so engines are grouped by similar VRAM per node. Ray GPU workers are
+        elastic/batch capacity and must not keep specialty cards resident.
+
+  models.yaml: |
+    text:
+      qwen3.6-27b:
+        provider_key: isa
+        engine: vllm
+        deployment: vllm
+        service: vllm
+        served_model_name: qwen3.6-27b
+        huggingface_id: Qwen/Qwen3.6-27B-FP8
+        role_group: llm
+        residency: always_on
+        gpu_request: 1
+        aliases:
+          - Qwen/Qwen3.6-27B-FP8
+          - Qwen/Qwen3.6-27B
+          - qwen3.6-27b-fp8
+          - qwen3.6-27b
+        runtime_hints:
+          reasoning_parser: qwen3
+          chat_template_kwargs:
+            enable_thinking: false
+
+    embedding:
+      qwen3-embedding-8b:
+        provider_key: isa
+        engine: vllm
+        deployment: vllm-qwen3-embedding-8b
+        service: vllm-qwen3-embedding-8b
+        served_model_name: qwen3-embedding-8b
+        huggingface_id: Qwen/Qwen3-Embedding-8B
+        role_group: specialty
+        residency: staged
+        gpu_request: 1
+        aliases:
+          - text-embedding-3-large
+          - text-embedding-3-small
+          - text-embedding-ada-002
+          - bge-large-en-v1.5
+        runtime_hints:
+          openai_endpoint: /v1/embeddings
+          vllm_runner: pooling
+          vllm_convert: embed
+          native_dimensions: 4096
+          alias_dimensions:
+            text-embedding-3-small: 1536
+            text-embedding-ada-002: 1536
+            text-embedding-3-large: 3072
+            bge-large-en-v1.5: 1024
+          vllm_hf_overrides:
+            is_matryoshka: true
+
+    rerank:
+      bge-reranker-v2-m3:
+        provider_key: isa
+        engine: triton
+        deployment: triton-bge-reranker-v2-m3
+        service: triton-bge-reranker-v2-m3
+        huggingface_id: BAAI/bge-reranker-v2-m3
+        role_group: specialty
+        residency: staged
+        gpu_request: 1
+        aliases:
+          - isa-jina-reranker-v2-service
+          - sn-jina-reranker-v2-service
+
+    # All audio engines target the specialty-audio-bundle (k8s-03 GPU1,
+    # single-container co-location) per ADR 0010. kokoro ships first as a CPU
+    # interim until the combined bundle image is built.
+    audio:
+      whisper-large-v3-turbo:
+        provider_key: isa
+        engine: faster-whisper
+        deployment: faster-whisper-v3-turbo
+        service: faster-whisper-v3-turbo
+        huggingface_id: openai/whisper-large-v3-turbo
+        role_group: specialty
+        residency: bundled            # specialty-audio-bundle
+        colocation_group: specialty-audio
+        aliases: [whisper-1]
+        runtime_hints:
+          note: retained for 99-language coverage; qwen3-asr is the accuracy/speed default
+      qwen3-asr-1.7b:
+        provider_key: isa
+        engine: vllm
+        deployment: qwen3-asr
+        service: qwen3-asr
+        huggingface_id: Qwen/Qwen3-ASR-1.7B
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        aliases: [whisper-1, gpt-4o-transcribe]
+        runtime_hints:
+          openai_endpoint: /v1/audio/transcriptions
+          sota: open ASR leader (2026-01) — accuracy, speed, timestamps, streaming
+      kokoro:
+        provider_key: isa
+        engine: kokoro-fastapi
+        deployment: kokoro-tts
+        service: kokoro-tts
+        huggingface_id: hexgrad/Kokoro-82M
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        interim_runtime: cpu          # GPU co-location once bundle image lands
+        aliases: [tts-1]
+        runtime_hints:
+          openai_endpoint: /v1/audio/speech
+          default_voice: af_nicole
+      qwen3-tts:
+        provider_key: isa
+        engine: qwen-tts
+        deployment: qwen3-tts
+        service: qwen3-tts
+        huggingface_id: Qwen/Qwen3-TTS
+        role_group: specialty
+        residency: bundled
+        colocation_group: specialty-audio
+        aliases: [tts-1-hd]
+        runtime_hints:
+          openai_endpoint: /v1/audio/speech
+          note: multilingual HD tier; kokoro stays the fast tts-1 default
+      fish-speech-s2:
+        provider_key: isa
+        engine: sglang
+        role_group: specialty
+        residency: staged             # alternative HD engine; qwen3-tts holds tts-1-hd
+        aliases: []
+
+    image:
+      qwen-image-2.0:
+        provider_key: isa
+        engine: triton
+        deployment: triton-qwen-image-2-0
+        service: triton-qwen-image-2-0
+        huggingface_id: Qwen/Qwen-Image
+        role_group: specialty
+        residency: staged
+        runtime_hints:
+          triton_model_name: qwen-image-2.0
+          endpoint: /v2/models/qwen-image-2.0/infer
+      flux-2-schnell:
+        provider_key: isa
+        engine: triton
+        role_group: specialty
+        residency: staged
+        aliases: [flux-schnell]
+
+    video:
+      wan-2.2:
+        provider_key: isa
+        engine: triton
+        role_group: elastic
+        residency: preemptible
+
+    # ── UNDERSTANDING tier (image/video -> text) — localizes the Qwen2.5-VL
+    #    the platform called via Modal. Closes the image->text & video->text
+    #    cells of the modality matrix. vLLM-served (NO flash-attn dep on sm_120;
+    #    vLLM uses its own kernels — unlike qwen-tts which hard-required FA2).
+    vision:
+      qwen3-vl-8b:
+        provider_key: isa
+        engine: vllm
+        deployment: qwen3-vl
+        service: qwen3-vl
+        huggingface_id: Qwen/Qwen3-VL-8B-Instruct-FP8   # 48GB-slice upgrade: Qwen3-VL-30B-A3B-Instruct-FP8
+        role_group: specialty
+        residency: staged
+        aliases: [gpt-4o, gpt-4.1-mini, qwen-vl]         # OpenAI vision aliases -> local VLM
+        license: Apache-2.0
+        capabilities: [image_understanding, video_understanding, vqa, ocr, grounding, document]
+        runtime_hints:
+          openai_endpoint: /v1/chat/completions          # multimodal: image_url + video
+          vllm_flags: "--limit-mm-per-prompt.image 4 --limit-mm-per-prompt.video 1 --max-model-len 65536"
+          attention_backend: FLASH_ATTN                   # vLLM's own kernel (no flash-attn wheel needed)
+
+    # ── PERCEPTION / document-AI layer — localizes the Modal vision services
+    #    (Florence-2, Table-Transformer x2, OCR, UI-detection) + the requested
+    #    OCR/YOLO/SAM. All run SDPA/ONNX/TensorRT (no flash-attn). LICENSE flags
+    #    noted per model (YOLO26=AGPL, SAM=gated Meta) — clear with legal before
+    #    commercial traffic.
+    perception:
+      paddleocr-vl:
+        provider_key: isa
+        engine: vllm
+        deployment: paddleocr-vl
+        service: paddleocr-vl
+        huggingface_id: PaddlePaddle/PaddleOCR-VL-1.5
+        role_group: specialty
+        residency: staged
+        license: Apache-2.0
+        capabilities: [ocr, table_extraction, document_layout, reading_order]  # retires Table-Transformer x2 + OCR svc
+        runtime_hints: { note: "own slice; PaddleOCR pins differ from the bundle; run --enforce-eager on sm_120" }
+      perception-bundle:
+        provider_key: isa
+        engine: fastapi-multi          # one FastAPI server, multiple small models, one 24GB slice
+        deployment: perception-bundle
+        service: perception-bundle
+        role_group: specialty
+        residency: bundled
+        colocation_group: perception
+        members:
+          florence-2:    { huggingface_id: microsoft/Florence-2-base-ft, license: MIT, caps: [detection, caption, grounding, region_ocr], attn: sdpa }
+          grounding-dino: { huggingface_id: IDEA-Research/grounding-dino-base, license: Apache-2.0, caps: [open_vocab_detection] }
+          sam-3:         { huggingface_id: facebook/sam3.1, license: "Meta SAM (gated)", caps: [segmentation, promptable_masks], attn: sdpa }
+          yolo26:        { huggingface_id: Ultralytics/YOLO26, license: "AGPL-3.0 (needs enterprise lic.)", caps: [object_detection], serving: onnx/tensorrt }
+          siglip2:       { huggingface_id: google/siglip2-so400m-patch16-naflex, license: Apache-2.0, caps: [image_embedding, multimodal_retrieval] }

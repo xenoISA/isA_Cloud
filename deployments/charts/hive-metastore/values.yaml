@@ -27,6 +27,28 @@ image:
   tag: "4.0.1"
   pullPolicy: IfNotPresent
 
+# Apache Hive's upstream image does not include the PostgreSQL JDBC driver.
+# When enabled, an initContainer copies the driver from a mirrored image into
+# an emptyDir and mounts it into /opt/hive/lib for both schematool and HMS.
+jdbcDriver:
+  enabled: false
+  image:
+    registry: docker.io
+    repository: apicurio/apicurio-registry-sql
+    tag: "2.6.6.Final"
+    pullPolicy: IfNotPresent
+  sourcePath: /deployments/lib/org.postgresql.postgresql-42.7.4.jar
+  mountPath: /opt/hive/lib/postgresql.jar
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+
 # 1 replica is the staging/local default. HMS supports active-active —
 # customer-prod scales to 2.
 replicas: 1

@@ -1,0 +1,88 @@
+# =============================================================================
+# Edition profile — BASE (common to all editions)        xenoISA/isA_Cloud #316
+# =============================================================================
+# Part of follow-up epic #328. One platform, three editions — see the matrix in
+# docs/saas-deployment/README.md and ADR docs/adr/0006-plugin-extension-sdk.md.
+#
+# This file holds the values COMMON to every edition. Each edition then overlays
+# its own values file on top:
+#
+#   helm install isa-<edition> ./deployments/charts/isa-service \
+#     -f deployments/editions/values-base.yaml \
+#     -f deployments/editions/values-<edition>.yaml \
+#     [ -f deployments/editions/values-brand-<customer>.example.yaml ]
+#
+# The `isa-service` base chart (deployments/charts/isa-service) renders
+# `.Values.env` verbatim as the container env list (see templates/deployment.yaml
+# `{{- toYaml .Values.env | nindent 8 }}`). The edition + brand env keys below are
+# therefore consumed at runtime by:
+#
+#   * isa_common.edition  (#317) — reads ISA_EDITION + ISA_*_ENABLED / ISA_MULTI_TENANT
+#   * isa_common.brand            — reads BRAND_* / AUTH_COOKIE_DOMAIN
+#
+# Internal `isa_` identifiers are unaffected — this is config, not a source
+# rewrite. The white-label sanitizer (isA->SN) rewrites ISA_*->SN_* and the brand
+# string defaults mechanically; do NOT hardcode "sn_" here.
+# =============================================================================
+
+# Core platform services (Agent / MCP / Model / Data) plus the lightweight data
+# stores (Postgres / Redis / MinIO / DuckDB / Qdrant) are ALWAYS deployed — they
+# are the product, present in every edition. They are installed from their own
+# charts / cluster-prereqs; this profile carries the per-service env and the
+# cross-cutting module switches. `name`/`image`/`namespace` are set per service
+# at install time (or in a per-service values overlay).
+
+# -----------------------------------------------------------------------------
+# Big-data umbrella (deployments/umbrella/isa-bigdata) — OFF by default.
+# Only the on-prem-full edition flips this on. This flag is read by the deploy
+# tooling / ArgoCD application that decides whether to ALSO install the
+# isa-bigdata umbrella release; the runtime mirror is ISA_BIGDATA_ENABLED in the
+# env block below (consumed by isa_common.edition).
+# -----------------------------------------------------------------------------
+bigdata:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Cross-cutting module switches — base defaults (conservative, on-prem-lite-like).
+# Metering ON as a core signal; customer-billing modules OFF. Editions override
+# both these and the matching env values below; keep the two in sync.
+# -----------------------------------------------------------------------------
+modules:
+  metering: true       # CORE signal (telemetry), ON in every edition
+  charging: false      # customer billing — SaaS only
+  multiTenant: false   # multi-tenant fan-out — SaaS only
+
+# -----------------------------------------------------------------------------
+# Environment variables rendered onto every service container.
+#
+# This list is the documented OVERLAY POINT. Helm merges list-valued keys by
+# REPLACEMENT, so each edition / brand overlay restates the full env list it
+# needs (see values-saas.yaml etc.). The brand defaults below are the isA
+# defaults (docs/saas-deployment/brand-surface-audit.md); a brand overlay
+# (values-brand-sn.example.yaml) restates the BRAND_* block to white-label.
+# -----------------------------------------------------------------------------
+env:
+  # --- Edition contract (#317): base defaults; editions override ---
+  - name: ISA_EDITION
+    value: "on-prem-lite"
+  - name: ISA_METERING_ENABLED
+    value: "true"
+  - name: ISA_CHARGING_ENABLED
+    value: "false"
+  - name: ISA_MULTI_TENANT
+    value: "false"
+  # --- Brand contract: isA defaults (overlay to white-label) ---
+  - name: BRAND_NAME
+    value: "isA"
+  - name: BRAND_DISPLAY_NAME
+    value: "isA Platform"
+  - name: BRAND_ORG_NAME
+    value: "isA"
+  - name: BRAND_SUPPORT_EMAIL
+    value: "dev@iapro.ai"
+  - name: AUTH_COOKIE_DOMAIN
+    value: ".iapro.ai"
+  - name: BRAND_PRIMARY_HOST
+    value: "isa.dev"
+  - name: BRAND_DOCS_URL
+    value: "docs.isa.dev"

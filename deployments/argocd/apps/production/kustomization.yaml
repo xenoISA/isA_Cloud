@@ -12,6 +12,7 @@ resources:
   - os-services.yaml
   - blockchain-service.yaml
   - user-services-appset.yaml
+  - sn-customer-modules-appset.yaml   # entitlement-gated SN modules (#369)
 
 commonLabels:
   managed-by: argocd

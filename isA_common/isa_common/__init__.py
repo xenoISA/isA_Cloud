@@ -52,6 +52,26 @@ from .async_qdrant_client import AsyncQdrantClient
 # Native Async Clients (Direct Connections)
 # =============================================================================
 from .async_redis_client import AsyncRedisClient
+
+# =============================================================================
+# Brand (white-label "brand as config" contract)
+# =============================================================================
+from .brand import BrandConfig, get_brand
+
+# =============================================================================
+# Edition (runtime "which edition + which features" contract — ADR 0006)
+# =============================================================================
+from .edition import EditionConfig, EditionType, get_edition
+
+# =============================================================================
+# License (offline ed25519-signed entitlement contract — ADR 0008)
+# =============================================================================
+from .license import LicenseConfig, LicenseStatus, get_license
+from .licensing import (
+    LicenseError,
+    add_license_middleware,
+    setup_licensing,
+)
 from .loki_handler import LokiHandler, setup_loki_logging
 
 # =============================================================================
@@ -65,6 +85,17 @@ from .metrics import (
     setup_metrics,
 )
 from .observability import setup_observability
+
+# =============================================================================
+# Plugin / Extension SDK (ADR 0006)
+# =============================================================================
+from .plugin import (
+    PluginKind,
+    PluginManifest,
+    PluginServiceRegistry,
+    ServiceBinding,
+    load_manifest,
+)
 from .tracing import get_tracer, setup_tracing
 
 # =============================================================================
@@ -141,6 +172,26 @@ __all__ = [
     "setup_tracing",
     "get_tracer",
     "setup_observability",
+    # Brand (white-label config)
+    "BrandConfig",
+    "get_brand",
+    # Edition (runtime feature flags — ADR 0006)
+    "EditionType",
+    "EditionConfig",
+    "get_edition",
+    # License (offline ed25519-signed entitlement — ADR 0008)
+    "LicenseStatus",
+    "LicenseConfig",
+    "get_license",
+    "setup_licensing",
+    "add_license_middleware",
+    "LicenseError",
+    # Plugin / Extension SDK (ADR 0006)
+    "PluginKind",
+    "PluginManifest",
+    "ServiceBinding",
+    "PluginServiceRegistry",
+    "load_manifest",
     # Local-mode alternative clients
     "AsyncSQLiteClient",
     "AsyncLocalStorageClient",

@@ -1,0 +1,36 @@
+apiVersion: v2
+name: isa-dataphin-infra
+description: |
+  Umbrella chart for the dedicated infrastructure Dataphin needs on top of
+  the isa-bigdata backbone but that the backbone does not (and should not)
+  provide: a dedicated PostgreSQL (Dataphin's installer needs superuser to
+  create ~18 datasource databases/roles) and a standalone Redis.
+
+  Dataphin consumes the lakehouse backbone (HMS, Kafka, Apicurio, MinIO
+  lake, StarRocks, Flink) from isa-bigdata. These two charts cover only
+  Dataphin's own internal runtime stores. Deployed into the `dataphin`
+  namespace, separate from isa-bigdata.
+
+  Optional on-prem-full component, opt-in via `dataphin.enabled` (default off).
+  Local-deploy runbook: deployments/kubernetes/local/scripts/README-phase3.md.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - dataphin
+  - postgresql
+  - redis
+  - data-platform
+sources:
+  - https://github.com/xenoISA/isA_Cloud
+maintainers:
+  - name: isA Platform
+dependencies:
+  - name: postgres-dataphin
+    version: 0.1.0
+    repository: file://../../charts/postgres-dataphin
+    condition: postgres-dataphin.enabled
+  - name: redis
+    version: 0.1.0
+    repository: file://../../charts/redis
+    condition: redis.enabled
