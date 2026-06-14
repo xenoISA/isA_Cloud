@@ -1,0 +1,17 @@
+# cloud-os — isA_OS cloud-OS control service (:8086). Standard infra via isa-svc-base.
+# NOTE (#320 dependency): isA_OS ships 4 deployable services (web/cloud-os/pool-manager/
+# python-repl) but currently publishes no images via CI and platform-services.yaml lists
+# only `isa-os`. This override assumes isA_OS will publish a `isa-os-cloud-os` image in the
+# platform release; CONFIRM the final image name + tag against platform-vX.Y.Z before cutover.
+name: cloud-os
+image:
+  repository: isa/isa-os-cloud-os
+  tag: "0.1.3"  # placeholder — pinned by platform release (#320); align with isA_OS release tag
+port: 8086
+replicas: 2
+resources:
+  requests: {cpu: "500m", memory: "1Gi"}
+  limits: {cpu: "2", memory: "4Gi"}
+health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}

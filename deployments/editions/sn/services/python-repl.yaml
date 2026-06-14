@@ -1,0 +1,16 @@
+# python-repl — isA_OS sandboxed Python REPL execution service (:8085). Standard infra via isa-svc-base.
+# Execution endpoints enforce auth (require_auth_or_internal_service; isA_OS #422 + timing-safe secret fix).
+# NOTE (#320 dependency): see cloud-os.yaml — isA_OS must publish an `isa-os-python-repl` image in the
+# platform release; CONFIRM the final image name + tag against platform-vX.Y.Z before cutover.
+name: python-repl
+image:
+  repository: isa/isa-os-python-repl
+  tag: "0.1.3"  # placeholder — pinned by platform release (#320)
+port: 8085
+replicas: 2
+resources:
+  requests: {cpu: "250m", memory: "512Mi"}
+  limits: {cpu: "1", memory: "2Gi"}
+health: {path: /health, initialDelaySeconds: 15, periodSeconds: 10}
+liveness: {path: /health, initialDelaySeconds: 40, periodSeconds: 20}
+autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70}
