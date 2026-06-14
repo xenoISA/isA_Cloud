@@ -280,6 +280,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 ## Epic 8: Unified Observability (Epic #92)
 
 > Shared Prometheus metrics, OpenTelemetry tracing (Tempo), and unified observability clients in `isa_common`.
+> Canonical contract: [Platform Observability Standard](platform_observability_standard.md) and [isA Platform Observability Contract](../observability-contract.md).
 
 ### E8-US1: Shared Observability Clients
 
@@ -298,6 +299,7 @@ This document defines the product requirements for isA Cloud's infrastructure se
 | AC-1.5 | L1 unit tests cover all three modules (metrics, tracing, observability) | Done |
 | AC-1.6 | L2 component tests verify middleware with Starlette TestClient | Planned |
 | AC-1.7 | L3 integration tests verify OTLP export to mock collector | Planned |
+| AC-1.8 | Canonical `isa_common` observability contract documented | Done |
 
 ### E8-US2: Service Migration to Shared Clients
 
