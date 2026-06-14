@@ -1,0 +1,92 @@
+# =============================================================================
+# SN image-layer build — ESCAPE HATCH (Model (a)), MANUAL-DISPATCH ONLY.
+# =============================================================================
+# Builds a thin SN layer over a digest-pinned upstream platform image for a
+# service that the cutover Decision-1 classified as needing it (see
+# sn_cloud docs/.../platform-services/sn-package-delivery-decision.md and
+# deployments/editions/sn/image-layer/Dockerfile).
+#
+# This workflow has NO push/PR/tag trigger — it never runs automatically. The
+# default cutover path (Model (c)) consumes upstream images via platform-release.yml
+# and needs nothing here. Run this ONLY when ops opts a service into Model (a).
+#
+# Like platform-build.yml it pushes to GHCR (ghcr.io/xenoisa); GitHub runners
+# cannot reach SN Harbor (10.60.65.10, VPN-only), so the mirror to Harbor is a
+# separate ops step (skopeo) per SN-DELIVERY.md / the cutover runbook.
+# =============================================================================
+name: sn-image-layer
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service short name (e.g. model, data, agent, mcp). Used for the layer image name sn-<service>-layer.'
+        required: true
+        type: string
+      base_image:
+        description: 'Digest-pinned upstream base ref from the platform release manifest (ghcr.io/xenoisa/isa-<svc>@sha256:...).'
+        required: true
+        type: string
+      sn_package:
+        description: 'SN pip package + pin to layer on, e.g. sn-model==0.6.0.'
+        required: true
+        type: string
+      pip_index:
+        description: 'PyPI index URL reachable from the runner (SN-internal mirror for air-gapped; public only for a connected throwaway build).'
+        required: true
+        type: string
+      platform_version:
+        description: 'Platform version to tag the layer with (X.Y.Z), so the layer tracks the release it was built over.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-layer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (Dockerfile only)
+        uses: actions/checkout@v4
+
+      - name: Guard — base image MUST be digest-pinned
+        run: |
+          case "${{ inputs.base_image }}" in
+            *@sha256:*) echo "OK: base image is digest-pinned" ;;
+            *) echo "ERROR: base_image must be @sha256-pinned (got '${{ inputs.base_image }}')"; exit 1 ;;
+          esac
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PLATFORM_BUILD_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build + push SN layer
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployments/editions/sn/image-layer/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          build-args: |
+            BASE_IMAGE=${{ inputs.base_image }}
+            SN_PACKAGE=${{ inputs.sn_package }}
+            PIP_INDEX=${{ inputs.pip_index }}
+          tags: |
+            ghcr.io/xenoisa/sn-${{ inputs.service }}-layer:${{ inputs.platform_version }}
+
+      - name: Next steps (ops)
+        run: |
+          echo "Built ghcr.io/xenoisa/sn-${{ inputs.service }}-layer:${{ inputs.platform_version }}"
+          echo "Mirror to SN Harbor (VPN-only, ops step):"
+          echo "  skopeo copy --dest-tls-verify=false --dest-creds admin:<HARBOR_PWD> \\"
+          echo "    docker://ghcr.io/xenoisa/sn-${{ inputs.service }}-layer:${{ inputs.platform_version }} \\"
+          echo "    docker://10.60.65.10/isa/sn-${{ inputs.service }}-layer:${{ inputs.platform_version }}"
+          echo "Then point editions/sn/services/<svc>.yaml image.repository at isa/sn-${{ inputs.service }}-layer."
