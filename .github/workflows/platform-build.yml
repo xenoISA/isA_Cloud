@@ -17,7 +17,6 @@ name: Platform Build (unified images → GHCR)
 # Covers the self-contained + multi-repo services. NOT yet wired (TODO #349):
 #   - isa-model  (Dockerfile is FROM isa-python-base:0.5.7 — needs the base
 #                 image built+pushed first, then retagged in-runner)
-#   - isa-os     (no Dockerfile in the repo yet — author one)
 #   - frontends  (isa-console / isa-docs / isa-marketing — node builds)
 #   - isa_user   (42 microservices — separate matrix over Dockerfile.microservice)
 
@@ -58,6 +57,18 @@ jobs:
             repos: isA_OS
             dockerfile: isA_OS/web_services/deployment/docker/Dockerfile
             context: isA_OS/web_services
+          - svc: isa-os-cloud-os
+            repos: isA_OS
+            dockerfile: isA_OS/os_services/cloud_os/deployment/docker/Dockerfile
+            context: isA_OS/os_services/cloud_os
+          - svc: isa-os-pool-manager
+            repos: isA_OS
+            dockerfile: isA_OS/os_services/pool_manager/deployment/docker/Dockerfile.api
+            context: isA_OS/os_services/pool_manager
+          - svc: isa-os-python-repl
+            repos: isA_OS
+            dockerfile: isA_OS/os_services/python_repl/deployment/docker/Dockerfile
+            context: isA_OS/os_services/python_repl
           - svc: isa-data
             repos: isA_Data
             dockerfile: isA_Data/deployment/docker/Dockerfile
